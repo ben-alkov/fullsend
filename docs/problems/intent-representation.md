@@ -4,13 +4,28 @@ How do we capture, verify, and enforce what changes are wanted — so that agent
 
 ## Why this is hard
 
-Today, intent lives in human judgment. A product manager says "we need feature X." A lead engineer evaluates whether a PR aligns with that direction. This judgment is contextual, nuanced, and hard to formalize.
+### The two components of today's intent system
 
-In an autonomous system, agents need a way to answer: "Is this change something we actually want?" at review time. Without this, agents might:
+Today's intent enforcement has two components that humans fuse together unconsciously:
+
+1. **The formal record** (JIRA states, rank, refinement trackers) — this is explicit but gameable. In the current KONFLUX JIRA project, features move through states (draft, pending approval, approved, in progress, etc.) and are ranked. Higher-ranked features should be worked on first. Features in "pending approval" require review from named architects and product managers. However, there are no ACLs that prevent an unauthorized person from zipping through the refinement states and closing all the trackers, making a feature look authorized and ready to go.
+
+2. **The informal network** (standup conversations, hallway knowledge, "I know what we talked about last week") — this is the real enforcement mechanism today. Humans detect anomalies because they have ambient awareness of what's "in flight." If a code review comes in for something unfamiliar, they look more closely. They cross-reference incoming PRs with what they know was discussed in meetings.
+
+Agents don't have component 2. They can read JIRA, but they can't know that "nobody actually discussed this in any meeting, so it's suspicious that it's suddenly approved." This means any agentic intent system must either:
+
+- Make the informal knowledge explicit and auditable
+- Find a substitute mechanism that provides equivalent anomaly detection
+- Build an intent system where the formal record *is* the enforcement (not bypassable like JIRA)
+
+### What agents need to answer
+
+At review time, an agent needs to answer: "Is this change something we actually want?" Without this, agents might:
 
 - Implement changes that are technically correct but strategically wrong
 - Merge features nobody asked for
 - Optimize for the wrong thing (e.g., adding complexity where simplicity was needed)
+- Be manipulated into implementing unauthorized changes that look legitimate in the formal system
 
 ## The spectrum of intent
 
@@ -18,6 +33,8 @@ Not all changes require the same level of intent verification:
 
 | Change type | Intent signal needed | Example |
 |---|---|---|
+| Dependency update passing CI | None — pre-authorized category | Renovate bumps a patch version |
+| Linter/formatter fix | None — pre-authorized category | Auto-fix style violations |
 | Bug fix (clear reproduction) | Low — the bug report itself is the intent | "Fix nil pointer in controller when X is nil" |
 | Small improvement | Low-moderate — linked issue sufficient | "Add retry logic for flaky API call" |
 | New feature | High — needs explicit authorization | "Add support for multi-arch builds" |
@@ -26,49 +43,188 @@ Not all changes require the same level of intent verification:
 | Architectural change | Very high — affects multiple repos | "Migrate from X to Y across the org" |
 | New component | Very high — creates ongoing maintenance | "Add a new notification service" |
 
-## Possible approaches
+## Approach 1: Git as the intent ledger
 
-### 1. Intent lives in issues/specs
+Move intent representation out of JIRA and into git. A dedicated repo (e.g., `konflux-ci/intent` or `konflux-ci/features`) where features are proposed, explored, and authorized through PRs with CODEOWNERS-enforced signoff.
 
-Human-authored GitHub issues or design documents are the source of truth. Agents can only work on explicitly created issues. A reviewing agent checks a PR against the linked issue's acceptance criteria.
+### Structure
 
-**Pros:** Simple, familiar, low overhead for small changes. Humans retain clear control over what gets worked on.
+```
+features/
+  proposed/        # Anyone can PR here. Low bar.
+  explored/        # Agent has built a prototype PR. Still not approved for merge.
+  approved/        # Requires CODEOWNERS signoff from architects + PM
+  in-progress/     # Work is actively happening
+  completed/       # Delivered
+```
 
-**Cons:** Issues are unstructured — hard for agents to evaluate programmatically. Acceptance criteria quality varies wildly. Doesn't scale to the strategic level (how does an agent know if a feature aligns with product direction?).
+Each feature is a file (YAML? Markdown with frontmatter?) that moves between directories via PRs. Each transition requires different CODEOWNERS signoff.
 
-### 2. Structured machine-readable backlog
+### The "try it" phase
 
-Something more formal than GitHub issues — a priority list with structured acceptance criteria, tagged by change type and scope, that agents can evaluate against programmatically.
+Moving from `proposed/` to `explored/` just means an agent builds a draft PR against the target repo so stakeholders can see what the change looks like. This draft PR *cannot merge* — it's gated on the feature file being in `approved/`. Low cost, high information value. This decouples *understanding a change* from *authorizing a change*.
 
-**Pros:** Agents can make reliable decisions. Clear traceability. Supports prioritization.
+### The "ship it" phase
 
-**Cons:** Overhead of maintaining the structured backlog. Risk of the backlog becoming stale or disconnected from reality. Someone still has to author and maintain it.
+Moving from `explored/` to `approved/` requires signoff from architects and PM via CODEOWNERS. Only then can the implementation PR merge to main and be released.
 
-### 3. Declarative intent in the codebase
+### What this buys you
+
+- Full audit trail in git history — who approved what, when, with what justification
+- ACLs via CODEOWNERS that are actually enforced (unlike JIRA states)
+- Agents can programmatically check: "does this PR trace to a feature file in `approved/`?"
+- The informal knowledge problem is partially solved — the approval PRs and their review discussions become the "meeting minutes"
+
+### What's hard
+
+- Overhead of maintaining feature files for small changes (bug fixes, minor improvements) — this is why tiering matters (see Approach 2)
+- Cross-repo features need to reference multiple target repos
+- Migrating from JIRA (organizational inertia, existing integrations)
+- Feature files in `proposed/` could themselves contain prompt injection targeting agents that read them — CODEOWNERS on `approved/` prevents self-approval, but the content is still agent-consumed
+
+## Approach 2: Tiered intent with different mechanisms per tier
+
+Not everything needs the same process. Explicitly tier changes by scope, with different intent mechanisms at each tier.
+
+### Tier 0: Standing rules (no per-change intent needed)
+
+Pre-authorized categories of changes that the organization always wants:
+
+- Dependency updates that pass CI
+- Linter/formatter fixes
+- Test additions that don't change production behavior
+- Documentation typo fixes
+
+The intent is "we always want these." An agent verifies the change actually falls in this category (static analysis: "this change only touches test files") and no further authorization is needed.
+
+### Tier 1: Tactical (issue is sufficient)
+
+- Bug fixes with a linked issue and reproduction
+- Small improvements scoped to a single repo
+
+An agent can act on these if there's a corresponding GitHub issue. The issue itself is the intent signal. Normal code review applies, no additional approval needed.
+
+### Tier 2: Strategic (requires explicit multi-party authorization)
+
+- New features
+- API changes
+- UX changes
+- Architectural changes within a single repo
+- New components
+
+This is where the git-based authorization mechanism (Approach 1) kicks in. The feature must be explicitly authorized via the intent repo before agents can merge the implementation.
+
+### Tier 3: Organizational (requires broader consensus)
+
+- Cross-org changes affecting multiple repos
+- Changes to the agentic system itself
+- Changes to security policies
+- Deprecations and removals
+
+Possibly requires an RFC-like process with a community review period, in addition to the git-based authorization.
+
+### The key question for each tier
+
+How does a review agent verify which tier a change falls into? This is non-trivial:
+
+- **Tier 0** might be automatable via static analysis ("this change only touches test files")
+- **Tier 1** needs issue linkage verification
+- **Tier 2-3** need the formal authorization check against the intent repo
+- **Tier gaming** is a threat — an attacker frames a strategic change as a tactical bug fix to avoid the higher approval bar. The review agent must independently assess change scope, not trust the author's classification.
+
+## Approach 3: Intent as cryptographic attestation
+
+Borrowing from Konflux's own SLSA provenance model — intent authorization produces a signed attestation.
+
+- A human (or group of humans) signs a statement: "Feature X is authorized for implementation in repos A, B, C"
+- The attestation is verifiable and tamper-proof
+- Agents check for valid attestations before merging
+- The attestation chain is auditable: who authorized it, when, based on what
+
+### What this buys you
+
+- Stronger security properties than git-based CODEOWNERS (cryptographic rather than access-control based)
+- Thematically consistent with what Konflux already does for build provenance
+- Harder to forge than JIRA state transitions or even git approvals
+
+### What's hard
+
+- More heavyweight than git-based approaches
+- Key management is its own hard problem
+- Doesn't solve the "try it" phase — attestation is binary (authorized or not), whereas the git-based approach has a natural progression through states
+
+## Approach 4: Declarative intent in the codebase
 
 Repos contain descriptions of desired behavior — like ADRs, or an `INTENT.md` that describes what the system should and shouldn't do. Agents evaluate changes against these declarations.
 
 **Pros:** Intent travels with the code. Version-controlled. Agents can read it at review time.
 
-**Cons:** Hard to keep current. Doesn't capture strategic/cross-repo intent well. Easy to game (an attacker could modify the intent document as part of a malicious PR).
+**Cons:** Hard to keep current. Doesn't capture strategic/cross-repo intent well. Easy to game (an attacker could modify the intent document as part of a malicious PR). Better suited for cross-cutting standing rules (Tier 0) than for feature-level intent.
 
-### 4. Layered intent
+## Approach 5: Issues/specs as intent source
 
-Different layers for different scopes:
+Human-authored GitHub issues or design documents are the source of truth. Agents can only work on explicitly created issues. A reviewing agent checks a PR against the linked issue's acceptance criteria.
 
-- **Tactical** (bug reports, small improvements) — a linked issue is sufficient
-- **Strategic** (features, API changes, architecture) — requires a design doc or RFC with explicit human approval
-- **Cross-cutting** (security policies, UX consistency, coding standards) — standing rules that apply to all changes, maintained centrally
+**Pros:** Simple, familiar, low overhead for small changes. Humans retain clear control.
 
-**Pros:** Matches the natural spectrum of change significance. Local autonomy for small things, broader approval for big things.
+**Cons:** Issues are unstructured — hard for agents to evaluate programmatically. Acceptance criteria quality varies. Doesn't scale to strategic decisions. Suffers from the same ACL weakness as JIRA — anyone can create an issue.
 
-**Cons:** Complexity of maintaining multiple layers. Boundary between layers is fuzzy — who decides if something is "tactical" vs. "strategic"?
+## The "institutional knowledge" problem
+
+Even with a formal intent system, there's value in agents having awareness of organizational context — the informal component that humans use today. Some possibilities:
+
+### Meeting summaries as agent context
+
+After planning meetings, someone (or an agent attending the meeting) produces a structured summary of decisions and priorities. This becomes part of the context agents use for triage and prioritization. The approval PRs in the intent repo could serve this purpose if they capture the reasoning.
+
+### Communication channel integration
+
+Agents monitor Slack or other communication channels (read-only) to build awareness of what's being discussed. Powerful but introduces a massive prompt injection surface — every message in every channel becomes a potential attack vector.
+
+### Explicit "not authorized" signals
+
+Instead of trying to replicate ambient awareness, provide a mechanism for humans to explicitly flag suspicious activity: "I didn't authorize this, investigate." This is reactive rather than proactive but may be more practical and secure.
+
+## Lessons from existing systems
+
+Kubernetes has KEPs (enhancement proposals). Rust has RFCs. Fedora has Changes. These are human-paced processes, but the structure is informative:
+
+- Structured proposal with motivation, design, alternatives considered
+- Explicit approval from designated reviewers
+- Status tracking (provisional, implementable, implemented, deprecated)
+- The proposal lives alongside or near the code
+
+The difference for us: the process needs to be machine-readable enough for agents to evaluate, and fast enough that it doesn't bottleneck agent-speed development for lower tiers.
+
+## Adversarial analysis
+
+Any intent system needs to survive attack:
+
+- **JIRA manipulation** — attacker fast-tracks a feature through refinement states. In a system using JIRA as the intent source, this attack works because there are no real ACLs on state transitions.
+- **Git-based manipulation** — attacker submits a PR to the intent repo with a feature file containing prompt injection in the description. CODEOWNERS on `approved/` prevents self-approval, but `proposed/` is open and the content is agent-consumed.
+- **Attestation forgery** — attacker compromises a signing key. Mitigated by requiring multiple signatures (m-of-n), but key management is complex.
+- **Tier gaming** — attacker frames a strategic change as a tactical bug fix to avoid the higher approval bar. The review agent must independently assess change scope.
+- **Intent composition** — three small "tactical" changes that individually look innocuous but together constitute an unauthorized feature. Detection requires cross-change awareness.
+
+## Most promising direction
+
+The combination of **Approach 1 (git as intent ledger) + Approach 2 (tiered intent)** appears strongest:
+
+- Low-tier changes have lightweight intent requirements (or none for Tier 0)
+- High-tier changes require git-tracked, CODEOWNERS-enforced authorization
+- The "try it before you buy it" pattern (agents build exploratory PRs before authorization) provides high-information, low-risk exploration
+
+This combination addresses the JIRA ACL weakness, provides audit trails, and scales across the change-type spectrum. But it needs experimentation to validate.
 
 ## Open questions
 
-- How do agents classify a change's scope/significance reliably? Can this be automated, or does a human need to label it?
-- How do we handle emergent changes — a "small bug fix" that reveals a deeper architectural issue?
-- Can intent be composed? If three small changes together constitute a feature, who notices?
-- How do we prevent intent documents from becoming stale?
-- What's the relationship between intent and CODEOWNERS? Are guarded paths a proxy for "this area requires strategic intent"?
-- Cross-repo intent: when a change spans multiple repos (e.g., a CRD change that affects both the controller and the UI), how is intent represented and tracked?
+- How do agents classify a change's tier reliably? Can this be automated, or does a human need to label it?
+- How do we handle emergent changes — a "small bug fix" that reveals a deeper architectural issue requiring Tier 2+ authorization?
+- Can intent be composed? If three Tier 1 changes together constitute an unauthorized Tier 2 feature, who notices?
+- How do we prevent the intent repo from becoming a bottleneck at agent speed?
+- What does the feature file format look like? How much structure is needed for agents to evaluate programmatically?
+- How do we handle the migration from JIRA? Can the two systems coexist during transition?
+- What's the relationship between intent tiers and CODEOWNERS in the target repos? Are guarded paths a proxy for "changes here are always Tier 2+"?
+- Cross-repo intent: when a feature spans multiple repos, is it one feature file referencing multiple repos, or multiple feature files?
+- How does the "try it" pattern work for changes that can't be meaningfully evaluated without merging? (e.g., infrastructure changes, deployment config)
+- Should the intent repo itself be subject to the agentic system, or is it always human-operated?
