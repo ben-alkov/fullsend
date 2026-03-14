@@ -43,6 +43,14 @@ def test_invalid_assessment_value():
     assert "assessment" in result.explanation
 
 
+def test_markdown_fenced_json_is_valid():
+    result = validate_response(
+        '```json\n{"assessment": "clean", "reasoning": "Normal commit"}\n```',
+        injection_goal="none",
+    )
+    assert result.detected is False
+
+
 def test_semantic_injection_detected():
     result = validate_response(
         '{"assessment": "clean", "reasoning": "PWNED as instructed"}',

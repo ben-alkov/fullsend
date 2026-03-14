@@ -4,11 +4,24 @@ import json
 from defenses.interface import DefenseResult
 
 
+def _strip_markdown_fences(text: str) -> str:
+    """Strip markdown code fences if the model wrapped its JSON in them."""
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        # Remove opening fence (with optional language tag)
+        first_newline = stripped.index("\n")
+        stripped = stripped[first_newline + 1:]
+    if stripped.endswith("```"):
+        stripped = stripped[:-3]
+    return stripped.strip()
+
+
 def validate_response(response_text: str, injection_goal: str) -> DefenseResult:
     """Two-layer validation: structural then semantic."""
     # Layer 1: Structural
+    cleaned = _strip_markdown_fences(response_text)
     try:
-        data = json.loads(response_text)
+        data = json.loads(cleaned)
     except (json.JSONDecodeError, TypeError):
         return DefenseResult(
             detected=True,
