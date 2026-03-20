@@ -133,6 +133,70 @@ Testing actual agent behavior requires running the actual agent — giving it a 
 
 The most practical path: use promptfoo for prompt regression testing (catching instruction changes that break known capabilities), but recognize that this is the unit-test layer. The integration-test layer — actually running agents against controlled tasks and evaluating their behavior — is a separate problem that needs a separate tool. The golden set itself is the hard part — the framework choice matters less than the test case quality.
 
+## Beyond promptfoo: the agent evaluation landscape
+
+The promptfoo experiment tested prompts, not agents. So what tools exist for actually evaluating tool-calling agents end-to-end, with LLM-as-judge scoring and input mutation?
+
+### The landscape splits into generators and runners
+
+No single tool combines input mutation, agent execution, and LLM-as-judge scoring in one workflow. The landscape splits into three tiers:
+
+| Tier | Tools | What they do |
+|------|-------|-------------|
+| **Agent execution + scoring** | Inspect AI | Run actual agents (including CLI agents like OpenCode via `sandbox_agent_bridge()`), evaluate outcomes with model-graded scorers. No input generation. |
+| **Input mutation + scoring** | DeepEval Synthesizer, promptfoo red-teaming, DeepTeam | Generate test case variations from seeds or adversarial inputs. Score results. Don't run agents — only evaluate prompt/response pairs or traces. |
+| **Observability + scoring** | Braintrust, LangSmith, Arize Phoenix, W&B Weave | Trace and score agent runs. Don't run agents or generate inputs. |
+
+### Inspect AI (UK AISI) — the strongest candidate for agent evaluation
+
+[Inspect AI](https://inspect.ai-safety-institute.org.uk/) is the only framework that can run an arbitrary CLI-based agent inside a sandboxed container and evaluate its outcomes:
+
+- **Agent Bridge.** `sandbox_agent_bridge()` runs CLI agents (Claude Code, Codex CLI, and by extension OpenCode) inside Docker/K8s containers. The agent talks to an intercepted API on localhost. You configure a Dockerfile for your agent, point it at the bridge, and run it.
+- **LLM-as-judge.** Built-in `model_graded_fact()`, `model_graded_qa()`, and custom model-graded scorers. This is a first-class feature.
+- **Statistical evaluation.** Supports running evaluations over datasets with many samples and parallel execution. Dataframe extraction for analysis.
+- **CI-native.** CLI-driven (`inspect eval`), produces structured logs, configurable parallelism.
+- **Open source.** MIT license, actively maintained. METR (the leading AI safety evaluation org) is migrating from their own Vivaria platform to Inspect.
+
+Inspect does not generate test inputs. It only consumes datasets.
+
+### Input mutation tools
+
+**DeepEval Synthesizer** — the strongest for functional test expansion:
+- `generate_goldens_from_goldens()` takes seed test cases and produces variations using an Evol-Instruct technique with 7 evolution types: add reasoning complexity, add constraints, broaden scope, make abstract questions specific, add comparisons, introduce hypotheticals, require multi-context reasoning.
+- Configurable via `EvolutionConfig` with evolution rounds and weighted distribution across types.
+- LLM-generated (not deterministic). Python, Apache 2.0, 14k+ stars.
+
+**promptfoo red-teaming** — strongest for adversarial mutation specifically:
+- 50+ vulnerability plugins, sophisticated attack strategy composition (jailbreak + encoding + multi-turn).
+- Only generates security/adversarial test cases, not functional variations.
+- Note: promptfoo has been acquired by OpenAI. Implications for open-source future unclear.
+
+**DeepTeam** — adversarial generation with agent-specific vulnerability types:
+- Goal theft, recursive hijacking, excessive agency, autonomous agent drift, tool orchestration abuse, inter-agent communication compromise.
+- Can generate and evaluate in one workflow, but only for security testing.
+
+### The gap: no "Hypothesis for agents"
+
+The biggest missing piece is property-based testing for agents — the equivalent of [Hypothesis](https://hypothesis.readthedocs.io/) (Python) or QuickCheck (Haskell). This would:
+
+1. Define **properties** the agent must satisfy (e.g., "never modifies CODEOWNERS," "always cites the linked issue," "responds within 500 tokens")
+2. **Generate** random/structured inputs that exercise those properties — including environment mutations (tool responses, file contents, API responses), not just user input mutations
+3. **Shrink** failing cases to find the minimal reproduction
+
+No tool does this today. All existing mutation tools only mutate user inputs. None mutates the environment the agent operates in (what happens when a tool call returns an error? when a file is unexpectedly large? when an API returns stale data?). Environment mutation is arguably more important for agents than input mutation, because agent failures in practice are more often caused by unexpected tool outputs than by unusual user inputs.
+
+### Practical architecture for konflux-ci
+
+The pragmatic answer is a pipeline:
+
+1. **Generate** functional test variations from seed cases — DeepEval Synthesizer (`generate_goldens_from_goldens()`)
+2. **Generate** adversarial inputs — promptfoo `redteam generate` or DeepTeam
+3. **Transform** generated data into Inspect AI `Sample` format (simple JSON mapping)
+4. **Execute** using Inspect AI with `sandbox_agent_bridge()` (runs the actual agent in a container)
+5. **Score** using Inspect AI's model-graded scorers
+
+This is more infrastructure than a single tool, but no single tool covers the full workflow. The generation layer (steps 1-2) and execution layer (steps 4-5) are fundamentally different concerns, and it may be appropriate to keep them separate.
+
 ## Reproducing
 
 ```bash
