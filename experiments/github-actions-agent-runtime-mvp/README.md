@@ -97,7 +97,7 @@ Third-party reviewers (Qodo, CodeRabbit) don't need identity isolation setup —
 | Review Agent | `fullsend-reviewer[bot]` | GitHub App (REVIEWER_APP_ID) | Post reviews, trigger fix agent |
 | Fix Agent | `fullsend-agent[bot]` | GitHub App (AGENT_APP_ID) | Push commits, post status |
 | Cancel stale fixes | `github-actions[bot]` | GITHUB_TOKEN | Cancel workflows (no event trigger needed) |
-| Injection scanner | Service account | GCP_SA_KEY | Scan for prompt injection |
+| Injection scanner | Service account | GCP_SA_KEY (static key — see [015](issues/015-gcp-workload-identity-federation.md)) | Scan for prompt injection |
 
 **Why PAT for Implementation Agent?** `GITHUB_TOKEN` events don't trigger other workflows. A PAT from a different identity breaks this restriction so the Implementation Agent's PR triggers the Review Agent.
 
@@ -437,6 +437,7 @@ The PR timeline shows the full autonomous loop: review agent requested changes �
 | [012](issues/012-diff-scan-truncation-bypass.md) | Prompt injection scan truncates diff at 1000 lines — bypass possible | Open |
 | [013](issues/013-github-output-multiline-injection.md) | `GITHUB_OUTPUT` multi-line value injection via `echo "instruction=$X"` | Open |
 | [014](issues/014-triage-multi-label-race.md) | Triage agent multi-label race causes implementation agent concurrency cancellation | Open |
+| [015](issues/015-gcp-workload-identity-federation.md) | GCP auth uses static SA key — replace with Workload Identity Federation | Open |
 
 ## Security Notes
 
