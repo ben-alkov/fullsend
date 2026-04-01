@@ -438,6 +438,7 @@ The PR timeline shows the full autonomous loop: review agent requested changes �
 | [013](issues/013-github-output-multiline-injection.md) | `GITHUB_OUTPUT` multi-line value injection via `echo "instruction=$X"` | Open |
 | [014](issues/014-triage-multi-label-race.md) | Triage agent multi-label race causes implementation agent concurrency cancellation | Open |
 | [015](issues/015-gcp-workload-identity-federation.md) | GCP auth uses static SA key — replace with Workload Identity Federation | Open |
+| [016](issues/016-gemini-metrics-export.md) | Agent telemetry trapped in artifacts — export to GCP Cloud Monitoring | Open |
 
 ## Security Notes
 
