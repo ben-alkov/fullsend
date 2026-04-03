@@ -66,6 +66,7 @@ func TestPreflight_NilScopes_FineGrainedToken(t *testing.T) {
 	result, err := stack.Preflight(context.Background(), OpInstall, client)
 	require.NoError(t, err)
 	assert.True(t, result.OK(), "should pass when scopes can't be introspected")
+	assert.True(t, result.Skipped, "should indicate preflight was skipped")
 }
 
 func TestPreflight_GetTokenScopesError(t *testing.T) {

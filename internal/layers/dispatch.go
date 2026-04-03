@@ -74,7 +74,7 @@ func (l *DispatchTokenLayer) Install(ctx context.Context) error {
 
 	l.ui.StepStart("creating org secret " + dispatchTokenName)
 	if err := l.client.CreateOrgSecret(ctx, l.org, dispatchTokenName, l.dispatchToken, l.enrolledRepoIDs); err != nil {
-		l.ui.StepFail("failed to create org secret " + dispatchTokenName)
+		l.ui.StepFail(fmt.Sprintf("failed to create org secret %s", dispatchTokenName))
 		return fmt.Errorf("creating org secret %s: %w", dispatchTokenName, err)
 	}
 	l.ui.StepDone("created org secret " + dispatchTokenName)

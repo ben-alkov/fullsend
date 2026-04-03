@@ -16,6 +16,9 @@ type PreflightResult struct {
 	Granted []string
 	// Missing is the set of scopes needed but not granted.
 	Missing []string
+	// Skipped is true when scope introspection was unavailable
+	// (e.g., fine-grained tokens that don't report scopes).
+	Skipped bool
 }
 
 // OK returns true if no scopes are missing.
@@ -55,9 +58,9 @@ func (s *Stack) Preflight(ctx context.Context, op Operation, client forge.Client
 	}
 
 	// If the forge can't report scopes (fine-grained tokens return nil),
-	// we can't validate. Let the operation proceed.
+	// we can't validate. Let the operation proceed but warn the caller.
 	if granted == nil {
-		return &PreflightResult{Required: required}, nil
+		return &PreflightResult{Required: required, Skipped: true}, nil
 	}
 
 	grantedSet := make(map[string]bool, len(granted))

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -583,7 +584,11 @@ func runPreflight(ctx context.Context, stack *layers.Stack, op layers.Operation,
 		return fmt.Errorf("token is missing required scopes: %s", strings.Join(result.Missing, ", "))
 	}
 
-	printer.StepDone("Token permissions verified")
+	if result.Skipped {
+		printer.StepWarn("Preflight skipped: fine-grained token detected (scopes cannot be verified)")
+	} else {
+		printer.StepDone("Token permissions verified")
+	}
 	return nil
 }
 
@@ -689,6 +694,7 @@ func promptDispatchToken(ctx context.Context, client forge.Client, printer *ui.P
 	//   1. Select "Only select repositories" and pick .fullsend
 	//   2. Click "Generate token"
 	//   3. Paste the token
+	escapedOrg := url.QueryEscape(org)
 	patURL := fmt.Sprintf(
 		"https://github.com/settings/personal-access-tokens/new"+
 			"?name=fullsend-dispatch-%s"+
@@ -696,7 +702,7 @@ func promptDispatchToken(ctx context.Context, client forge.Client, printer *ui.P
 			"+Scoped+to+.fullsend+repo+with+Actions+write+only."+
 			"&target_name=%s"+
 			"&actions=write",
-		org, org, org,
+		escapedOrg, escapedOrg, escapedOrg,
 	)
 
 	printer.StepStart("Opening browser for dispatch token creation")

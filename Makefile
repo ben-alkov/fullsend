@@ -32,7 +32,7 @@ help:
 BOOTSTRAP_TOOL_DIR := $(HOME)/.local/share/uv-tools
 BOOTSTRAP_BIN_DIR  := $(HOME)/.local/bin
 
-bootstrap: e2e-playwright
+bootstrap:
 	@mkdir -p "$(BOOTSTRAP_BIN_DIR)"
 	@echo "==> Installing Python 3.12 (via uv)..."
 	uv python install 3.12

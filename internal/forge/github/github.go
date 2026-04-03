@@ -965,11 +965,9 @@ func (c *LiveClient) OrgSecretExists(ctx context.Context, org, name string) (boo
 		return false, nil
 	case http.StatusForbidden:
 		// 403 means the token doesn't have permission to check org secrets.
-		// Treat as "unknown" (false) rather than a hard error — the preflight
-		// should have caught missing admin:org scope before we get here. If it
-		// didn't (e.g., fine-grained token without scope introspection), we'll
-		// attempt to create the secret and get a clear error at that point.
-		return false, nil
+		// Return false with an error so callers can distinguish "not found"
+		// from "can't tell due to permissions".
+		return false, &APIError{StatusCode: http.StatusForbidden, Message: "insufficient permissions to check org secret (missing admin:org scope?)"}
 	default:
 		return false, &APIError{StatusCode: resp.StatusCode, Message: "unexpected status checking org secret"}
 	}

@@ -28,6 +28,10 @@ jobs:
 
       - name: Decode session
         run: |
+          if [ -z "$E2E_GITHUB_SESSION_B64" ]; then
+            echo "::error::E2E_GITHUB_SESSION secret is not set"
+            exit 1
+          fi
           SESSION_FILE="${RUNNER_TEMP}/github-session.json"
           printf '%s' "$E2E_GITHUB_SESSION_B64" | base64 -d > "$SESSION_FILE"
           echo "E2E_GITHUB_SESSION_FILE=${SESSION_FILE}" >> "$GITHUB_ENV"
