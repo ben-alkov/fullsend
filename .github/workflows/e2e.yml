@@ -1,0 +1,30 @@
+name: E2E Tests
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths: ['**/*.go', 'go.mod', 'go.sum', 'e2e/**']
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-halfsend
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run e2e tests
+        run: make e2e-test
+        env:
+          E2E_GITHUB_USERNAME: ${{ secrets.E2E_GITHUB_USERNAME }}
+          E2E_GITHUB_PASSWORD: ${{ secrets.E2E_GITHUB_PASSWORD }}
