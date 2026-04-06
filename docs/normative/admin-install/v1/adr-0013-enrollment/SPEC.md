@@ -2,29 +2,27 @@
 
 **Version:** v1
 **ADR:** [0013](../../../../ADRs/0013-admin-install-repo-enrollment-v1.md)
-**Scope:** How the admin install enrolls a GitHub-hosted repository into the fullsend agent pipeline by opening a pull request that adds a *shim* workflow. This spec is the contract for tooling (for example the enrollment layer and `forge.Client`); hosting details follow GitHub’s REST API unless stated otherwise.
+**Scope:** How the admin install enrolls a GitHub-hosted repository into the fullsend agent pipeline by opening a pull request that adds a *shim* workflow. The shim triggers the `workflow_dispatch` entrypoint for `agent.yaml` in the org’s `.fullsend` config repository using the org Actions secret `FULLSEND_DISPATCH_TOKEN` (see [ADR 0008](../../../../ADRs/0008-workflow-dispatch-for-cross-repo-dispatch.md), [ADR 0009](../../../../ADRs/0009-pull-request-target-in-shim-workflows.md)). This spec is the contract for tooling (for example the enrollment layer and `forge.Client`); hosting details follow GitHub’s REST API unless stated otherwise.
 
 ## 1. Definitions
 
 - **Owner** — GitHub organization or user that owns the repository (the install target). In admin-install configuration this is the organization login passed to tooling as the owner namespace.
 - **Target repository** — A repository listed as enabled for the pipeline in org configuration (see ADR 0011).
-- **Shim workflow** — The workflow file at **shim path** whose only job is to delegate to the reusable workflow published from the org’s `.fullsend` config repository (see ADR 0012).
+- **Shim workflow** — The workflow file at **shim path** whose job is to forward repository events to the agent dispatch workflow in the org’s `.fullsend` repository by running `gh workflow run` against `agent.yaml` with authentication from **dispatch secret** (see §3).
 - **Enrollment branch** — The head branch for the enrollment change proposal.
 - **Base branch** — The branch the enrollment pull request targets.
 
-## 2. `{org}` placeholder
+## 2. Dispatch target (`.fullsend` / `agent.yaml`)
 
-The shim workflow template contains the literal substring `{org}` in exactly one normative place: the `uses:` value that names the reusable workflow.
+At run time the shim MUST resolve the config repository as `${{ github.repository_owner }}/.fullsend` and MUST invoke the workflow file **`agent.yaml`** in that repository (GitHub CLI `gh workflow run agent.yaml --repo …` semantics).
 
 **Rules:**
 
-1. `{org}` MUST be replaced with the **Owner** string (the same identifier used in forge calls as `owner` / org login for the target repository). No other substitution or templating is defined in v1.
-2. After substitution, the `uses:` line MUST be exactly:
-
-   `{Owner}/.fullsend/.github/workflows/agent.yaml@main`
-
-   where `{Owner}` is the substituted value (for example `acme-corp/.fullsend/.github/workflows/agent.yaml@main`).
-3. Implementations MUST NOT leave `{org}` in the committed shim file.
+1. The committed shim MUST use GitHub Actions context `github.repository_owner` so the same file content is valid for any target repository under that owner namespace. Installers MUST NOT perform owner-string substitution or other templating on the shim body for v1.
+2. The dispatch inputs MUST include at least:
+   - `event_type` — `${{ github.event_name }}`
+   - `source_repo` — `${{ github.repository }}`
+   - `event_payload` — JSON for `${{ toJSON(github.event) }}` (same expression shape as the reference implementation).
 
 ## 3. Constants (v1)
 
@@ -32,7 +30,8 @@ The shim workflow template contains the literal substring `{org}` in exactly one
 |------|--------|
 | Shim path | `.github/workflows/fullsend.yaml` |
 | Enrollment branch name | `fullsend/onboard` |
-| Reusable workflow ref | `@main` (pinned to the default branch of `.fullsend`) |
+| Dispatch workflow file (in `.fullsend`) | `agent.yaml` |
+| Dispatch secret (org Actions secret name) | `FULLSEND_DISPATCH_TOKEN` |
 | Default base branch if unspecified | `main` |
 | Commit message for adding the shim | `chore: add fullsend shim workflow` |
 
@@ -50,7 +49,12 @@ The file at **shim path** MUST be valid GitHub Actions workflow YAML and MUST ma
 
 ```yaml
 # fullsend shim workflow
-# Routes events to the reusable agent dispatch workflow in .fullsend.
+# Routes events to the agent dispatch workflow in .fullsend.
+#
+# Security: pull_request_target runs the BASE branch version of this workflow,
+# preventing PRs from modifying it to exfiltrate the dispatch token.
+# This shim never checks out PR code, so it is not vulnerable to "pwn request"
+# attacks (see: Trivy CVE-2026-33634, hackerbot-claw campaign).
 name: fullsend
 
 on:
@@ -58,29 +62,32 @@ on:
     types: [opened, edited, labeled]
   issue_comment:
     types: [created]
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, ready_for_review]
   pull_request_review:
     types: [submitted]
 
 jobs:
   dispatch:
-    uses: {org}/.fullsend/.github/workflows/agent.yaml@main
-    with:
-      event_type: ${{ github.event_name }}
-      event_payload: ${{ toJSON(github.event) }}
-    secrets:
-      APP_PRIVATE_KEY: ${{ secrets.FULLSEND_FULLSEND_APP_PRIVATE_KEY }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch to fullsend
+        env:
+          GH_TOKEN: ${{ secrets.FULLSEND_DISPATCH_TOKEN }}
+        run: |
+          gh workflow run agent.yaml \
+            --repo "${{ github.repository_owner }}/.fullsend" \
+            --field event_type="${{ github.event_name }}" \
+            --field source_repo="${{ github.repository }}" \
+            --field event_payload='${{ toJSON(github.event) }}'
 ```
-
-Before commit, `{org}` MUST be replaced per §2.
 
 ## 6. Forge operation sequence (install)
 
 For each enabled target repository that is not enrolled (§4), the installer MUST perform these operations in order:
 
 1. **CreateBranch** — Create **enrollment branch** from the target repository’s **default branch** tip (same SHA the hosting API uses for “branch from default”).
-2. **CreateFileOnBranch** — Create **shim path** on **enrollment branch** with content from §5 (after `{org}` substitution), using the commit message from §3.
+2. **CreateFileOnBranch** — Create **shim path** on **enrollment branch** with content from §5, using the commit message from §3.
 3. **CreateChangeProposal** — Open a pull request with:
    - **head:** enrollment branch name (`fullsend/onboard`)
    - **base:** the configured default branch name for that repository, or `main` if none is configured (§3)

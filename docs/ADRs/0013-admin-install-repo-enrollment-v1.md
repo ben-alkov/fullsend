@@ -20,11 +20,11 @@ Proposed
 
 ## Context
 
-Admin install must attach each enabled repository to the shared agent pipeline without silently rewriting default branches. The established pattern is a small *shim* workflow in the target repo that calls the reusable workflow in the org’s `.fullsend` repository. Org-level configuration and the contents of `.fullsend` are decided separately (ADR 0011, ADR 0012); this ADR fixes the enrollment mechanics for target repos.
+Admin install must attach each enabled repository to the shared agent pipeline without silently rewriting default branches. The established pattern is a small *shim* workflow in the target repo that triggers `workflow_dispatch` on `agent.yaml` in the org’s `.fullsend` repository using the org Actions secret `FULLSEND_DISPATCH_TOKEN` ([ADR 0008](0008-workflow-dispatch-for-cross-repo-dispatch.md), [ADR 0009](0009-pull-request-target-in-shim-workflows.md)). Org-level configuration and the contents of `.fullsend` are decided separately (ADR 0011, ADR 0012); this ADR fixes the enrollment mechanics for target repos.
 
 ## Decision
 
-**Enrollment v1** is defined exactly by the normative specification at [`docs/normative/admin-install/v1/adr-0013-enrollment/SPEC.md`](../normative/admin-install/v1/adr-0013-enrollment/SPEC.md). Tooling that performs enrollment MUST conform to that document for branch names, shim path, pull request title and body, base branch selection, `{org}` substitution rules, shim YAML shape, and forge operation ordering.
+**Enrollment v1** is defined exactly by the normative specification at [`docs/normative/admin-install/v1/adr-0013-enrollment/SPEC.md`](../normative/admin-install/v1/adr-0013-enrollment/SPEC.md). Tooling that performs enrollment MUST conform to that document for branch names, shim path, pull request title and body, base branch selection, dispatch wiring (`agent.yaml`, `FULLSEND_DISPATCH_TOKEN`, `github.repository_owner` / `.fullsend` target), shim YAML shape (including `pull_request_target` for PR events), and forge operation ordering.
 
 ## Consequences
 
