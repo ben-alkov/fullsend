@@ -20,8 +20,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          files=$(gh pr diff "${{ github.event.pull_request.number }}" --name-only \
-            | grep '^docs/ADRs/' || true)
+          all_files=$(gh pr diff "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" --name-only)
+          files=$(echo "$all_files" | grep '^docs/ADRs/' || true)
 
           if [ -z "$files" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -51,6 +52,11 @@ jobs:
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           FILE_SUMMARY: ${{ steps.changed.outputs.file_summary }}
         run: |
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "::error::SLACK_WEBHOOK_URL secret is not configured"
+            exit 1
+          fi
+
           payload=$(jq -n \
             --arg title "$PR_TITLE" \
             --arg number "$PR_NUMBER" \
@@ -77,5 +83,4 @@ jobs:
             }')
 
           curl -sf -X POST -H 'Content-Type: application/json' \
-            -d "$payload" "$SLACK_WEBHOOK_URL" \
-            || echo "::warning::Slack notification failed"
+            -d "$payload" "$SLACK_WEBHOOK_URL"
