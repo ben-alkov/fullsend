@@ -18,7 +18,7 @@ Install in .claude/settings.json:
         "hooks": [
           {
             "type": "command",
-            "command": "python3 experiments/hermes-security-patterns/hooks/secret_redact_posttool.py"
+            "command": "python3 hooks/secret_redact_posttool.py"
           }
         ]
       }
@@ -34,7 +34,6 @@ Exit code 0 always (redaction never blocks, only transforms).
 import json
 import re
 import sys
-
 
 # ---------------------------------------------------------------------------
 # Known secret prefix patterns (35+ from Hermes agent/redact.py)
@@ -53,7 +52,10 @@ _PREFIX_PATTERNS: list[tuple[str, re.Pattern]] = [
     ("anthropic_key", re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}")),
     # AWS
     ("aws_access_key", re.compile(r"AKIA[A-Z0-9]{16}")),
-    ("aws_secret_key", re.compile(r"(?:aws_secret_access_key|AWS_SECRET_ACCESS_KEY)\s*[=:]\s*[A-Za-z0-9/+=]{40}")),
+    (
+        "aws_secret_key",
+        re.compile(r"(?:aws_secret_access_key|AWS_SECRET_ACCESS_KEY)\s*[=:]\s*[A-Za-z0-9/+=]{40}"),
+    ),
     # Stripe
     ("stripe_key", re.compile(r"(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{10,}")),
     # SendGrid
@@ -73,7 +75,12 @@ _PREFIX_PATTERNS: list[tuple[str, re.Pattern]] = [
     # Telegram bot token
     ("telegram_bot", re.compile(r"\d{8,10}:[A-Za-z0-9_-]{35}")),
     # Generic bearer/basic auth
-    ("auth_header", re.compile(r"(?:Authorization|authorization)\s*:\s*(?:Bearer|Basic|Token)\s+[A-Za-z0-9_.+/=-]{20,}")),
+    (
+        "auth_header",
+        re.compile(
+            r"(?:Authorization|authorization)\s*:\s*(?:Bearer|Basic|Token)\s+[A-Za-z0-9_.+/=-]{20,}"
+        ),
+    ),
 ]
 
 # ---------------------------------------------------------------------------
@@ -146,11 +153,13 @@ def redact_text(text: str) -> tuple[str, list[dict]]:
             token = match.group(0)
             masked = mask_token(token)
             if masked != token:
-                findings.append({
-                    "pattern": name,
-                    "original_length": len(token),
-                    "masked": masked,
-                })
+                findings.append(
+                    {
+                        "pattern": name,
+                        "original_length": len(token),
+                        "masked": masked,
+                    }
+                )
                 result = result.replace(token, masked)
 
     # Apply structural patterns
@@ -159,11 +168,13 @@ def redact_text(text: str) -> tuple[str, list[dict]]:
             # Replace entire key block
             for match in pattern.finditer(result):
                 block = match.group(0)
-                findings.append({
-                    "pattern": name,
-                    "original_length": len(block),
-                    "masked": "[REDACTED PRIVATE KEY]",
-                })
+                findings.append(
+                    {
+                        "pattern": name,
+                        "original_length": len(block),
+                        "masked": "[REDACTED PRIVATE KEY]",
+                    }
+                )
                 result = result.replace(block, "[REDACTED PRIVATE KEY]")
         else:
             # Replace captured group (the secret value)
@@ -172,11 +183,13 @@ def redact_text(text: str) -> tuple[str, list[dict]]:
                     token = match.group(1)
                     masked = mask_token(token)
                     if masked != token:
-                        findings.append({
-                            "pattern": name,
-                            "original_length": len(token),
-                            "masked": masked,
-                        })
+                        findings.append(
+                            {
+                                "pattern": name,
+                                "original_length": len(token),
+                                "masked": masked,
+                            }
+                        )
                         result = result.replace(token, masked)
 
     return result, findings
@@ -199,13 +212,16 @@ def main():
     redacted, findings = redact_text(tool_result)
 
     if findings:
-        json.dump({
-            "tool_result": redacted,
-            "metadata": {
-                "secrets_redacted": len(findings),
-                "patterns": [f["pattern"] for f in findings],
+        json.dump(
+            {
+                "tool_result": redacted,
+                "metadata": {
+                    "secrets_redacted": len(findings),
+                    "patterns": [f["pattern"] for f in findings],
+                },
             },
-        }, sys.stdout)
+            sys.stdout,
+        )
 
     sys.exit(0)
 

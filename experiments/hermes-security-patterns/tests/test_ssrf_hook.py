@@ -1,5 +1,6 @@
 """Tests for the SSRF PreToolUse hook."""
 
+import contextlib
 import json
 import subprocess
 import sys
@@ -22,10 +23,8 @@ def run_hook(tool_name: str, tool_input: dict) -> tuple[int, dict | None]:
     )
     output = None
     if result.stdout.strip():
-        try:
+        with contextlib.suppress(json.JSONDecodeError):
             output = json.loads(result.stdout)
-        except json.JSONDecodeError:
-            pass
     return result.returncode, output
 
 
@@ -67,18 +66,15 @@ class TestBashUrlExtraction:
             "Bash", {"command": "curl -s https://169.254.169.254/latest/meta-data/"}
         )
         assert code != 0
+        assert output is not None
         assert "SSRF" in output["reason"]
 
     def test_blocks_wget_to_internal(self):
-        code, _ = run_hook(
-            "Bash", {"command": "wget http://192.168.1.100/secret.json"}
-        )
+        code, _ = run_hook("Bash", {"command": "wget http://192.168.1.100/secret.json"})
         assert code != 0
 
     def test_allows_curl_to_public(self):
-        code, _ = run_hook(
-            "Bash", {"command": "curl -sL https://api.github.com/repos/foo/bar"}
-        )
+        code, _ = run_hook("Bash", {"command": "curl -sL https://api.github.com/repos/foo/bar"})
         assert code == 0
 
     def test_allows_commands_without_urls(self):

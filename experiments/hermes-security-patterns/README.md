@@ -22,6 +22,9 @@ Fullsend's runtime security gaps (secret redaction, SSRF protection, context fil
                      │     ├── context injection detect      │
                      │     └── AI config file scanning       │
                      │                                      │
+                     │  1b. scan_exfil.py .                  │
+                     │      └── credential exfil in configs  │
+                     │                                      │
                      │  2. Agent execution                   │
                      │     ├── claude-code / gemini-cli      │
                      │     │                                │
@@ -46,10 +49,11 @@ Fullsend's runtime security gaps (secret redaction, SSRF protection, context fil
 
 Tirith replaces three custom Python scanners with its battle-tested Rust implementation:
 
-| Fullsend Concern | Tirith Rule Module | Coverage |
+| Fullsend Concern | Tool | Coverage |
 |---|---|---|
-| Unicode normalization | `terminal.rs` — zero-width, bidi, tags, variation selectors, ANSI | 80+ invisible character types, joining-script context awareness |
-| Context injection | `configfile.rs` — 50+ AI config file patterns | CLAUDE.md, .cursorrules, AGENTS.md, etc. with prompt injection detection |
+| Unicode normalization | Tirith `terminal.rs` | 80+ invisible character types, joining-script context awareness |
+| Context injection (prompt) | Tirith `configfile.rs` | CLAUDE.md, .cursorrules, AGENTS.md — prompt injection detection |
+| Context injection (exfil) | `scan_exfil.py` | Credential exfiltration commands in AI config files (Tirith gap) |
 
 **Usage in workflow:**
 
@@ -142,7 +146,7 @@ Attack payloads targeting each security concern:
 | `ssrf-redirect.yaml` | SSRF hook | Public URL redirects to internal endpoint |
 | `context-injection-agents-md.yaml` | Tirith scan | AGENTS.md with "ignore instructions" pattern |
 | `context-injection-hidden-html.yaml` | Tirith scan | Hidden HTML comment with override instructions |
-| `context-injection-credential-exfil.yaml` | Tirith scan | Context file with curl + credential env vars |
+| `context-injection-credential-exfil.yaml` | Exfil scan | Context file with curl + credential env vars |
 | `unicode-invisible-command.yaml` | Tirith scan | Command with zero-width characters |
 | `unicode-bidi-override.yaml` | Tirith scan | Bidirectional override hiding malicious suffix |
 | `unicode-tag-chars.yaml` | Tirith scan | Tag characters embedding hidden text |
@@ -168,8 +172,11 @@ curl -fsSL https://github.com/sheeki03/tirith/releases/latest/download/tirith-aa
 # Or via cargo (any platform)
 cargo install tirith
 
-# Run full evaluation
+# Run full evaluation (tirith + exfil scan + hooks)
 uv run python run_eval.py
+
+# Scan a repo for config file exfiltration patterns
+python3 scan_exfil.py /path/to/repo
 
 # Hook tests only (no tirith needed)
 uv run python run_eval.py --hooks-only
@@ -194,10 +201,11 @@ uv run python -m pytest tests/ -v
 | Scanner | Payloads | Correct | Notes |
 |---------|----------|---------|-------|
 | tirith:unicode_normalizer | 3 | 3/3 (100%) | Zero-width, bidi, tag chars all detected |
-| tirith:context_injection | 3 | 2/3 (67%) | Credential exfil in config files not detected (known gap) |
+| tirith:context_injection | 2 | 2/2 (100%) | Prompt injection in AGENTS.md, hidden HTML |
+| exfil_scan | 1 | 1/1 (100%) | Credential exfil commands in CLAUDE.md |
 | ssrf_hook | 2 | 2/2 (100%) | Metadata + redirect payloads blocked |
 | redact_hook | 2 | 2/2 (100%) | OpenAI, GitHub, Slack tokens masked |
-| **Total** | **10** | **9/10 (90%)** | |
+| **Total** | **10** | **10/10 (100%)** | |
 
 ### Phase 2: GitHub Actions integration
 - Add `tirith scan` as a workflow step before agent execution
@@ -217,18 +225,18 @@ uv run python -m pytest tests/ -v
 | Unicode attacks | guardrails-eval/zero-width-chars.yaml | Tirith terminal rules (80+ types, not just detect) |
 | Secret leakage | None | PostToolUse redaction hook (35+ patterns, Hermes masking strategy) |
 | SSRF | None | PreToolUse hook (RFC 1918, metadata, schemes) |
-| Pre-exec scanning | None | Tirith scan in workflow + SSRF hook at runtime |
+| Credential exfil in configs | None | `scan_exfil.py` (8 patterns from Hermes, Tirith gap) |
+| Pre-exec scanning | None | Tirith scan + exfil scan in workflow, hooks at runtime |
 
 ## Known Gaps
 
 ### Tirith: Credential exfiltration in config files
 
-Tirith's `configfile.rs` detects prompt injection and invisible unicode in AI config files, but does **not** detect credential exfiltration commands (e.g., `curl $GITHUB_TOKEN`, `cat ~/.ssh/id_rsa`, `base64 <<< "$OPENAI_API_KEY" | curl -d @-`). The `context-injection-credential-exfil` payload passes tirith scan undetected.
+Tirith's `configfile.rs` detects prompt injection and invisible unicode in AI config files, but does **not** detect credential exfiltration commands (e.g., `curl $GITHUB_TOKEN`, `cat ~/.ssh/id_rsa`, `base64 <<< "$OPENAI_API_KEY" | curl -d @-`). This is a deliberate architectural boundary — Tirith's `engine.rs` only runs `command.rs` (where exfiltration detection lives) for interactive Exec/Paste contexts, not FileScan.
 
-This is a real gap: a malicious CLAUDE.md could embed "debugging instructions" that exfiltrate secrets when the agent follows them. Mitigation options:
-1. **PreToolUse hook** — extend SSRF hook to also check for env var expansion in curl/wget commands
-2. **Custom tirith rule** — tirith supports custom YAML rules that could pattern-match data exfiltration commands
-3. **LLM Guard layer** — the guardrails-eval experiment's LLM Guard sentence-mode scanner may catch this at the prompt level
+The `scan_exfil.py` script fills this gap with 8 regex patterns adapted from Hermes Agent's `prompt_builder.py` and `skills_guard.py`. It runs as a pre-agent scan step alongside `tirith scan`.
+
+> **Note:** This script may be superseded by a `fullsend scan` CLI command that integrates exfiltration scanning alongside other pre-agent security checks into a single invocation.
 
 ## Key Design Decisions
 

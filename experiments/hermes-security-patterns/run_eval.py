@@ -46,7 +46,7 @@ def load_payloads() -> list[dict]:
 
 def tirith_available() -> bool:
     try:
-        subprocess.run(
+        subprocess.run(  # nosec B607
             ["tirith", "--version"],
             capture_output=True,
             timeout=5,
@@ -76,7 +76,7 @@ def install_tirith() -> bool:
 
     if system == "darwin":
         print("Installing tirith via brew...")
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B607
             ["brew", "install", "sheeki03/tap/tirith"],
             capture_output=True,
             text=True,
@@ -98,12 +98,9 @@ def install_tirith() -> bool:
 
         # Determine install dir — prefer ~/.local/bin if exists, else /usr/local/bin
         local_bin = Path.home() / ".local" / "bin"
-        if local_bin.exists():
-            install_dir = str(local_bin)
-        else:
-            install_dir = "/usr/local/bin"
+        install_dir = str(local_bin) if local_bin.exists() else "/usr/local/bin"
 
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B607
             ["sh", "-c", f"curl -fsSL '{tarball_url}' | tar xz -C '{install_dir}' tirith"],
             capture_output=True,
             text=True,
@@ -113,6 +110,7 @@ def install_tirith() -> bool:
             print(f"  tirith installed to {install_dir}")
             # Add to PATH for this process if needed
             import os
+
             if install_dir not in os.environ.get("PATH", ""):
                 os.environ["PATH"] = f"{install_dir}:{os.environ.get('PATH', '')}"
             return True
@@ -121,7 +119,7 @@ def install_tirith() -> bool:
 
     # Fallback: cargo install (works on any platform with Rust)
     print("Falling back to cargo install (this may take a few minutes)...")
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B607
         ["cargo", "install", "tirith"],
         capture_output=True,
         text=True,
@@ -134,7 +132,12 @@ def install_tirith() -> bool:
     print(f"  cargo install failed: {result.stderr.strip()}")
     print("  Could not install tirith. Install manually:")
     print("    macOS:  brew install sheeki03/tap/tirith")
-    print("    Linux:  curl -fsSL https://github.com/sheeki03/tirith/releases/latest/download/tirith-x86_64-unknown-linux-gnu.tar.gz | tar xz -C ~/.local/bin tirith")
+    print(
+        "    Linux:  curl -fsSL"
+        " https://github.com/sheeki03/tirith/releases/latest/download/"
+        "tirith-x86_64-unknown-linux-gnu.tar.gz"
+        " | tar xz -C ~/.local/bin tirith"
+    )
     print("    Any:    cargo install tirith")
     return False
 
@@ -159,7 +162,7 @@ def eval_tirith_file_scan(payload: dict) -> dict:
 
     start = time.perf_counter()
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B607
             ["tirith", "scan", "--json", "--", str(tmp_path)],
             capture_output=True,
             text=True,
@@ -226,9 +229,81 @@ def eval_tirith(payloads: list[dict]) -> list[dict]:
     for p in payloads:
         if p.get("scanner") not in tirith_scanners:
             continue
+        # Skip exfil payloads — handled by exfil_scan
+        if p.get("technique") == "credential_exfil":
+            continue
         result = eval_tirith_file_scan(p)
         if result:
             results.append(result)
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Exfil scanner evaluation (pre-agent scan step)
+# ---------------------------------------------------------------------------
+
+SCAN_EXFIL_PATH = Path(__file__).parent / "scan_exfil.py"
+
+
+def eval_exfil_scan(payloads: list[dict]) -> list[dict]:
+    """Test the exfil scanner against context injection payloads with exfil technique."""
+    results = []
+
+    for p in payloads:
+        if p.get("technique") != "credential_exfil":
+            continue
+
+        content = p.get("content", "")
+        filename = p.get("filename", "CLAUDE.md")
+
+        # Write to temp dir with exact filename
+        tmp_dir = tempfile.mkdtemp()
+        tmp_path = Path(tmp_dir) / filename
+        tmp_path.write_text(content)
+
+        start = time.perf_counter()
+        try:
+            proc = subprocess.run(
+                [sys.executable, str(SCAN_EXFIL_PATH), "--json", str(tmp_path)],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            elapsed_ms = (time.perf_counter() - start) * 1000
+
+            detected = proc.returncode != 0
+            findings = []
+            if proc.stdout.strip():
+                try:
+                    out = json.loads(proc.stdout)
+                    for file_findings in out.get("findings", {}).values():
+                        findings.extend(file_findings)
+                except json.JSONDecodeError:
+                    pass
+
+        except subprocess.TimeoutExpired:
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            detected = False
+            findings = []
+        finally:
+            tmp_path.unlink(missing_ok=True)
+            Path(tmp_dir).rmdir()
+
+        expected = p.get("expected") == "blocked"
+
+        results.append(
+            {
+                "name": p["name"],
+                "scanner": "exfil_scan",
+                "detected": detected,
+                "expected": expected,
+                "correct": detected == expected,
+                "finding_count": len(findings),
+                "findings": [f"{f['severity']}:{f['pattern']}" for f in findings[:5]],
+                "latency_ms": elapsed_ms,
+            }
+        )
 
     return results
 
@@ -254,10 +329,12 @@ def eval_ssrf_hook(payloads: list[dict]) -> list[dict]:
 
         # Test each URL as a WebFetch tool call
         for url in urls:
-            hook_input = json.dumps({
-                "tool_name": "WebFetch",
-                "tool_input": {"url": url},
-            })
+            hook_input = json.dumps(
+                {
+                    "tool_name": "WebFetch",
+                    "tool_input": {"url": url},
+                }
+            )
 
             try:
                 proc = subprocess.run(
@@ -288,10 +365,12 @@ def eval_ssrf_hook(payloads: list[dict]) -> list[dict]:
         chain_results = []
         if chain:
             for chain_url in chain:
-                hook_input = json.dumps({
-                    "tool_name": "Bash",
-                    "tool_input": {"command": f"curl -sL {chain_url}"},
-                })
+                hook_input = json.dumps(
+                    {
+                        "tool_name": "Bash",
+                        "tool_input": {"command": f"curl -sL {chain_url}"},
+                    }
+                )
                 proc = subprocess.run(
                     [sys.executable, str(SSRF_HOOK_PATH)],
                     input=hook_input,
@@ -307,25 +386,25 @@ def eval_ssrf_hook(payloads: list[dict]) -> list[dict]:
                         reason = out.get("reason", "")
                     except json.JSONDecodeError:
                         reason = proc.stdout.strip()
-                chain_results.append(
-                    {"url": chain_url, "blocked": blocked, "reason": reason}
-                )
+                chain_results.append({"url": chain_url, "blocked": blocked, "reason": reason})
                 if blocked:
                     any_blocked = True
 
         elapsed_ms = (time.perf_counter() - start) * 1000
         expected = p.get("expected") == "blocked"
 
-        results.append({
-            "name": p["name"],
-            "scanner": "ssrf_hook",
-            "detected": any_blocked,
-            "expected": expected,
-            "correct": any_blocked == expected,
-            "url_results": url_results,
-            "chain_results": chain_results,
-            "latency_ms": elapsed_ms,
-        })
+        results.append(
+            {
+                "name": p["name"],
+                "scanner": "ssrf_hook",
+                "detected": any_blocked,
+                "expected": expected,
+                "correct": any_blocked == expected,
+                "url_results": url_results,
+                "chain_results": chain_results,
+                "latency_ms": elapsed_ms,
+            }
+        )
 
     return results
 
@@ -347,11 +426,13 @@ def eval_redact_hook(payloads: list[dict]) -> list[dict]:
 
         start = time.perf_counter()
 
-        hook_input = json.dumps({
-            "tool_name": "Bash",
-            "tool_input": {"command": "echo output"},
-            "tool_result": text,
-        })
+        hook_input = json.dumps(
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": "echo output"},
+                "tool_result": text,
+            }
+        )
 
         try:
             proc = subprocess.run(
@@ -387,17 +468,19 @@ def eval_redact_hook(payloads: list[dict]) -> list[dict]:
 
         expected = p.get("expected") == "detected"
 
-        results.append({
-            "name": p["name"],
-            "scanner": "redact_hook",
-            "detected": detected,
-            "expected": expected,
-            "correct": detected == expected,
-            "finding_count": len(findings),
-            "findings": findings[:5],
-            "redacted_preview": redacted_text[:200] if redacted_text else "",
-            "latency_ms": elapsed_ms,
-        })
+        results.append(
+            {
+                "name": p["name"],
+                "scanner": "redact_hook",
+                "detected": detected,
+                "expected": expected,
+                "correct": detected == expected,
+                "finding_count": len(findings),
+                "findings": findings[:5],
+                "redacted_preview": redacted_text[:200] if redacted_text else "",
+                "latency_ms": elapsed_ms,
+            }
+        )
 
     return results
 
@@ -426,10 +509,7 @@ def print_results(all_results: list[dict]):
             status = "PASS" if r["correct"] else "FAIL"
             det = "DETECTED" if r["detected"] else "CLEAN"
             exp = "expected" if r["correct"] else "UNEXPECTED"
-            print(
-                f"  [{status}] {r['name']:<40} {det:<10} "
-                f"({exp}, {r['latency_ms']:.1f}ms)"
-            )
+            print(f"  [{status}] {r['name']:<40} {det:<10} ({exp}, {r['latency_ms']:.1f}ms)")
 
             # Show URL-level details for SSRF
             if r.get("url_results"):
@@ -481,7 +561,7 @@ def print_results(all_results: list[dict]):
         c = sum(1 for r in results if r["correct"])
         avg = sum(r["latency_ms"] for r in results if not r.get("error")) / n if n else 0
         print(f"\n  {scanner}:")
-        print(f"    Correct: {c}/{n} ({100 * c / n:.0f}%)" if n else f"    Skipped (errors)")
+        print(f"    Correct: {c}/{n} ({100 * c / n:.0f}%)" if n else "    Skipped (errors)")
         print(f"    Avg latency: {avg:.1f}ms")
 
     if correct < testable:
@@ -495,12 +575,8 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="Evaluate Hermes security patterns")
-    parser.add_argument(
-        "--hooks-only", action="store_true", help="Only test hooks (no tirith)"
-    )
-    parser.add_argument(
-        "--tirith-only", action="store_true", help="Only test tirith scan"
-    )
+    parser.add_argument("--hooks-only", action="store_true", help="Only test hooks (no tirith)")
+    parser.add_argument("--tirith-only", action="store_true", help="Only test tirith scan")
     args = parser.parse_args()
 
     payloads = load_payloads()
@@ -516,6 +592,10 @@ def main():
         if tirith_available():
             print("Using tirith CLI for static scanning")
             all_results.extend(eval_tirith(payloads))
+
+        if SCAN_EXFIL_PATH.exists():
+            print(f"Using exfil scanner: {SCAN_EXFIL_PATH}")
+            all_results.extend(eval_exfil_scan(payloads))
 
     if not args.tirith_only:
         if SSRF_HOOK_PATH.exists():

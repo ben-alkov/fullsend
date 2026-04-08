@@ -1,22 +1,23 @@
 """Tests for the secret redaction PostToolUse hook."""
 
+import contextlib
 import json
 import subprocess
 import sys
 from pathlib import Path
-
-import pytest
 
 HOOK_PATH = Path(__file__).parent.parent / "hooks" / "secret_redact_posttool.py"
 
 
 def run_hook(tool_name: str, tool_result: str) -> tuple[int, dict | None]:
     """Run the hook and return (exit_code, parsed_stdout)."""
-    payload = json.dumps({
-        "tool_name": tool_name,
-        "tool_input": {},
-        "tool_result": tool_result,
-    })
+    payload = json.dumps(
+        {
+            "tool_name": tool_name,
+            "tool_input": {},
+            "tool_result": tool_result,
+        }
+    )
     result = subprocess.run(
         [sys.executable, str(HOOK_PATH)],
         input=payload,
@@ -26,10 +27,8 @@ def run_hook(tool_name: str, tool_result: str) -> tuple[int, dict | None]:
     )
     output = None
     if result.stdout.strip():
-        try:
+        with contextlib.suppress(json.JSONDecodeError):
             output = json.loads(result.stdout)
-        except json.JSONDecodeError:
-            pass
     return result.returncode, output
 
 
