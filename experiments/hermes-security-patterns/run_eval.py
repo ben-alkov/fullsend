@@ -56,6 +56,89 @@ def tirith_available() -> bool:
         return False
 
 
+def detect_platform() -> tuple[str, str]:
+    """Return (os, arch) e.g. ('darwin', 'arm64'), ('linux', 'x86_64')."""
+    import platform
+
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+    # Normalize arch names
+    if machine in ("arm64", "aarch64"):
+        machine = "aarch64"
+    elif machine in ("x86_64", "amd64"):
+        machine = "x86_64"
+    return system, machine
+
+
+def install_tirith() -> bool:
+    """Install tirith CLI. Returns True if successful."""
+    system, arch = detect_platform()
+
+    if system == "darwin":
+        print("Installing tirith via brew...")
+        result = subprocess.run(
+            ["brew", "install", "sheeki03/tap/tirith"],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        if result.returncode == 0:
+            print("  tirith installed successfully via brew")
+            return True
+        print(f"  brew install failed: {result.stderr.strip()}")
+        # Fall through to cargo
+    elif system == "linux":
+        # Try binary download first (faster than cargo)
+        rust_target = f"{arch}-unknown-linux-gnu"
+        tarball_url = (
+            f"https://github.com/sheeki03/tirith/releases/latest/download/"
+            f"tirith-{rust_target}.tar.gz"
+        )
+        print(f"Installing tirith binary for linux/{arch}...")
+
+        # Determine install dir — prefer ~/.local/bin if exists, else /usr/local/bin
+        local_bin = Path.home() / ".local" / "bin"
+        if local_bin.exists():
+            install_dir = str(local_bin)
+        else:
+            install_dir = "/usr/local/bin"
+
+        result = subprocess.run(
+            ["sh", "-c", f"curl -fsSL '{tarball_url}' | tar xz -C '{install_dir}' tirith"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode == 0:
+            print(f"  tirith installed to {install_dir}")
+            # Add to PATH for this process if needed
+            import os
+            if install_dir not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = f"{install_dir}:{os.environ.get('PATH', '')}"
+            return True
+        print(f"  binary install failed: {result.stderr.strip()}")
+        # Fall through to cargo
+
+    # Fallback: cargo install (works on any platform with Rust)
+    print("Falling back to cargo install (this may take a few minutes)...")
+    result = subprocess.run(
+        ["cargo", "install", "tirith"],
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    if result.returncode == 0:
+        print("  tirith installed via cargo")
+        return True
+
+    print(f"  cargo install failed: {result.stderr.strip()}")
+    print("  Could not install tirith. Install manually:")
+    print("    macOS:  brew install sheeki03/tap/tirith")
+    print("    Linux:  curl -fsSL https://github.com/sheeki03/tirith/releases/latest/download/tirith-x86_64-unknown-linux-gnu.tar.gz | tar xz -C ~/.local/bin tirith")
+    print("    Any:    cargo install tirith")
+    return False
+
+
 def eval_tirith_file_scan(payload: dict) -> dict:
     """Write payload content to a temp file and run tirith scan on it."""
     # Determine the text content and temp filename
@@ -65,22 +148,19 @@ def eval_tirith_file_scan(payload: dict) -> dict:
     elif payload.get("scanner") == "unicode_normalizer":
         content = payload["text"]
         suffix = "input.txt"
-    elif payload.get("scanner") == "secret_redactor":
-        content = payload["text"]
-        suffix = "output.txt"
     else:
         return {}
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=f"_{suffix}", delete=False
-    ) as f:
-        f.write(content)
-        tmp_path = f.name
+    # Use a temp directory with the exact filename so tirith recognizes
+    # config files (AGENTS.md, CLAUDE.md, etc.) by name.
+    tmp_dir = tempfile.mkdtemp()
+    tmp_path = Path(tmp_dir) / suffix
+    tmp_path.write_text(content)
 
     start = time.perf_counter()
     try:
         result = subprocess.run(
-            ["tirith", "scan", "--json", "--", tmp_path],
+            ["tirith", "scan", "--json", "--", str(tmp_path)],
             capture_output=True,
             text=True,
             timeout=10,
@@ -116,7 +196,8 @@ def eval_tirith_file_scan(payload: dict) -> dict:
             "latency_ms": 0,
         }
     finally:
-        Path(tmp_path).unlink(missing_ok=True)
+        tmp_path.unlink(missing_ok=True)
+        Path(tmp_dir).rmdir()
 
     scanner_name = payload.get("scanner", "unknown")
     expected_map = {
@@ -428,12 +509,13 @@ def main():
     all_results = []
 
     if not args.hooks_only:
+        if not tirith_available():
+            print("tirith not found in PATH, attempting install...")
+            if not install_tirith() or not tirith_available():
+                print("WARNING: tirith unavailable, skipping static scan tests")
         if tirith_available():
             print("Using tirith CLI for static scanning")
             all_results.extend(eval_tirith(payloads))
-        else:
-            print("WARNING: tirith not found in PATH, skipping static scan tests")
-            print("  Install: brew install sheeki03/tap/tirith")
 
     if not args.tirith_only:
         if SSRF_HOOK_PATH.exists():

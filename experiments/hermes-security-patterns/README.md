@@ -186,7 +186,18 @@ uv run python -m pytest tests/ -v
 ### Phase 1: Validation (this experiment)
 - Test tirith scan against fullsend-specific payloads
 - Test SSRF hook against metadata/redirect payloads
+- Test PostToolUse redaction hook against secret payloads
 - Measure detection rates and false positives
+
+**Results (10 payloads):**
+
+| Scanner | Payloads | Correct | Notes |
+|---------|----------|---------|-------|
+| tirith:unicode_normalizer | 3 | 3/3 (100%) | Zero-width, bidi, tag chars all detected |
+| tirith:context_injection | 3 | 2/3 (67%) | Credential exfil in config files not detected (known gap) |
+| ssrf_hook | 2 | 2/2 (100%) | Metadata + redirect payloads blocked |
+| redact_hook | 2 | 2/2 (100%) | OpenAI, GitHub, Slack tokens masked |
+| **Total** | **10** | **9/10 (90%)** | |
 
 ### Phase 2: GitHub Actions integration
 - Add `tirith scan` as a workflow step before agent execution
@@ -207,6 +218,17 @@ uv run python -m pytest tests/ -v
 | Secret leakage | None | PostToolUse redaction hook (35+ patterns, Hermes masking strategy) |
 | SSRF | None | PreToolUse hook (RFC 1918, metadata, schemes) |
 | Pre-exec scanning | None | Tirith scan in workflow + SSRF hook at runtime |
+
+## Known Gaps
+
+### Tirith: Credential exfiltration in config files
+
+Tirith's `configfile.rs` detects prompt injection and invisible unicode in AI config files, but does **not** detect credential exfiltration commands (e.g., `curl $GITHUB_TOKEN`, `cat ~/.ssh/id_rsa`, `base64 <<< "$OPENAI_API_KEY" | curl -d @-`). The `context-injection-credential-exfil` payload passes tirith scan undetected.
+
+This is a real gap: a malicious CLAUDE.md could embed "debugging instructions" that exfiltrate secrets when the agent follows them. Mitigation options:
+1. **PreToolUse hook** — extend SSRF hook to also check for env var expansion in curl/wget commands
+2. **Custom tirith rule** — tirith supports custom YAML rules that could pattern-match data exfiltration commands
+3. **LLM Guard layer** — the guardrails-eval experiment's LLM Guard sentence-mode scanner may catch this at the prompt level
 
 ## Key Design Decisions
 
