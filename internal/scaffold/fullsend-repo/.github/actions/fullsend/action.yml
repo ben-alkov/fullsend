@@ -1,8 +1,8 @@
 name: Fullsend
 description: >-
-  Install fullsend-cli, create ${GITHUB_WORKSPACE}/output, invoke fullsend run with
-  --output-dir pointing at that directory, then upload it with actions/upload-artifact. Does not
-  read agent configuration from the repository; configure the job environment or CLI as needed.
+  Install fullsend-cli, run fullsend entrypoint (stdout must be the artifact directory path), then
+  upload that directory with actions/upload-artifact. Does not read agent configuration from the repository;
+  configure the job environment or CLI as needed.
 
 branding:
   icon: zap
@@ -10,7 +10,7 @@ branding:
 
 inputs:
   agent:
-    description: Agent name passed to fullsend run (e.g. triage, code, review).
+    description: Agent name passed to fullsend entrypoint (e.g. triage, code, review).
     required: true
   version:
     description: >-
@@ -18,10 +18,16 @@ inputs:
       names use the version without v (fullsend_0.0.1_linux_amd64.tar.gz).
     default: latest
 
+outputs:
+  artifact_dir:
+    description: Absolute path printed by fullsend entrypoint on stdout (same path uploaded as an artifact).
+    value: ${{ steps.run-fullsend.outputs.artifact_dir }}
+
 runs:
   using: composite
   steps:
-    - name: Install fullsend CLI
+    - id: install-fullsend
+      name: Install fullsend CLI
       shell: bash
       env:
         VERSION: ${{ inputs.version }}
@@ -29,18 +35,6 @@ runs:
         RUNNER_ARCH: ${{ runner.arch }}
       run: |
         set -euo pipefail
-
-        # Use vendored binary if present (placed by fullsend admin install --vendor-fullsend-binary).
-        # GitHub Contents API does not preserve the executable bit, so check -f not -x.
-        if [[ -f "${GITHUB_WORKSPACE}/bin/fullsend" ]]; then
-          echo "Using vendored fullsend binary from bin/fullsend"
-          mkdir -p "${RUNNER_TEMP}/fullsend"
-          cp "${GITHUB_WORKSPACE}/bin/fullsend" "${RUNNER_TEMP}/fullsend/fullsend"
-          chmod +x "${RUNNER_TEMP}/fullsend/fullsend"
-          echo "${RUNNER_TEMP}/fullsend" >> "${GITHUB_PATH}"
-          exit 0
-        fi
-
         VERSION="$(printf '%s' "${VERSION:-latest}" | tr -d '[:space:]')"
         VERSION="${VERSION:-latest}"
 
@@ -91,36 +85,34 @@ runs:
         tar -xzf "/tmp/${ASSET_NAME}" -C "${RUNNER_TEMP}/fullsend"
         echo "${RUNNER_TEMP}/fullsend" >> "${GITHUB_PATH}"
 
-    - name: Print fullsend version
-      shell: bash
-      run: fullsend --version
-
-    - name: Install OpenShell
-      shell: bash
-      run: |
-        curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/v0.0.30/install.sh | sh
-        openshell --version
-
-    - name: Install validation dependencies
-      shell: bash
-      run: pip install --quiet "jsonschema>=4.18.0"
-
-    - name: Run fullsend
-      if: inputs.agent != '__install_only__'
+    - id: run-fullsend
+      name: Run fullsend
       shell: bash
       env:
         AGENT: ${{ inputs.agent }}
       run: |
         set -euo pipefail
-        mkdir -p "${GITHUB_WORKSPACE}/output"
-        fullsend run "${AGENT}" \
-          --fullsend-dir "${GITHUB_WORKSPACE}" \
-          --output-dir "${GITHUB_WORKSPACE}/output" \
-          --target-repo "${GITHUB_WORKSPACE}/target-repo"
+        # fullsend must print the artifact directory path on stdout (last line wins if multiple lines).
+        ARTIFACT_DIR="$(fullsend entrypoint "${AGENT}" | tail -n1)"
+        ARTIFACT_DIR="$(printf '%s' "${ARTIFACT_DIR}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        if [[ -z "${ARTIFACT_DIR}" ]]; then
+          echo "::error::fullsend entrypoint did not print an artifact directory on stdout"
+          exit 1
+        fi
+        # Validate path is absolute and within expected boundaries.
+        if [[ "${ARTIFACT_DIR}" != /* ]]; then
+          echo "::error::fullsend entrypoint returned a non-absolute path: ${ARTIFACT_DIR}"
+          exit 1
+        fi
+        # Use heredoc delimiter to prevent GITHUB_OUTPUT injection via newlines.
+        {
+          echo "artifact_dir<<FULLSEND_EOF"
+          echo "${ARTIFACT_DIR}"
+          echo "FULLSEND_EOF"
+        } >> "${GITHUB_OUTPUT}"
 
     - name: Upload fullsend artifacts
-      if: always() && inputs.agent != '__install_only__'
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@v4
       with:
         name: fullsend-${{ inputs.agent }}
-        path: ${{ github.workspace }}/output
+        path: ${{ steps.run-fullsend.outputs.artifact_dir }}
