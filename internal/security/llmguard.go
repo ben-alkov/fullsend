@@ -1,0 +1,95 @@
+package security
+
+import (
+	"encoding/json"
+	"fmt"
+	"os/exec"
+	"strings"
+)
+
+// LLMGuardResult holds the output from the LLM Guard Python scanner.
+type LLMGuardResult struct {
+	IsInjection bool    `json:"is_injection"`
+	RiskScore   float64 `json:"risk_score"`
+	Detail      string  `json:"detail"`
+}
+
+// LLMGuardScanner wraps the Python llm-guard library for ML-based prompt
+// injection detection. Only used in Path A (GHA workflow pre-step) due to
+// Python/ONNX dependency size (~200MB).
+//
+// Fail-open: if Python or llm-guard is not installed, returns a clean result.
+type LLMGuardScanner struct {
+	Threshold float64
+	MatchType string // "sentence" or "full"
+}
+
+// NewLLMGuardScanner creates a scanner with the given threshold and match type.
+// Default threshold is 0.92, default match type is "sentence".
+func NewLLMGuardScanner(threshold float64, matchType string) *LLMGuardScanner {
+	if threshold == 0 {
+		threshold = 0.92
+	}
+	if matchType == "" {
+		matchType = "sentence"
+	}
+	return &LLMGuardScanner{
+		Threshold: threshold,
+		MatchType: matchType,
+	}
+}
+
+// Scan runs the LLM Guard prompt injection scanner on the given text.
+// Returns a ScanResult. Fails open if the Python subprocess fails.
+func (s *LLMGuardScanner) Scan(text string) ScanResult {
+	script := fmt.Sprintf(`
+import json, sys
+try:
+    from llm_guard.input_scanners import PromptInjection
+    from llm_guard.input_scanners.prompt_injection import MatchType
+    mt = MatchType.SENTENCE if %q == "sentence" else MatchType.FULL
+    scanner = PromptInjection(threshold=%f, match_type=mt, use_onnx=True)
+    sanitized, is_valid, risk_score = scanner.scan("", text=sys.stdin.read())
+    json.dump({"is_injection": not is_valid, "risk_score": risk_score, "detail": "LLM Guard ML scan"}, sys.stdout)
+except ImportError:
+    json.dump({"is_injection": False, "risk_score": 0, "detail": "llm-guard not installed"}, sys.stdout)
+except Exception as e:
+    json.dump({"is_injection": False, "risk_score": 0, "detail": str(e)}, sys.stdout)
+`, s.MatchType, s.Threshold)
+
+	cmd := exec.Command("python3", "-c", script)
+	cmd.Stdin = strings.NewReader(text)
+
+	output, err := cmd.Output()
+	if err != nil {
+		// Fail open — Python not available or script error.
+		return ScanResult{Safe: true}
+	}
+
+	var result LLMGuardResult
+	if err := json.Unmarshal(output, &result); err != nil {
+		return ScanResult{Safe: true}
+	}
+
+	if result.IsInjection {
+		return ScanResult{
+			Safe: false,
+			Findings: []Finding{
+				{
+					Scanner:  "llm_guard",
+					Name:     "prompt_injection_ml",
+					Severity: "critical",
+					Detail:   fmt.Sprintf("LLM Guard detected injection (risk_score=%.3f, threshold=%.3f)", result.RiskScore, s.Threshold),
+					Position: -1,
+				},
+			},
+		}
+	}
+
+	return ScanResult{Safe: true}
+}
+
+// Name returns the scanner identifier.
+func (s *LLMGuardScanner) Name() string {
+	return "llm_guard"
+}

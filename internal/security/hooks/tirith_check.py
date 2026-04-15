@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+"""Claude Code PreToolUse hook for Tirith terminal security scanning.
+
+Intercepts Bash tool calls and runs them through the Tirith CLI for
+command injection, unicode tricks, and exfiltration pattern detection.
+
+Requires: tirith binary in PATH (baked into sandbox container image).
+
+Protocol: reads JSON from stdin, writes JSON to stdout.
+Exit codes: 0 = allow, 1 = block (with reason on stdout).
+
+Fail-open: if tirith is not installed or fails, the tool call proceeds.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from datetime import UTC, datetime
+
+FINDINGS_PATH = "/tmp/workspace/.security/findings.jsonl"
+TIRITH_FAIL_ON = os.environ.get("TIRITH_FAIL_ON", "high")
+
+# Map tirith severity to numeric for comparison
+SEVERITY_LEVELS = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+
+
+def log_finding(name: str, severity: str, detail: str, action: str):
+    trace_id = os.environ.get("FULLSEND_TRACE_ID", "")
+    finding = {
+        "trace_id": trace_id,
+        "timestamp": datetime.now(UTC).isoformat(),
+        "phase": "hook_pretool",
+        "scanner": "tirith_check",
+        "name": name,
+        "severity": severity,
+        "detail": detail,
+        "action": action,
+    }
+    try:
+        with open(FINDINGS_PATH, "a") as f:
+            f.write(json.dumps(finding) + "\n")
+    except OSError:
+        pass
+
+
+def severity_meets_threshold(severity: str, threshold: str) -> bool:
+    sev_level = SEVERITY_LEVELS.get(severity.lower(), 0)
+    thresh_level = SEVERITY_LEVELS.get(threshold.lower(), 3)
+    return sev_level >= thresh_level
+
+
+def check_command(command: str) -> tuple[bool, str]:
+    """Run tirith check on a command. Returns (should_block, reason)."""
+    try:
+        result = subprocess.run(
+            ["tirith", "check", "--json", "--non-interactive", "--shell", "posix", "--", command],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except FileNotFoundError:
+        # Tirith not installed, fail open
+        return False, ""
+    except subprocess.TimeoutExpired:
+        return False, ""
+    except Exception:
+        return False, ""
+
+    if result.returncode == 0:
+        return False, ""
+
+    # Parse tirith JSON output
+    try:
+        findings = json.loads(result.stdout)
+    except (json.JSONDecodeError, Exception):
+        # Can't parse output, check exit code
+        if result.returncode == 1:
+            reason = f"Tirith blocked command (exit code 1): {result.stderr.strip()}"
+            log_finding("tirith_block", "high", reason, "block")
+            return True, reason
+        return False, ""
+
+    # Check findings against threshold
+    if isinstance(findings, list):
+        for finding in findings:
+            severity = finding.get("severity", "medium")
+            if severity_meets_threshold(severity, TIRITH_FAIL_ON):
+                rule = finding.get("rule", "unknown")
+                detail = finding.get("message", finding.get("detail", ""))
+                reason = f"Tirith [{severity}] {rule}: {detail}"
+                log_finding(rule, severity, reason, "block")
+                return True, reason
+            else:
+                rule = finding.get("rule", "unknown")
+                detail = finding.get("message", finding.get("detail", ""))
+                log_finding(rule, severity, f"Tirith [{severity}] {rule}: {detail}", "warn")
+
+    return False, ""
+
+
+def main():
+    try:
+        raw = sys.stdin.read()
+        if not raw.strip():
+            sys.exit(0)
+        tool_input = json.loads(raw)
+    except (json.JSONDecodeError, Exception):
+        sys.exit(0)
+
+    tool_name = tool_input.get("tool_name", "")
+    if tool_name != "Bash":
+        sys.exit(0)
+
+    command = tool_input.get("tool_input", {}).get("command", "")
+    if not command:
+        sys.exit(0)
+
+    should_block, reason = check_command(command)
+
+    if should_block:
+        json.dump({"decision": "block", "reason": reason}, sys.stdout)
+        sys.exit(1)
+
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()
