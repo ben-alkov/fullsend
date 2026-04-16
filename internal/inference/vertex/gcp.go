@@ -111,7 +111,7 @@ func (c *LiveGCPClient) GetServiceAccount(ctx context.Context, projectID, saName
 		return fmt.Errorf("service account %s not found in project %s", saName, projectID)
 	}
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		return fmt.Errorf("unexpected status %d checking service account: %s", resp.StatusCode, extractGCPErrorMessage(body))
 	}
 	return nil
@@ -128,7 +128,18 @@ func (c *LiveGCPClient) CreateServiceAccount(ctx context.Context, projectID, saN
 
 	reqURL := fmt.Sprintf("https://iam.googleapis.com/v1/projects/%s/serviceAccounts",
 		url.PathEscape(projectID))
-	payload := fmt.Sprintf(`{"accountId":%q,"serviceAccount":{"displayName":%q}}`, saName, displayName)
+	payloadObj := struct {
+		AccountID      string `json:"accountId"`
+		ServiceAccount struct {
+			DisplayName string `json:"displayName"`
+		} `json:"serviceAccount"`
+	}{AccountID: saName}
+	payloadObj.ServiceAccount.DisplayName = displayName
+	payloadBytes, err := json.Marshal(payloadObj)
+	if err != nil {
+		return fmt.Errorf("marshaling request: %w", err)
+	}
+	payload := string(payloadBytes)
 
 	resp, err := c.doRequest(ctx, http.MethodPost, reqURL, payload)
 	if err != nil {
@@ -141,7 +152,7 @@ func (c *LiveGCPClient) CreateServiceAccount(ctx context.Context, projectID, saN
 		return nil
 	}
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		return fmt.Errorf("unexpected status %d creating service account: %s", resp.StatusCode, extractGCPErrorMessage(body))
 	}
 	return nil
@@ -167,7 +178,7 @@ func (c *LiveGCPClient) CreateServiceAccountKey(ctx context.Context, projectID, 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		return nil, fmt.Errorf("unexpected status %d creating key: %s", resp.StatusCode, extractGCPErrorMessage(body))
 	}
 

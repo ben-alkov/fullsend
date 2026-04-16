@@ -18,6 +18,7 @@ type fakeGCPClient struct {
 	getErr          error
 	createErr       error
 	createKeyErr    error
+	alreadyExists   bool // simulate 409 Conflict (SA already exists → success)
 }
 
 func newFakeGCPClient() *fakeGCPClient {
@@ -41,6 +42,10 @@ func (f *fakeGCPClient) GetServiceAccount(_ context.Context, projectID, saName s
 func (f *fakeGCPClient) CreateServiceAccount(_ context.Context, projectID, saName, _ string) error {
 	if f.createErr != nil {
 		return f.createErr
+	}
+	// Simulate 409 Conflict → success (SA already exists, idempotent).
+	if f.alreadyExists {
+		return nil
 	}
 	f.createdSAs = append(f.createdSAs, projectID+"/"+saName)
 	f.existingSAs[projectID+"/"+saName] = true
@@ -107,7 +112,7 @@ func TestProvision_Mode2_SANotFound(t *testing.T) {
 
 func TestProvision_Mode3_PreMadeKey(t *testing.T) {
 	gcp := newFakeGCPClient()
-	credJSON := `{"type":"service_account","project_id":"my-project","private_key":"..."}`
+	credJSON := []byte(`{"type":"service_account","project_id":"my-project","private_key":"..."}`)
 	p := New(Config{ProjectID: "my-project", CredentialJSON: credJSON}, gcp)
 
 	secrets, err := p.Provision(context.Background())
@@ -117,8 +122,24 @@ func TestProvision_Mode3_PreMadeKey(t *testing.T) {
 	assert.Empty(t, gcp.createdSAs)
 	assert.Empty(t, gcp.createdKeys)
 
-	assert.Equal(t, credJSON, secrets[SecretCredentials])
+	assert.Equal(t, string(credJSON), secrets[SecretCredentials])
 	assert.Equal(t, "my-project", secrets[SecretProjectID])
+}
+
+func TestProvision_Mode1_SA409Conflict(t *testing.T) {
+	gcp := newFakeGCPClient()
+	// Simulate the SA already existing (409 Conflict → treated as success).
+	gcp.alreadyExists = true
+	p := New(Config{ProjectID: "my-project"}, gcp)
+
+	secrets, err := p.Provision(context.Background())
+	require.NoError(t, err)
+
+	// SA was not re-created (409 path), but key was still generated.
+	assert.Empty(t, gcp.createdSAs) // no new SA recorded
+	assert.NotEmpty(t, gcp.createdKeys)
+	assert.Equal(t, "my-project", secrets[SecretProjectID])
+	assert.Equal(t, string(gcp.keyData), secrets[SecretCredentials])
 }
 
 func TestProvision_MissingProjectID(t *testing.T) {
@@ -168,12 +189,23 @@ func TestProvision_NilGCPClient_Mode2(t *testing.T) {
 
 func TestProvision_NilGCPClient_Mode3_OK(t *testing.T) {
 	// Mode 3 should work fine without a GCP client.
-	credJSON := `{"type":"service_account"}`
+	credJSON := []byte(`{"type":"service_account"}`)
 	p := New(Config{ProjectID: "my-project", CredentialJSON: credJSON}, nil)
 
 	secrets, err := p.Provision(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, credJSON, secrets[SecretCredentials])
+	assert.Equal(t, string(credJSON), secrets[SecretCredentials])
+}
+
+func TestProvision_AnalyzeOnly(t *testing.T) {
+	p := NewAnalyzeOnly()
+
+	assert.Equal(t, "vertex", p.Name())
+	assert.Equal(t, []string{SecretCredentials, SecretProjectID}, p.SecretNames())
+
+	_, err := p.Provision(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "project ID is required")
 }
 
 func TestName(t *testing.T) {

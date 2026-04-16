@@ -37,10 +37,10 @@ func newInferenceLayer(t *testing.T, client *forge.FakeClient, provider inferenc
 func vertexProvider() *fakeProvider {
 	return &fakeProvider{
 		name:        "vertex",
-		secretNames: []string{"FULLSEND_GCP_SA_KEY_JSON", "GCP_PROJECT_ID"},
+		secretNames: []string{"FULLSEND_GCP_SA_KEY_JSON", "FULLSEND_GCP_PROJECT_ID"},
 		secrets: map[string]string{
-			"FULLSEND_GCP_SA_KEY_JSON": `{"type":"service_account"}`,
-			"GCP_PROJECT_ID":                 "my-project",
+			"FULLSEND_GCP_SA_KEY_JSON":  `{"type":"service_account"}`,
+			"FULLSEND_GCP_PROJECT_ID":   "my-project",
 		},
 	}
 }
@@ -68,7 +68,7 @@ func TestInferenceLayer_Install_StoresSecrets(t *testing.T) {
 	}
 
 	assert.Equal(t, `{"type":"service_account"}`, secretMap["FULLSEND_GCP_SA_KEY_JSON"])
-	assert.Equal(t, "my-project", secretMap["GCP_PROJECT_ID"])
+	assert.Equal(t, "my-project", secretMap["FULLSEND_GCP_PROJECT_ID"])
 }
 
 func TestInferenceLayer_Install_NilProvider(t *testing.T) {
@@ -107,7 +107,7 @@ func TestInferenceLayer_Install_SecretWriteError(t *testing.T) {
 func TestInferenceLayer_Install_SkipsWhenSecretsExist(t *testing.T) {
 	client := forge.NewFakeClient()
 	client.Secrets["test-org/.fullsend/FULLSEND_GCP_SA_KEY_JSON"] = true
-	client.Secrets["test-org/.fullsend/GCP_PROJECT_ID"] = true
+	client.Secrets["test-org/.fullsend/FULLSEND_GCP_PROJECT_ID"] = true
 	provider := vertexProvider()
 	layer, buf := newInferenceLayer(t, client, provider)
 
@@ -133,7 +133,7 @@ func TestInferenceLayer_Uninstall_Noop(t *testing.T) {
 func TestInferenceLayer_Analyze_AllPresent(t *testing.T) {
 	client := forge.NewFakeClient()
 	client.Secrets["test-org/.fullsend/FULLSEND_GCP_SA_KEY_JSON"] = true
-	client.Secrets["test-org/.fullsend/GCP_PROJECT_ID"] = true
+	client.Secrets["test-org/.fullsend/FULLSEND_GCP_PROJECT_ID"] = true
 	provider := vertexProvider()
 	layer, _ := newInferenceLayer(t, client, provider)
 
@@ -160,7 +160,7 @@ func TestInferenceLayer_Analyze_NonePresent(t *testing.T) {
 
 func TestInferenceLayer_Analyze_Partial(t *testing.T) {
 	client := forge.NewFakeClient()
-	client.Secrets["test-org/.fullsend/GCP_PROJECT_ID"] = true
+	client.Secrets["test-org/.fullsend/FULLSEND_GCP_PROJECT_ID"] = true
 	// FULLSEND_GCP_SA_KEY_JSON missing
 	provider := vertexProvider()
 	layer, _ := newInferenceLayer(t, client, provider)

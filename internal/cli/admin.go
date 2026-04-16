@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -127,11 +128,27 @@ func newInstallCmd() *cobra.Command {
 			if gcpProject != "" {
 				vcfg := vertex.Config{ProjectID: gcpProject, ServiceAccountName: gcpServiceAccount}
 				if gcpCredentialsFile != "" {
+					info, statErr := os.Lstat(gcpCredentialsFile)
+					if statErr != nil {
+						return fmt.Errorf("checking credentials file: %w", statErr)
+					}
+					if !info.Mode().IsRegular() {
+						return fmt.Errorf("credentials file %s must be a regular file", gcpCredentialsFile)
+					}
 					credData, readErr := os.ReadFile(gcpCredentialsFile)
 					if readErr != nil {
 						return fmt.Errorf("reading credentials file: %w", readErr)
 					}
-					vcfg.CredentialJSON = string(credData)
+					// Zero credential bytes when done to limit exposure in memory.
+					defer func() {
+						for i := range credData {
+							credData[i] = 0
+						}
+					}()
+					if err := validateCredentialJSON(credData); err != nil {
+						return err
+					}
+					vcfg.CredentialJSON = credData
 				}
 				inferenceProvider = vertex.New(vcfg, vertex.NewLiveGCPClient())
 				inferenceProviderName = "vertex"
@@ -564,13 +581,10 @@ func runAnalyze(ctx context.Context, client forge.Client, printer *ui.Printer, o
 		return fmt.Errorf("getting authenticated user: %w", err)
 	}
 
-	// Try to detect inference provider from existing config.
+	// Detect inference provider from existing config.
 	var inferenceProvider inference.Provider
-	if cfgData, cfgErr := client.GetFileContent(ctx, org, forge.ConfigRepoName, "config.yaml"); cfgErr == nil {
-		if existingCfg, parseErr := config.ParseOrgConfig(cfgData); parseErr == nil && existingCfg.Inference.Provider != "" {
-			// For analyze, we only need SecretNames() — no GCP client needed.
-			inferenceProvider = vertex.New(vertex.Config{ProjectID: "analyze"}, nil)
-		}
+	if providerName := loadExistingInferenceProvider(ctx, client, org); providerName != "" {
+		inferenceProvider = vertex.NewAnalyzeOnly()
 	}
 
 	stack := buildLayerStack(org, client, cfg, printer, user, hasPrivate, nil, defaultBranches, agentCreds, "", nil, inferenceProvider)
@@ -698,6 +712,21 @@ func loadExistingInferenceProvider(ctx context.Context, client forge.Client, org
 		return ""
 	}
 	return cfg.Inference.Provider
+}
+
+// validateCredentialJSON checks that raw bytes look like a GCP service account key.
+func validateCredentialJSON(data []byte) error {
+	var keyFile struct {
+		Type      string `json:"type"`
+		ProjectID string `json:"project_id"`
+	}
+	if err := json.Unmarshal(data, &keyFile); err != nil {
+		return fmt.Errorf("credentials file is not valid JSON: %w", err)
+	}
+	if keyFile.Type != "service_account" {
+		return fmt.Errorf("credentials file type is %q, expected \"service_account\"", keyFile.Type)
+	}
+	return nil
 }
 
 // loadKnownSlugs tries to read agent slugs from an existing config.

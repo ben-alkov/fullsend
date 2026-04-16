@@ -6,7 +6,7 @@ Agents running in GitHub Actions need credentials to call an inference API (curr
 
 1. Provision or accept GCP service account credentials
 2. Upload the credential JSON as `FULLSEND_GCP_SA_KEY_JSON` repo secret on `.fullsend` (NOT org-scoped)
-3. Upload the GCP project ID as `GCP_PROJECT_ID` repo secret on `.fullsend`
+3. Upload the GCP project ID as `FULLSEND_GCP_PROJECT_ID` repo secret on `.fullsend`
 4. Record the chosen inference provider in `config.yaml`
 
 This must be coded behind an abstract interface so we can support other inference providers (e.g., Bedrock, OpenAI) in the future.
@@ -104,7 +104,7 @@ type GCPClient interface {
 ```
 if cfg.CredentialJSON != "" {
     // Mode 3: key provided directly
-    return {"FULLSEND_GCP_SA_KEY_JSON": cfg.CredentialJSON, "GCP_PROJECT_ID": cfg.ProjectID}
+    return {"FULLSEND_GCP_SA_KEY_JSON": cfg.CredentialJSON, "FULLSEND_GCP_PROJECT_ID": cfg.ProjectID}
 }
 
 saName := cfg.ServiceAccountName
@@ -120,7 +120,7 @@ if saName == "" {
 // Create key for the SA (modes 1 and 2)
 saEmail := saName + "@" + cfg.ProjectID + ".iam.gserviceaccount.com"
 keyJSON := gcpAPI.CreateServiceAccountKey(ctx, cfg.ProjectID, saEmail)
-return {"FULLSEND_GCP_SA_KEY_JSON": keyJSON, "GCP_PROJECT_ID": cfg.ProjectID}
+return {"FULLSEND_GCP_SA_KEY_JSON": keyJSON, "FULLSEND_GCP_PROJECT_ID": cfg.ProjectID}
 ```
 
 ### Phase 2: Layer
@@ -140,7 +140,7 @@ type InferenceLayer struct {
 
 - **Install**: Calls `provider.Provision(ctx)` to get secrets, then stores each as a repo secret on `.fullsend` via `client.CreateRepoSecret()`.
 - **Uninstall**: No-op (secrets deleted with repo, same as SecretsLayer).
-- **Analyze**: Checks that expected secrets exist (`FULLSEND_GCP_SA_KEY_JSON`, `GCP_PROJECT_ID` for vertex).
+- **Analyze**: Checks that expected secrets exist (`FULLSEND_GCP_SA_KEY_JSON`, `FULLSEND_GCP_PROJECT_ID` for vertex).
 - **RequiredScopes**: `["repo"]` for install/analyze.
 
 **Layer ordering** (updated):
@@ -215,10 +215,10 @@ Add the InferenceLayer to the stack between SecretsLayer and DispatchTokenLayer.
 
 **E2E changes:**
 
-- `e2e/admin/testutil.go`: Add `E2E_HALFSEND_VERTEX_KEY` env var loading. Also add `E2E_GCP_PROJECT_ID` (or derive from the key JSON).
+- `e2e/admin/testutil.go`: Add `E2E_HALFSEND_VERTEX_KEY` env var loading. Also add `E2E_FULLSEND_GCP_PROJECT_ID` (or derive from the key JSON).
 - `e2e/admin/admin_test.go`:
   - In `runFullInstall()`: Create a vertex provider in mode 3 using the env var, add InferenceLayer to the test stack.
-  - In `verifyInstalled()`: Assert `FULLSEND_GCP_SA_KEY_JSON` and `GCP_PROJECT_ID` repo secrets exist.
+  - In `verifyInstalled()`: Assert `FULLSEND_GCP_SA_KEY_JSON` and `FULLSEND_GCP_PROJECT_ID` repo secrets exist.
   - In `verifyNotInstalled()`: Assert secrets are gone (deleted with repo).
   - In `buildTestLayerStack()`: Accept and include inference provider/layer.
 - The e2e test should `t.Skip` the inference portion if `E2E_HALFSEND_VERTEX_KEY` is not set (so existing CI doesn't break until the secret is wired into the workflow).
@@ -247,7 +247,7 @@ References the layer stack ordering inline. Update the installation model descri
 Currently documents only GitHub App secrets (`FULLSEND_<ROLE>_APP_PRIVATE_KEY`, `FULLSEND_<ROLE>_APP_ID`). Add a new section or extend the secrets table to cover inference provider secrets stored on `.fullsend`:
 
 - `FULLSEND_GCP_SA_KEY_JSON` — GCP service account key JSON (repo secret)
-- `GCP_PROJECT_ID` — GCP project identifier (repo secret)
+- `FULLSEND_GCP_PROJECT_ID` — GCP project identifier (repo secret)
 
 Note: these are repo-level secrets on `.fullsend`, not org-level, consistent with the existing credential isolation pattern.
 

@@ -18,7 +18,8 @@ const (
 	SecretCredentials = "FULLSEND_GCP_SA_KEY_JSON"
 
 	// SecretProjectID is the repo secret name for the GCP project ID.
-	SecretProjectID = "GCP_PROJECT_ID"
+	// Uses the FULLSEND_ prefix for consistency with other secrets.
+	SecretProjectID = "FULLSEND_GCP_PROJECT_ID"
 
 	// defaultSAName is the service account name created in mode 1.
 	defaultSAName = "fullsend-agent"
@@ -40,7 +41,7 @@ type GCPClient interface {
 type Config struct {
 	ProjectID          string // required
 	ServiceAccountName string // optional: existing SA name (mode 2)
-	CredentialJSON     string // optional: pre-made key JSON (mode 3)
+	CredentialJSON     []byte // optional: pre-made key JSON (mode 3)
 }
 
 // Provider implements inference.Provider for Vertex AI.
@@ -52,6 +53,12 @@ type Provider struct {
 // New creates a Vertex Provider with the given config and GCP client.
 func New(cfg Config, gcpAPI GCPClient) *Provider {
 	return &Provider{cfg: cfg, gcpAPI: gcpAPI}
+}
+
+// NewAnalyzeOnly creates a Provider that only supports SecretNames() and Name().
+// Calling Provision() on this provider returns an error.
+func NewAnalyzeOnly() *Provider {
+	return &Provider{}
 }
 
 // Name returns "vertex".
@@ -71,15 +78,15 @@ func (p *Provider) Provision(ctx context.Context) (map[string]string, error) {
 	}
 
 	// Mode 3: credential JSON provided directly.
-	if p.cfg.CredentialJSON != "" {
+	if len(p.cfg.CredentialJSON) > 0 {
 		return map[string]string{
-			SecretCredentials: p.cfg.CredentialJSON,
+			SecretCredentials: string(p.cfg.CredentialJSON),
 			SecretProjectID:   p.cfg.ProjectID,
 		}, nil
 	}
 
 	if p.gcpAPI == nil {
-		return nil, fmt.Errorf("GCP client is required for modes 1 and 2 (no credential JSON provided)")
+		return nil, fmt.Errorf("GCP client is required for provisioning")
 	}
 
 	saName := p.cfg.ServiceAccountName
