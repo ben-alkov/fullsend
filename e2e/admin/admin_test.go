@@ -227,7 +227,7 @@ func runFullInstall(t *testing.T, env *e2eEnv) ([]layers.AgentCredentials, *conf
 		}
 		inferenceProvider = vertex.New(vertex.Config{
 			ProjectID:      gcpProjectID,
-			CredentialJSON: vertexKey,
+			CredentialJSON: []byte(vertexKey),
 		}, nil)
 		inferenceProviderName = "vertex"
 		t.Logf("Inference provider: vertex (project: %s)", gcpProjectID)
