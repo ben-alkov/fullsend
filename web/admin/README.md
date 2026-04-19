@@ -29,19 +29,23 @@ Create a **GitHub App** used for **user** sign-in to the admin UI (not the same 
 
 ## Environment
 
-**`GITHUB_APP_CLIENT_ID`** and **`GITHUB_APP_CLIENT_SECRET`** must be in **`process.env`** when you run **`npm run dev`** (and in any shell where you run **`vite`** or **`wrangler dev`** alone). Root **`vite.config.ts`** and Wrangler (**`CLOUDFLARE_INCLUDE_PROCESS_ENV=true`**) read the environment only; they do not open env files themselves.
+**`GITHUB_APP_CLIENT_ID`**, **`GITHUB_APP_CLIENT_SECRET`**, **`TURNSTILE_SITE_KEY`**, and **`TURNSTILE_SECRET_KEY`** must be available to Wrangler when you run **`npm run dev`** (same shell / `.env.local` as **`GITHUB_APP_*`** if you use mise). The site Worker **refuses** admin `/api/*` traffic with **503** and JSON **`missing_turnstile_keys`** if either Turnstile value is missing or empty — there is no silent “Turnstile off” mode. Root **`vite.config.ts`** and Wrangler (**`CLOUDFLARE_INCLUDE_PROCESS_ENV=true`**) read the environment only; they do not open env files themselves. For Wrangler-only secrets in local dev, use **`cloudflare_site/.dev.vars`** (see [Wrangler secrets](https://developers.cloudflare.com/workers/configuration/secrets/)); keep it gitignored alongside **`.env.local`**.
 
 **mise users:** with repo-root **`.env.local`** present, mise injects those values into the shell (see **`mise.toml`**). **Everyone else:** use `export`, direnv, your editor, CI secrets, etc.
 
 The SPA **does not** embed the GitHub App OAuth **client id** at build time. Sign-in navigates to **`GET /api/oauth/authorize`** on the site Worker, which **redirects** to `https://github.com/login/oauth/authorize` with `client_id` from Worker configuration (local env / Wrangler deploy only).
 
-The committed **`sample.env.local`** at the repository root documents variable names and the GitHub App checklist; copy it to **`.env.local`** if you want a file-based workflow (and keep it gitignored).
+**Origin (not `Referer`):** the Worker uses the **`Origin` header only** when deciding CORS and when binding `POST /api/oauth/token` to the `redirect_uri` origin (same-origin `fetch` sends `Origin`). Full-page navigations to **`GET /api/oauth/authorize`** often omit `Origin`; in that case the Worker allows the request when `redirect_uri` is on the same public origin as the Worker, or when both the Worker URL and `redirect_uri` are **loopback HTTP** (typical Vite + Wrangler dev with different ports).
+
+**Turnstile (required):** the Worker always folds the site key into GitHub’s `state` at authorize time; the SPA decodes it after redirect and runs an invisible Turnstile challenge before **`POST /api/oauth/token`**. Do **not** put Turnstile keys in the Vite build (`define` / `VITE_*`).
+
+The committed **`sample.env.local`** at the repository root lists **official Cloudflare dummy Turnstile keys** for local dev plus the GitHub App checklist; copy it to **`.env.local`** (and align **`.dev.vars`** if you store the secret there only).
 
 ## Production and CI (Cloudflare Workers)
 
 **Build Site** runs **`npm run build`** with no GitHub App id in CI env (the static bundle stays id-agnostic).
 
-**Deploy Site** passes **`GITHUB_APP_CLIENT_ID`** and **`GITHUB_APP_CLIENT_SECRET`** to Wrangler via repository variable **`FULLSEND_GITHUB_APP_CLIENT_ID`** and secret **`FULLSEND_GITHUB_APP_CLIENT_SECRET`** (`workflow_run` uses the base repo; set both for previews and production).
+**Deploy Site** requires repository variable **`FULLSEND_TURNSTILE_SITE_KEY`** and secret **`FULLSEND_TURNSTILE_SECRET_KEY`** alongside the GitHub App variable/secret. Wrangler receives **`TURNSTILE_SITE_KEY`** as a var and **`TURNSTILE_SECRET_KEY`** via `wrangler-action`’s `secrets:` list; **missing values fail the deploy** (by design).
 
 On the GitHub App, add a **Callback URL** that matches your deployed admin entry, for example `https://<your-project>.<account>.workers.dev/admin/` (use the exact URL your users open; trailing slash must match what the SPA sends as `redirect_uri`).
 

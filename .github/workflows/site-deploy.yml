@@ -113,23 +113,25 @@ jobs:
         if: github.event.workflow_run.event == 'push'
         uses: cloudflare/wrangler-action@v3.14.1
         with:
-          wranglerVersion: "4.30.0"
+          wranglerVersion: "4.36.0"
           workingDirectory: cloudflare_site
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy --name="${{ vars.CLOUDFLARE_PROJECT_NAME }}"
-          vars: GITHUB_APP_CLIENT_ID
-          secrets: GITHUB_APP_CLIENT_SECRET
+          vars: GITHUB_APP_CLIENT_ID TURNSTILE_SITE_KEY
+          secrets: GITHUB_APP_CLIENT_SECRET TURNSTILE_SECRET_KEY
         env:
           GITHUB_APP_CLIENT_ID: ${{ vars.FULLSEND_GITHUB_APP_CLIENT_ID }}
           GITHUB_APP_CLIENT_SECRET: ${{ secrets.FULLSEND_GITHUB_APP_CLIENT_SECRET }}
+          TURNSTILE_SITE_KEY: ${{ vars.FULLSEND_TURNSTILE_SITE_KEY }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.FULLSEND_TURNSTILE_SECRET_KEY }}
 
       - name: Upload preview version (Workers + static assets)
         id: cf-preview
         if: github.event.workflow_run.event == 'pull_request'
         uses: cloudflare/wrangler-action@v3.14.1
         with:
-          wranglerVersion: "4.30.0"
+          wranglerVersion: "4.36.0"
           workingDirectory: cloudflare_site
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -137,11 +139,13 @@ jobs:
             versions upload
             --name="${{ vars.CLOUDFLARE_PROJECT_NAME }}"
             --preview-alias ${{ steps.preview-context.outputs.preview_alias }}
-          vars: GITHUB_APP_CLIENT_ID
-          secrets: GITHUB_APP_CLIENT_SECRET
+          vars: GITHUB_APP_CLIENT_ID TURNSTILE_SITE_KEY
+          secrets: GITHUB_APP_CLIENT_SECRET TURNSTILE_SECRET_KEY
         env:
           GITHUB_APP_CLIENT_ID: ${{ vars.FULLSEND_GITHUB_APP_CLIENT_ID }}
           GITHUB_APP_CLIENT_SECRET: ${{ secrets.FULLSEND_GITHUB_APP_CLIENT_SECRET }}
+          TURNSTILE_SITE_KEY: ${{ vars.FULLSEND_TURNSTILE_SITE_KEY }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.FULLSEND_TURNSTILE_SECRET_KEY }}
 
       - name: Resolve deployment URL
         id: meta

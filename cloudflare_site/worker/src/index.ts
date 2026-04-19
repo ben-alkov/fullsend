@@ -10,14 +10,28 @@ export interface Env {
   GITHUB_APP_CLIENT_SECRET: string;
   /** Set to `"1"` via `wrangler dev --var DEBUG_LOG:1` (see root `npm run dev:debug`). */
   DEBUG_LOG?: string;
+  /**
+   * Required for admin `/api/*` routes. Site key is folded into OAuth `state` at authorize —
+   * never baked into the SPA build. Missing or empty values fail with HTTP 503 and JSON
+   * `missing_turnstile_keys` (no silent disable).
+   */
+  TURNSTILE_SITE_KEY?: string;
+  TURNSTILE_SECRET_KEY?: string;
+  OAUTH_TOKEN_RATE_LIMITER: RateLimit;
+  GITHUB_USER_RATE_LIMITER: RateLimit;
 }
 
 const TOKEN_URL = "https://github.com/login/oauth/access_token";
 const GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
 const GITHUB_USER_URL = "https://api.github.com/user";
+const TURNSTILE_SITEVERIFY_URL =
+  "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
-const MAX_STATE_LEN = 512;
+/** Max length of the client-supplied OAuth `state` nonce (before Worker expansion). */
+const MAX_CLIENT_OAUTH_STATE_LEN = 128;
 const MAX_PKCE_CHALLENGE_LEN = 256;
+/** Max `state` sent to GitHub (expanded JSON + base64url including Turnstile site key). */
+const MAX_GITHUB_STATE_LEN = 4096;
 
 function isAdminApiPath(pathname: string): boolean {
   return (
@@ -73,24 +87,17 @@ function isAllowedOAuthRedirectUri(redirectUri: string): boolean {
   return u.protocol === "https:";
 }
 
+/**
+ * Browser tab origin from **`Origin` only** (no `Referer` fallback — it is not authentication).
+ */
 function getBrowserOrigin(request: Request): string | null {
   const originHeader = request.headers.get("Origin") ?? "";
-  if (originHeader) {
-    try {
-      return new URL(originHeader).origin;
-    } catch {
-      return null;
-    }
+  if (!originHeader) return null;
+  try {
+    return new URL(originHeader).origin;
+  } catch {
+    return null;
   }
-  const ref = request.headers.get("Referer") ?? "";
-  if (ref) {
-    try {
-      return new URL(ref).origin;
-    } catch {
-      return null;
-    }
-  }
-  return null;
 }
 
 function workerPublicOrigin(request: Request): string | null {
@@ -101,32 +108,72 @@ function workerPublicOrigin(request: Request): string | null {
   }
 }
 
-/**
- * CORS for `/api/*`: loopback (dev), or browser origin equals this Worker’s origin (deployed).
- */
-function effectiveCorsOrigin(request: Request): string | null {
-  const browser = getBrowserOrigin(request);
-  if (!browser) return null;
-  if (isLocalhostHttpOrigin(browser)) return browser;
-  const site = workerPublicOrigin(request);
-  if (site && browser === site) return browser;
-  return null;
+function redirectUriOrigin(redirectUri: string): string | null {
+  try {
+    return new URL(redirectUri).origin;
+  } catch {
+    return null;
+  }
 }
 
-/** OAuth token exchange: tab origin must match `redirect_uri` origin (binds `code` to the SPA). */
-function browserOriginMatchesRedirectUri(
+/**
+ * Full-page navigations to `GET /api/oauth/authorize` often omit `Origin`. Allow the hop when
+ * `redirect_uri` is same-origin as this Worker, or both are loopback HTTP (Vite port vs Wrangler).
+ */
+function authorizeNavigationWithoutOriginAllowed(
   request: Request,
   redirectUri: string,
 ): boolean {
-  let redirectOrigin: string;
-  try {
-    redirectOrigin = new URL(redirectUri).origin;
-  } catch {
-    return false;
+  const ro = redirectUriOrigin(redirectUri);
+  const site = workerPublicOrigin(request);
+  if (!ro || !site) return false;
+  if (ro === site) return true;
+  return isLocalhostHttpOrigin(ro) && isLocalhostHttpOrigin(site);
+}
+
+/**
+ * CORS for `/api/*`: loopback (dev), or browser origin equals this Worker’s origin (deployed).
+ * For `GET /api/oauth/authorize` without `Origin`, uses `redirect_uri` origin when navigation rule passes.
+ */
+function effectiveCorsOrigin(request: Request, url: URL): string | null {
+  const browser = getBrowserOrigin(request);
+  if (browser) {
+    if (isLocalhostHttpOrigin(browser)) return browser;
+    const site = workerPublicOrigin(request);
+    if (site && browser === site) return browser;
+    return null;
   }
+
+  if (
+    request.method === "GET" &&
+    url.pathname === "/api/oauth/authorize"
+  ) {
+    const redirect_uri = url.searchParams.get("redirect_uri")?.trim() ?? "";
+    if (!redirect_uri || !isAllowedOAuthRedirectUri(redirect_uri)) return null;
+    const ro = redirectUriOrigin(redirect_uri);
+    if (!ro) return null;
+    if (authorizeNavigationWithoutOriginAllowed(request, redirect_uri)) return ro;
+  }
+
+  return null;
+}
+
+/** Authorize: `Origin` when present, else navigation binding (see `authorizeNavigationWithoutOriginAllowed`). */
+function authorizeTabBindingOk(request: Request, redirectUri: string): boolean {
+  const browser = getBrowserOrigin(request);
+  if (browser) {
+    const ro = redirectUriOrigin(redirectUri);
+    return Boolean(ro && browser === ro);
+  }
+  return authorizeNavigationWithoutOriginAllowed(request, redirectUri);
+}
+
+/** Token exchange and API `fetch`: require `Origin` and match `redirect_uri` origin. */
+function fetchTabBindingOk(request: Request, redirectUri: string): boolean {
   const browser = getBrowserOrigin(request);
   if (!browser) return false;
-  return browser === redirectOrigin;
+  const ro = redirectUriOrigin(redirectUri);
+  return Boolean(ro && browser === ro);
 }
 
 function corsHeaders(allowOrigin: string): HeadersInit {
@@ -137,6 +184,88 @@ function corsHeaders(allowOrigin: string): HeadersInit {
       "Content-Type, Authorization, Accept, X-GitHub-Api-Version",
     "Access-Control-Max-Age": "86400",
   };
+}
+
+function hasNonEmptyTurnstileKeys(env: Env): boolean {
+  return (
+    (env.TURNSTILE_SITE_KEY ?? "").trim() !== "" &&
+    (env.TURNSTILE_SECRET_KEY ?? "").trim() !== ""
+  );
+}
+
+function missingTurnstileResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      error: "server_misconfigured",
+      detail: "missing_turnstile_keys",
+      message:
+        "TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY must both be set to non-empty values for admin API routes (Wrangler var + secret). See repo sample.env.local for official dummy keys in dev.",
+    }),
+    {
+      status: 503,
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store",
+      },
+    },
+  );
+}
+
+function isValidClientOAuthNonce(state: string): boolean {
+  if (state.length < 8 || state.length > MAX_CLIENT_OAUTH_STATE_LEN) return false;
+  return /^[A-Za-z0-9._-]+$/.test(state);
+}
+
+function utf8Bytes(s: string): Uint8Array {
+  return new TextEncoder().encode(s);
+}
+
+function base64UrlEncodeJson(obj: unknown): string {
+  const bytes = utf8Bytes(JSON.stringify(obj));
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!);
+  const b64 = btoa(bin);
+  return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function buildGithubState(env: Env, clientNonce: string): string | null {
+  const siteKey = (env.TURNSTILE_SITE_KEY ?? "").trim();
+  const payload = { v: 1 as const, n: clientNonce, k: siteKey };
+  const combined = base64UrlEncodeJson(payload);
+  if (combined.length > MAX_GITHUB_STATE_LEN) return null;
+  return combined;
+}
+
+function clientIp(request: Request): string {
+  return request.headers.get("CF-Connecting-IP") ?? "unknown";
+}
+
+async function consumeRateLimitOr429(
+  rl: RateLimit,
+  pathname: string,
+  request: Request,
+  cors: HeadersInit,
+): Promise<Response | null> {
+  const key = `${pathname}:${clientIp(request)}`;
+  const { success } = await rl.limit({ key });
+  if (success) return null;
+  return new Response(JSON.stringify({ error: "rate_limited" }), {
+    status: 429,
+    headers: { "content-type": "application/json", ...cors },
+  });
+}
+
+async function verifyTurnstile(env: Env, token: string): Promise<boolean> {
+  const secret = (env.TURNSTILE_SECRET_KEY ?? "").trim();
+  const body = new URLSearchParams({ secret, response: token });
+  const res = await fetch(TURNSTILE_SITEVERIFY_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
+  });
+  const json: unknown = await res.json().catch(() => ({}));
+  const rec = json as Record<string, unknown>;
+  return rec.success === true;
 }
 
 /**
@@ -172,7 +301,10 @@ async function handleOAuthAuthorize(
     );
   }
 
-  if (state.length > MAX_STATE_LEN || code_challenge.length > MAX_PKCE_CHALLENGE_LEN) {
+  if (
+    !isValidClientOAuthNonce(state) ||
+    code_challenge.length > MAX_PKCE_CHALLENGE_LEN
+  ) {
     return new Response(JSON.stringify({ error: "param_too_long" }), {
       status: 400,
       headers: { "content-type": "application/json", ...cors },
@@ -186,7 +318,7 @@ async function handleOAuthAuthorize(
     });
   }
 
-  if (!browserOriginMatchesRedirectUri(request, redirect_uri)) {
+  if (!authorizeTabBindingOk(request, redirect_uri)) {
     return new Response(JSON.stringify({ error: "forbidden_origin" }), {
       status: 403,
       headers: { "content-type": "application/json", ...cors },
@@ -201,10 +333,18 @@ async function handleOAuthAuthorize(
     });
   }
 
+  const githubState = buildGithubState(env, state);
+  if (githubState == null) {
+    return new Response(JSON.stringify({ error: "state_too_long" }), {
+      status: 500,
+      headers: { "content-type": "application/json", ...cors },
+    });
+  }
+
   const gh = new URL(GITHUB_AUTHORIZE_URL);
   gh.searchParams.set("client_id", clientId);
   gh.searchParams.set("redirect_uri", redirect_uri);
-  gh.searchParams.set("state", state);
+  gh.searchParams.set("state", githubState);
   gh.searchParams.set("code_challenge", code_challenge);
   gh.searchParams.set("code_challenge_method", "S256");
 
@@ -215,14 +355,24 @@ type ExchangeBody = {
   code?: string;
   redirect_uri?: string;
   code_verifier?: string;
+  turnstile_token?: string;
 };
 
 async function handleOAuthToken(
   request: Request,
   env: Env,
+  url: URL,
   corsOrigin: string,
 ): Promise<Response> {
   const cors = corsHeaders(corsOrigin);
+
+  const limited = await consumeRateLimitOr429(
+    env.OAUTH_TOKEN_RATE_LIMITER,
+    url.pathname,
+    request,
+    cors,
+  );
+  if (limited) return limited;
 
   if (request.method !== "POST") {
     return new Response(JSON.stringify({ error: "method_not_allowed" }), {
@@ -254,6 +404,8 @@ async function handleOAuthToken(
     typeof body.redirect_uri === "string" ? body.redirect_uri.trim() : "";
   const code_verifier =
     typeof body.code_verifier === "string" ? body.code_verifier.trim() : "";
+  const turnstile_token =
+    typeof body.turnstile_token === "string" ? body.turnstile_token.trim() : "";
 
   if (!code || !redirect_uri || !code_verifier) {
     return new Response(JSON.stringify({ error: "missing_fields" }), {
@@ -269,8 +421,22 @@ async function handleOAuthToken(
     });
   }
 
-  if (!browserOriginMatchesRedirectUri(request, redirect_uri)) {
+  if (!fetchTabBindingOk(request, redirect_uri)) {
     return new Response(JSON.stringify({ error: "forbidden_origin" }), {
+      status: 403,
+      headers: { "content-type": "application/json", ...cors },
+    });
+  }
+
+  if (!turnstile_token) {
+    return new Response(JSON.stringify({ error: "turnstile_required" }), {
+      status: 400,
+      headers: { "content-type": "application/json", ...cors },
+    });
+  }
+  const ok = await verifyTurnstile(env, turnstile_token);
+  if (!ok) {
+    return new Response(JSON.stringify({ error: "turnstile_failed" }), {
       status: 403,
       headers: { "content-type": "application/json", ...cors },
     });
@@ -346,9 +512,19 @@ async function handleOAuthToken(
 /** Server-side GitHub /user so the browser never hits api.github.com (no CORS). */
 async function handleGithubUser(
   request: Request,
+  env: Env,
+  url: URL,
   corsOrigin: string,
 ): Promise<Response> {
   const cors = corsHeaders(corsOrigin);
+
+  const limited = await consumeRateLimitOr429(
+    env.GITHUB_USER_RATE_LIMITER,
+    url.pathname,
+    request,
+    cors,
+  );
+  if (limited) return limited;
 
   if (request.method !== "GET") {
     return new Response(JSON.stringify({ error: "method_not_allowed" }), {
@@ -398,7 +574,16 @@ async function handleAdminApi(
     console.log("[worker]", request.method, url.pathname);
   }
 
-  const corsOrigin = effectiveCorsOrigin(request);
+  if (!hasNonEmptyTurnstileKeys(env)) {
+    if (env.DEBUG_LOG === "1") {
+      console.error(
+        "[worker] misconfigured: missing TURNSTILE_SITE_KEY and/or TURNSTILE_SECRET_KEY",
+      );
+    }
+    return missingTurnstileResponse();
+  }
+
+  const corsOrigin = effectiveCorsOrigin(request, url);
 
   if (request.method === "OPTIONS") {
     if (!corsOrigin) {
@@ -435,11 +620,11 @@ async function handleAdminApi(
   }
 
   if (url.pathname === "/api/oauth/token") {
-    return handleOAuthToken(request, env, corsOrigin);
+    return handleOAuthToken(request, env, url, corsOrigin);
   }
 
   if (url.pathname === "/api/github/user") {
-    return handleGithubUser(request, corsOrigin);
+    return handleGithubUser(request, env, url, corsOrigin);
   }
 
   return new Response(JSON.stringify({ error: "not_found" }), {

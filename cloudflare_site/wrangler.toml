@@ -15,3 +15,18 @@ preview_urls = true
 [assets]
 directory = "./public"
 not_found_handling = "single-page-application"
+
+# Native rate limits (Wrangler ≥ 4.36). namespace_id values are account-unique integers (see Cloudflare docs).
+[[ratelimits]]
+name = "OAUTH_TOKEN_RATE_LIMITER"
+namespace_id = "482401"
+  [ratelimits.simple]
+  limit = 5
+  period = 60
+
+[[ratelimits]]
+name = "GITHUB_USER_RATE_LIMITER"
+namespace_id = "482402"
+  [ratelimits.simple]
+  limit = 5
+  period = 60

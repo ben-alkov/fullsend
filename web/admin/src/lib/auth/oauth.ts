@@ -1,5 +1,6 @@
 import { challengeS256, randomVerifier } from "./pkce";
 import { refreshSession } from "./session";
+import { obtainTurnstileToken } from "./turnstile";
 import { saveToken } from "./tokenStore";
 
 const PKCE_VERIFIER_KEY = "fullsend_admin_pkce_verifier";
@@ -27,6 +28,42 @@ function adminAppBasePath(): string {
  */
 export function getOAuthRedirectUri(): string {
   return new URL(adminAppBasePath(), window.location.origin).href;
+}
+
+type WorkerExpandedOauthState = { v: 1; n: string; k: string };
+
+function base64UrlToUtf8(s: string): string {
+  const pad = s.length % 4 === 0 ? "" : "=".repeat(4 - (s.length % 4));
+  const b64 = s.replace(/-/g, "+").replace(/_/g, "/") + pad;
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+/**
+ * Parses Worker-built OAuth `state` (base64url JSON `{ v, n, k }`). Returns `null` for malformed
+ * values or payloads that are not Worker-expanded state.
+ */
+export function tryParseWorkerExpandedOauthState(
+  stateParam: string,
+): WorkerExpandedOauthState | null {
+  const t = stateParam.trim();
+  if (!t || t.length > 4096) return null;
+  if (!t.startsWith("eyJ")) return null;
+  try {
+    const json = base64UrlToUtf8(t);
+    const o = JSON.parse(json) as unknown;
+    if (!o || typeof o !== "object") return null;
+    const r = o as Record<string, unknown>;
+    if (r.v !== 1) return null;
+    const n = typeof r.n === "string" ? r.n : "";
+    const k = typeof r.k === "string" ? r.k : "";
+    if (!n || !k) return null;
+    return { v: 1, n, k };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -122,8 +159,16 @@ export async function completeGithubOAuthFromHandoff(): Promise<OAuthCompleteRes
 
   const { code, state } = handoff;
   const expected = peekOAuthState();
-
-  if (expected && state !== expected) {
+  const expanded = tryParseWorkerExpandedOauthState(state);
+  if (!expanded) {
+    clearOAuthState();
+    return {
+      ok: false,
+      error:
+        "OAuth callback state is not Worker-expanded (Turnstile). Ensure the site Worker has TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY set and sign in again.",
+    };
+  }
+  if (!expected || expanded.n !== expected) {
     clearOAuthState();
     return { ok: false, error: "OAuth state mismatch — try signing in again." };
   }
@@ -139,6 +184,21 @@ export async function completeGithubOAuthFromHandoff(): Promise<OAuthCompleteRes
   }
 
   const redirect_uri = getOAuthRedirectUri();
+
+  let turnstile_token: string;
+  try {
+    turnstile_token = await obtainTurnstileToken(expanded.k);
+  } catch (e) {
+    clearOAuthState();
+    return {
+      ok: false,
+      error:
+        e instanceof Error
+          ? e.message
+          : "Turnstile verification failed — try signing in again.",
+    };
+  }
+
   let res: Response;
   try {
     res = await fetch("/api/oauth/token", {
@@ -148,6 +208,7 @@ export async function completeGithubOAuthFromHandoff(): Promise<OAuthCompleteRes
         code,
         redirect_uri,
         code_verifier: verifier,
+        turnstile_token,
       }),
     });
   } catch (e) {
