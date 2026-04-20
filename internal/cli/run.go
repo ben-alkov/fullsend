@@ -74,6 +74,9 @@ func runAgent(agentName, fullsendDir, outputBase, targetRepo string, printer *ui
 		printer.StepFail("Environment validation failed")
 		return fmt.Errorf("validating env: %w", err)
 	}
+	// Expose the fullsend directory so runner_env values can reference it
+	// (e.g., ${FULLSEND_DIR}/schemas/triage-result.schema.json).
+	os.Setenv("FULLSEND_DIR", absFullsendDir)
 	for k, v := range h.RunnerEnv {
 		h.RunnerEnv[k] = os.ExpandEnv(v)
 	}

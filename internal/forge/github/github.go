@@ -916,6 +916,35 @@ func (c *LiveClient) CloseIssue(ctx context.Context, owner, repo string, number 
 	return nil
 }
 
+// ListIssueComments returns all comments on an issue.
+func (c *LiveClient) ListIssueComments(ctx context.Context, owner, repo string, number int) ([]forge.IssueComment, error) {
+	resp, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/issues/%d/comments?per_page=100", owner, repo, number))
+	if err != nil {
+		return nil, fmt.Errorf("list issue comments: %w", err)
+	}
+	var raw []struct {
+		ID   int    `json:"id"`
+		Body string `json:"body"`
+		User struct {
+			Login string `json:"login"`
+		} `json:"user"`
+		CreatedAt string `json:"created_at"`
+	}
+	if err := decodeJSON(resp, &raw); err != nil {
+		return nil, fmt.Errorf("decoding issue comments: %w", err)
+	}
+	comments := make([]forge.IssueComment, len(raw))
+	for i, r := range raw {
+		comments[i] = forge.IssueComment{
+			ID:        r.ID,
+			Body:      r.Body,
+			Author:    r.User.Login,
+			CreatedAt: r.CreatedAt,
+		}
+	}
+	return comments, nil
+}
+
 // MergeChangeProposal squash-merges a pull request by number.
 func (c *LiveClient) MergeChangeProposal(ctx context.Context, owner, repo string, number int) error {
 	resp, err := c.put(ctx, fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", owner, repo, number), map[string]string{"merge_method": "squash"})

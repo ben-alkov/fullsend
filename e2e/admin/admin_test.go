@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -377,10 +378,10 @@ func verifyInstalled(t *testing.T, env *e2eEnv, orgCfg *config.OrgConfig, enable
 		"env/triage.env",
 		"env/code-agent.env",
 		"env/gcp-vertex.env",
-		"scripts/validate-triage.sh",
 		"scripts/scan-secrets",
 		"scripts/pre-code.sh",
 		"scripts/post-code.sh",
+		"scripts/post-triage.sh",
 		"scripts/reconcile-repos.sh",
 		"skills/code-implementation/SKILL.md",
 		"templates/shim-workflow.yaml",
@@ -520,7 +521,35 @@ func runTriageDispatchSmokeTest(t *testing.T, env *e2eEnv) {
 
 	// File a test issue to trigger the shim workflow.
 	issueTitle := fmt.Sprintf("e2e-triage-test-%s", env.runID)
-	issueBody := "Automated e2e test issue to verify the triage dispatch pipeline."
+	issueBody := `## Bug Report
+
+**What happened:**
+The application crashes with a segmentation fault when saving a file larger than 64KB
+that contains UTF-8 multibyte characters (e.g., emoji or CJK characters).
+
+**Expected behavior:**
+The file should save successfully regardless of size or character encoding.
+
+**Steps to reproduce:**
+1. Open the application (v2.3.1)
+2. Create a new document
+3. Paste approximately 70KB of text containing emoji characters
+4. Click File > Save
+5. Application crashes immediately
+
+**Environment:**
+- OS: Ubuntu 22.04 LTS
+- Application version: 2.3.1 (installed via apt)
+- RAM: 16GB
+
+**Error output:**
+` + "```" + `
+Segmentation fault (core dumped)
+` + "```" + `
+
+**Additional context:**
+This started happening after the v2.3.0 -> v2.3.1 upgrade. Files under 64KB save fine.
+Files over 64KB save fine if they contain only ASCII characters.`
 	issue, err := env.client.CreateIssue(ctx, testOrg, testRepo, issueTitle, issueBody)
 	require.NoError(t, err, "creating test issue")
 	t.Logf("Created test issue #%d: %s", issue.Number, issue.URL)
@@ -538,7 +567,7 @@ func runTriageDispatchSmokeTest(t *testing.T, env *e2eEnv) {
 	// Filter by CreatedAt to avoid false positives from previous runs.
 	issueCreatedAt := time.Now()
 	t.Log("Waiting for triage workflow to be dispatched...")
-	var triageRunFound bool
+	var triageRun *forge.WorkflowRun
 	for attempt := 0; attempt < 12; attempt++ {
 		time.Sleep(5 * time.Second)
 		runs, listErr := env.client.ListWorkflowRuns(ctx, testOrg, forge.ConfigRepoName, "triage.yml")
@@ -557,15 +586,91 @@ func runTriageDispatchSmokeTest(t *testing.T, env *e2eEnv) {
 				continue
 			}
 			t.Logf("Attempt %d: found run %d (status: %s, conclusion: %s, created: %s)", attempt+1, run.ID, run.Status, run.Conclusion, run.CreatedAt)
-			triageRunFound = true
+			r := run // avoid loop variable capture
+			triageRun = &r
 			break
 		}
-		if triageRunFound {
+		if triageRun != nil {
 			break
 		}
 		t.Logf("Attempt %d: no triage workflow runs found yet", attempt+1)
 	}
-	assert.True(t, triageRunFound, "triage workflow should have been dispatched in .fullsend repo")
+	require.NotNil(t, triageRun, "triage workflow should have been dispatched in .fullsend repo")
+
+	// Wait for the workflow run to complete (up to 12 minutes: 10-minute agent
+	// timeout + sandbox setup overhead).
+	t.Logf("Waiting for triage workflow run %d to complete...", triageRun.ID)
+	var finalRun *forge.WorkflowRun
+	deadline := time.Now().Add(12 * time.Minute)
+	for time.Now().Before(deadline) {
+		time.Sleep(15 * time.Second)
+		run, getErr := env.client.GetWorkflowRun(ctx, testOrg, forge.ConfigRepoName, triageRun.ID)
+		if getErr != nil {
+			t.Logf("Error polling workflow run: %v", getErr)
+			continue
+		}
+		t.Logf("Run %d: status=%s conclusion=%s", run.ID, run.Status, run.Conclusion)
+		if run.Status == "completed" {
+			finalRun = run
+			break
+		}
+	}
+	require.NotNil(t, finalRun, "triage workflow run should have completed within deadline")
+
+	// If the run failed, fetch logs for debugging.
+	if finalRun.Conclusion != "success" {
+		logs, logErr := env.client.GetWorkflowRunLogs(ctx, testOrg, forge.ConfigRepoName, finalRun.ID)
+		if logErr != nil {
+			t.Logf("Could not fetch run logs: %v", logErr)
+		} else {
+			t.Logf("Workflow run logs (last 2000 chars):\n%s", truncateEnd(logs, 2000))
+		}
+		t.Fatalf("Triage workflow run %d concluded with %q, expected success", finalRun.ID, finalRun.Conclusion)
+	}
+
+	// Verify the triage agent posted a comment on the issue.
+	t.Log("Verifying triage agent posted a comment...")
+	comments, err := env.client.ListIssueComments(ctx, testOrg, testRepo, issue.Number)
+	require.NoError(t, err, "listing issue comments")
+	assert.NotEmpty(t, comments, "triage agent should have posted at least one comment on the issue")
+
+	if len(comments) > 0 {
+		lastComment := comments[len(comments)-1]
+		t.Logf("Triage comment by %s (first 200 chars): %.200s", lastComment.Author, lastComment.Body)
+	}
+
+	// Verify labels: either needs-info (insufficient) or ready-to-code (sufficient).
+	t.Log("Verifying triage labels...")
+	labelURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues/%d/labels", testOrg, testRepo, issue.Number)
+	labelReq, err := http.NewRequestWithContext(ctx, http.MethodGet, labelURL, nil)
+	require.NoError(t, err)
+	labelReq.Header.Set("Authorization", "Bearer "+env.token)
+	labelReq.Header.Set("Accept", "application/vnd.github+json")
+	labelResp, err := http.DefaultClient.Do(labelReq)
+	require.NoError(t, err)
+	defer labelResp.Body.Close()
+
+	var labels []struct {
+		Name string `json:"name"`
+	}
+	err = json.NewDecoder(labelResp.Body).Decode(&labels)
+	require.NoError(t, err, "decoding labels response")
+
+	labelNames := make([]string, len(labels))
+	for i, l := range labels {
+		labelNames[i] = l.Name
+	}
+	t.Logf("Issue labels after triage: %v", labelNames)
+
+	hasTriageLabel := false
+	for _, name := range labelNames {
+		if name == "needs-info" || name == "ready-to-code" || name == "duplicate" {
+			hasTriageLabel = true
+			break
+		}
+	}
+	assert.True(t, hasTriageLabel,
+		"issue should have a triage label (needs-info, ready-to-code, or duplicate), got: %v", labelNames)
 }
 
 // runUnenrollmentTest disables test-repo in config.yaml, runs install to
@@ -670,6 +775,14 @@ func hasPrivateRepos(repos []forge.Repository) bool {
 		}
 	}
 	return false
+}
+
+// truncateEnd returns the last n characters of s, or all of s if shorter.
+func truncateEnd(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return "...\n" + s[len(s)-n:]
 }
 
 // extractProjectID attempts to extract project_id from a GCP service account

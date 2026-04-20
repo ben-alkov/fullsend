@@ -25,11 +25,14 @@ func TestFullsendRepoFilesExist(t *testing.T) {
 		"harness/code.yaml",
 		"policies/triage.yaml",
 		"policies/code.yaml",
-		"scripts/validate-triage.sh",
+		"schemas/triage-result.schema.json",
+		"scripts/post-triage.sh",
+		"scripts/pre-triage.sh",
 		"scripts/scan-secrets",
 		"scripts/pre-code.sh",
 		"scripts/post-code.sh",
 		"scripts/reconcile-repos.sh",
+		"scripts/validate-output-schema.sh",
 		"skills/code-implementation/SKILL.md",
 		"templates/shim-workflow.yaml",
 	}
@@ -57,7 +60,7 @@ func TestWalkFullsendRepo(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	assert.True(t, len(paths) >= 22, "expected at least 22 files, got %d", len(paths))
+	assert.True(t, len(paths) >= 27, "expected at least 27 files, got %d", len(paths))
 }
 
 func TestTriageWorkflowContent(t *testing.T) {
@@ -137,4 +140,28 @@ func TestSetupAgentEnvContent(t *testing.T) {
 	s := string(content)
 	assert.Contains(t, s, "AGENT_PREFIX")
 	assert.Contains(t, s, "GITHUB_ENV")
+}
+
+func TestTriageAgentPromptContent(t *testing.T) {
+	content, err := FullsendRepoFile("agents/triage.md")
+	require.NoError(t, err)
+	s := string(content)
+	assert.Contains(t, s, "triage-result.json")
+	assert.Contains(t, s, "clarity_scores")
+	assert.Contains(t, s, "Anti-premature-resolution")
+}
+
+func TestTriageSchemaContent(t *testing.T) {
+	content, err := FullsendRepoFile("schemas/triage-result.schema.json")
+	require.NoError(t, err)
+	s := string(content)
+	assert.Contains(t, s, "$schema")
+	assert.Contains(t, s, "insufficient")
+	assert.Contains(t, s, "duplicate")
+	assert.Contains(t, s, "sufficient")
+}
+
+func TestValidateTriageDeleted(t *testing.T) {
+	_, err := FullsendRepoFile("scripts/validate-triage.sh")
+	assert.Error(t, err, "validate-triage.sh should have been deleted")
 }
