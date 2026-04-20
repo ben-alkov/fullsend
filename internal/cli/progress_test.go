@@ -169,11 +169,11 @@ func TestProgressParser(t *testing.T) {
 	}
 }
 
-func TestProgressParserStreamEvents(t *testing.T) {
+func TestProgressParserIgnoresStreamEvents(t *testing.T) {
 	lines := []string{
 		`{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"tool_use","name":"Edit"}}}`,
 		`{"type":"stream_event","event":{"type":"content_block_stop"}}`,
-		`{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"tool_use","name":"Bash"}}}`,
+		`{"type":"assistant","content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/src/main.go"}}]}`,
 	}
 
 	input := strings.NewReader(strings.Join(lines, "\n"))
@@ -185,8 +185,8 @@ func TestProgressParserStreamEvents(t *testing.T) {
 		t.Fatalf("progressParser returned error: %v", err)
 	}
 
-	if metrics.ToolCalls.Load() != 2 {
-		t.Errorf("expected 2 tool calls from stream events, got %d", metrics.ToolCalls.Load())
+	if metrics.ToolCalls.Load() != 1 {
+		t.Errorf("expected 1 tool call (stream_event ignored), got %d", metrics.ToolCalls.Load())
 	}
 }
 
@@ -213,8 +213,8 @@ func TestProgressParserMalformedJSON(t *testing.T) {
 
 func TestProgressParserUnknownToolAllowlisted(t *testing.T) {
 	lines := []string{
-		`{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"tool_use","name":"EvilTool"}}}`,
-		`{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"tool_use","name":"Read"}}}`,
+		`{"type":"assistant","content":[{"type":"tool_use","name":"EvilTool","input":{"secret":"should-not-appear"}}]}`,
+		`{"type":"assistant","content":[{"type":"tool_use","name":"Read","input":{"file_path":"/src/main.go"}}]}`,
 	}
 
 	input := strings.NewReader(strings.Join(lines, "\n"))
@@ -367,7 +367,6 @@ func TestSanitizeOutput(t *testing.T) {
 func TestHeartbeatConcurrency(t *testing.T) {
 	var buf bytes.Buffer
 	printer := ui.New(&buf)
-	start := time.Now()
 	done := make(chan struct{})
 
 	// Use a short-interval heartbeat to force actual concurrent writes.
@@ -395,8 +394,6 @@ func TestHeartbeatConcurrency(t *testing.T) {
 
 	wg.Wait()
 	close(done)
-
-	_ = start // suppress unused warning
 
 	output := buf.String()
 	if !strings.Contains(output, "main goroutine") {

@@ -22,16 +22,7 @@ const (
 
 // streamEvent represents a single NDJSON event from Claude Code's stream-json output.
 type streamEvent struct {
-	Type  string `json:"type"`
-	Event *struct {
-		Type         string       `json:"type"`
-		ContentBlock contentBlock `json:"content_block"`
-	} `json:"event,omitempty"`
-}
-
-type contentBlock struct {
 	Type string `json:"type"`
-	Name string `json:"name"`
 }
 
 // assistantMessage contains tool_use blocks from complete assistant messages.
@@ -85,19 +76,8 @@ func progressParser(r io.Reader, printer *ui.Printer, start time.Time, metrics *
 			continue
 		}
 
-		switch {
-		case evt.Type == "assistant":
+		if evt.Type == "assistant" {
 			parseAssistantToolUse(line, printer, start, metrics, isCI)
-
-		case evt.Type == "stream_event" && evt.Event != nil:
-			if evt.Event.Type == "content_block_start" && evt.Event.ContentBlock.Type == "tool_use" {
-				toolName := evt.Event.ContentBlock.Name
-				if !allowedTools[toolName] {
-					toolName = "tool"
-				}
-				count := metrics.ToolCalls.Add(1)
-				emitToolProgress(printer, toolName, "", start, count, isCI)
-			}
 		}
 	}
 

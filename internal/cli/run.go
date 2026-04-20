@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -559,7 +560,9 @@ func runAgentWithProgress(sshConfigPath, sandboxName, claudeCmd string, timeout 
 	defer cancel()
 
 	if parseErr := progressParser(stdout, printer, start, metrics); parseErr != nil {
-		fmt.Fprintf(os.Stderr, "  progress parser: %v\n", parseErr)
+		fmt.Fprintf(os.Stderr, "  progress parser: %v\n", sanitizeOutput(parseErr.Error()))
+		cancel()
+		io.Copy(io.Discard, stdout)
 	}
 
 	waitErr := cmd.Wait()
