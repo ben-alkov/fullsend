@@ -7,10 +7,13 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/fullsend-ai/fullsend/internal/ui"
 )
+
+const maxPatternDisplay = 50
 
 // streamEvent represents a single NDJSON event from Claude Code's stream-json output.
 type streamEvent struct {
@@ -26,12 +29,6 @@ type contentBlock struct {
 	Name string `json:"name"`
 }
 
-// toolResult is emitted when a tool completes.
-type toolResult struct {
-	Type      string `json:"type"`
-	ToolUseID string `json:"tool_use_id"`
-}
-
 // assistantMessage contains tool_use blocks from complete assistant messages.
 type assistantMessage struct {
 	Type    string          `json:"type"`
@@ -44,9 +41,22 @@ type contentItem struct {
 	Input json.RawMessage `json:"input"`
 }
 
+// allowedTools is the set of tool names we display in progress output.
+// Unknown tools emit no context to prevent information disclosure from
+// untrusted sandbox output.
+var allowedTools = map[string]bool{
+	"Bash":  true,
+	"Read":  true,
+	"Write": true,
+	"Edit":  true,
+	"Grep":  true,
+	"Glob":  true,
+	"Agent": true,
+}
+
 // RunMetrics collects execution statistics from stream parsing.
 type RunMetrics struct {
-	ToolCalls int `json:"tool_calls"`
+	ToolCalls atomic.Int32
 }
 
 // progressParser reads NDJSON from Claude Code's stream-json output and emits
@@ -77,10 +87,17 @@ func progressParser(r io.Reader, printer *ui.Printer, start time.Time, metrics *
 		case evt.Type == "stream_event" && evt.Event != nil:
 			if evt.Event.Type == "content_block_start" && evt.Event.ContentBlock.Type == "tool_use" {
 				toolName := evt.Event.ContentBlock.Name
-				metrics.ToolCalls++
-				emitToolProgress(printer, toolName, "", start, metrics.ToolCalls, isCI)
+				if !allowedTools[toolName] {
+					toolName = "tool"
+				}
+				count := metrics.ToolCalls.Add(1)
+				emitToolProgress(printer, toolName, "", start, count, isCI)
 			}
 		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "  progress parser: %v\n", err)
 	}
 }
 
@@ -99,9 +116,13 @@ func parseAssistantToolUse(line []byte, printer *ui.Printer, start time.Time, me
 		if item.Type != "tool_use" {
 			continue
 		}
-		metrics.ToolCalls++
-		context := extractSafeContext(item.Name, item.Input)
-		emitToolProgress(printer, item.Name, context, start, metrics.ToolCalls, isCI)
+		toolName := item.Name
+		if !allowedTools[toolName] {
+			toolName = "tool"
+		}
+		count := metrics.ToolCalls.Add(1)
+		ctx := extractSafeContext(item.Name, item.Input)
+		emitToolProgress(printer, toolName, ctx, start, count, isCI)
 	}
 }
 
@@ -139,7 +160,7 @@ func extractSafeContext(toolName string, input json.RawMessage) string {
 		}
 		return path
 
-	case "Grep":
+	case "Grep", "Glob":
 		raw, ok := fields["pattern"]
 		if !ok {
 			return ""
@@ -148,16 +169,8 @@ func extractSafeContext(toolName string, input json.RawMessage) string {
 		if err := json.Unmarshal(raw, &pattern); err != nil {
 			return ""
 		}
-		return pattern
-
-	case "Glob":
-		raw, ok := fields["pattern"]
-		if !ok {
-			return ""
-		}
-		var pattern string
-		if err := json.Unmarshal(raw, &pattern); err != nil {
-			return ""
+		if len(pattern) > maxPatternDisplay {
+			return pattern[:maxPatternDisplay] + "…"
 		}
 		return pattern
 	}
@@ -165,21 +178,31 @@ func extractSafeContext(toolName string, input json.RawMessage) string {
 	return ""
 }
 
-// extractBinaryName returns only the first token of a shell command.
+// extractBinaryName returns only the binary name from a shell command,
+// skipping leading KEY=VALUE environment variable assignments.
 func extractBinaryName(cmd string) string {
 	cmd = strings.TrimSpace(cmd)
 	if cmd == "" {
 		return ""
 	}
-	firstWord := strings.Fields(cmd)[0]
-	// Strip path prefix if present (e.g. /usr/bin/make → make).
-	if idx := strings.LastIndex(firstWord, "/"); idx >= 0 {
-		firstWord = firstWord[idx+1:]
+	fields := strings.Fields(cmd)
+	if len(fields) == 0 {
+		return ""
 	}
-	return firstWord
+	// Skip leading KEY=VALUE env var assignments.
+	for _, f := range fields {
+		if !strings.Contains(f, "=") {
+			// Strip path prefix (e.g. /usr/bin/make → make).
+			if idx := strings.LastIndex(f, "/"); idx >= 0 {
+				f = f[idx+1:]
+			}
+			return f
+		}
+	}
+	return ""
 }
 
-func emitToolProgress(printer *ui.Printer, toolName, context string, start time.Time, toolCount int, isCI bool) {
+func emitToolProgress(printer *ui.Printer, toolName, context string, start time.Time, toolCount int32, isCI bool) {
 	elapsed := time.Since(start).Truncate(time.Second)
 
 	var msg string
@@ -190,7 +213,16 @@ func emitToolProgress(printer *ui.Printer, toolName, context string, start time.
 	}
 
 	if isCI {
-		fmt.Fprintf(os.Stderr, "::notice::%s\n", msg)
+		fmt.Fprintf(os.Stderr, "::notice::%s\n", sanitizeGHA(msg))
 	}
 	printer.Heartbeat(msg)
+}
+
+// sanitizeGHA strips characters that could inject GitHub Actions workflow
+// commands from untrusted sandbox output.
+func sanitizeGHA(s string) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "::", ": :")
+	return s
 }

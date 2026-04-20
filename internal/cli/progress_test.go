@@ -22,6 +22,13 @@ func TestExtractBinaryName(t *testing.T) {
 		{"", ""},
 		{"gh pr create --title 'x'", "gh"},
 		{"curl -H 'Authorization: Bearer SECRET' https://api.example.com", "curl"},
+		// KEY=VALUE env var prefixes are skipped.
+		{"SECRET=val make test", "make"},
+		{"FOO=bar BAZ=qux /usr/bin/go test", "go"},
+		// All tokens are KEY=VALUE — return empty.
+		{"FOO=bar BAZ=qux", ""},
+		// Whitespace-only input.
+		{"   \t  ", ""},
 	}
 	for _, tt := range tests {
 		got := extractBinaryName(tt.cmd)
@@ -51,6 +58,12 @@ func TestExtractSafeContext(t *testing.T) {
 			want:     "curl",
 		},
 		{
+			name:     "bash with env var prefix",
+			toolName: "Bash",
+			input:    map[string]interface{}{"command": "API_KEY=secret123 curl https://api.example.com"},
+			want:     "curl",
+		},
+		{
 			name:     "read file",
 			toolName: "Read",
 			input:    map[string]interface{}{"file_path": "/src/main.go"},
@@ -69,7 +82,19 @@ func TestExtractSafeContext(t *testing.T) {
 			want:     "func main",
 		},
 		{
-			name:     "unknown tool",
+			name:     "grep long pattern truncated",
+			toolName: "Grep",
+			input:    map[string]interface{}{"pattern": "this is a very long pattern that exceeds the fifty character display limit for safety"},
+			want:     "this is a very long pattern that exceeds the fifty…",
+		},
+		{
+			name:     "glob pattern",
+			toolName: "Glob",
+			input:    map[string]interface{}{"pattern": "**/*.go"},
+			want:     "**/*.go",
+		},
+		{
+			name:     "unknown tool returns empty",
 			toolName: "Agent",
 			input:    map[string]interface{}{"prompt": "do something"},
 			want:     "",
@@ -93,7 +118,6 @@ func TestExtractSafeContext(t *testing.T) {
 }
 
 func TestProgressParser(t *testing.T) {
-	// Build NDJSON with assistant-type tool_use messages.
 	lines := []string{
 		`{"type":"assistant","content":[{"type":"tool_use","name":"Read","input":{"file_path":"/src/main.go"}}]}`,
 		`{"type":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"make test"}}]}`,
@@ -109,8 +133,8 @@ func TestProgressParser(t *testing.T) {
 
 	progressParser(input, printer, start, metrics)
 
-	if metrics.ToolCalls != 2 {
-		t.Errorf("expected 2 tool calls, got %d", metrics.ToolCalls)
+	if metrics.ToolCalls.Load() != 2 {
+		t.Errorf("expected 2 tool calls, got %d", metrics.ToolCalls.Load())
 	}
 
 	output := buf.String()
@@ -136,7 +160,105 @@ func TestProgressParserStreamEvents(t *testing.T) {
 
 	progressParser(input, printer, time.Now(), metrics)
 
-	if metrics.ToolCalls != 2 {
-		t.Errorf("expected 2 tool calls from stream events, got %d", metrics.ToolCalls)
+	if metrics.ToolCalls.Load() != 2 {
+		t.Errorf("expected 2 tool calls from stream events, got %d", metrics.ToolCalls.Load())
 	}
+}
+
+func TestProgressParserMalformedJSON(t *testing.T) {
+	lines := []string{
+		`{"type":"assistant","content":[{"type":"tool_use","name":"Read","input":{"file_path":"/a.go"}}]}`,
+		`{this is not json}`,
+		`{"type":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"go test"}}]}`,
+	}
+
+	input := strings.NewReader(strings.Join(lines, "\n"))
+	var buf bytes.Buffer
+	printer := ui.New(&buf)
+	metrics := &RunMetrics{}
+
+	progressParser(input, printer, time.Now(), metrics)
+
+	if metrics.ToolCalls.Load() != 2 {
+		t.Errorf("expected 2 tool calls (skip malformed), got %d", metrics.ToolCalls.Load())
+	}
+}
+
+func TestProgressParserUnknownToolAllowlisted(t *testing.T) {
+	lines := []string{
+		`{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"tool_use","name":"EvilTool"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"tool_use","name":"Read"}}}`,
+	}
+
+	input := strings.NewReader(strings.Join(lines, "\n"))
+	var buf bytes.Buffer
+	printer := ui.New(&buf)
+	metrics := &RunMetrics{}
+
+	progressParser(input, printer, time.Now(), metrics)
+
+	if metrics.ToolCalls.Load() != 2 {
+		t.Errorf("expected 2 tool calls, got %d", metrics.ToolCalls.Load())
+	}
+
+	output := buf.String()
+	if strings.Contains(output, "EvilTool") {
+		t.Errorf("unknown tool name should not appear in output, got: %s", output)
+	}
+	if !strings.Contains(output, "tool") {
+		t.Errorf("expected generic 'tool' label for unknown tool, got: %s", output)
+	}
+}
+
+func TestSanitizeGHA(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "clean string",
+			input: "Read: /src/main.go (3s, 1 tools)",
+			want:  "Read: /src/main.go (3s, 1 tools)",
+		},
+		{
+			name:  "newline injection",
+			input: "Read\n::error::pwned",
+			want:  "Read : :error: :pwned",
+		},
+		{
+			name:  "carriage return injection",
+			input: "Read\r\n::stop-commands::token",
+			want:  "Read  : :stop-commands: :token",
+		},
+		{
+			name:  "double colon in path",
+			input: "Edit: /src/config::default.go",
+			want:  "Edit: /src/config: :default.go",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeGHA(tt.input)
+			if got != tt.want {
+				t.Errorf("sanitizeGHA(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHeartbeatConcurrency(t *testing.T) {
+	var buf bytes.Buffer
+	printer := ui.New(&buf)
+	start := time.Now()
+	done := make(chan struct{})
+
+	go runHeartbeat(printer, start, 10*time.Minute, done)
+
+	// Write from main goroutine concurrently.
+	for i := 0; i < 50; i++ {
+		printer.Heartbeat("main goroutine")
+	}
+
+	close(done)
 }
