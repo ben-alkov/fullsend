@@ -123,7 +123,7 @@ if [ -n "$ENABLED_REPOS" ]; then
     echo "Enrolling $REPO..."
 
     # Get default branch.
-    DEFAULT_BRANCH=$(gh api "repos/$ORG/$REPO" --jq .default_branch)
+    DEFAULT_BRANCH=$(gh api "repos/$ORG/$REPO" --jq .default_branch 2>/dev/null || true)
     if [ -z "$DEFAULT_BRANCH" ]; then
       echo "::error::Could not determine default branch for $REPO"
       FAILED=$((FAILED + 1))
@@ -201,7 +201,7 @@ fi
 # Phase 2: Unenroll disabled repos
 # ===========================
 
-DISABLED_REPOS=$(yq '.repos | to_entries[] | select(.value.enabled != true) | .key' "$CONFIG_FILE")
+DISABLED_REPOS=$(yq '.repos | to_entries[] | select(.value.enabled == false) | .key' "$CONFIG_FILE")
 
 if [ -n "$DISABLED_REPOS" ]; then
   echo ""
