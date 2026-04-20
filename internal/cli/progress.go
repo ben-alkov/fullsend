@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -70,6 +71,8 @@ func progressParser(r io.Reader, printer *ui.Printer, start time.Time, metrics *
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
 
+	isCI := os.Getenv("GITHUB_ACTIONS") == "true"
+
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
@@ -83,7 +86,7 @@ func progressParser(r io.Reader, printer *ui.Printer, start time.Time, metrics *
 
 		switch {
 		case evt.Type == "assistant":
-			parseAssistantToolUse(line, printer, start, metrics)
+			parseAssistantToolUse(line, printer, start, metrics, isCI)
 
 		case evt.Type == "stream_event" && evt.Event != nil:
 			if evt.Event.Type == "content_block_start" && evt.Event.ContentBlock.Type == "tool_use" {
@@ -92,7 +95,7 @@ func progressParser(r io.Reader, printer *ui.Printer, start time.Time, metrics *
 					toolName = "tool"
 				}
 				count := metrics.ToolCalls.Add(1)
-				emitToolProgress(printer, toolName, "", start, count)
+				emitToolProgress(printer, toolName, "", start, count, isCI)
 			}
 		}
 	}
@@ -100,7 +103,7 @@ func progressParser(r io.Reader, printer *ui.Printer, start time.Time, metrics *
 	return scanner.Err()
 }
 
-func parseAssistantToolUse(line []byte, printer *ui.Printer, start time.Time, metrics *RunMetrics) {
+func parseAssistantToolUse(line []byte, printer *ui.Printer, start time.Time, metrics *RunMetrics, isCI bool) {
 	var msg assistantMessage
 	if err := json.Unmarshal(line, &msg); err != nil {
 		return
@@ -123,7 +126,7 @@ func parseAssistantToolUse(line []byte, printer *ui.Printer, start time.Time, me
 			ctx = extractSafeContext(item.Name, item.Input)
 		}
 		count := metrics.ToolCalls.Add(1)
-		emitToolProgress(printer, toolName, ctx, start, count)
+		emitToolProgress(printer, toolName, ctx, start, count, isCI)
 	}
 }
 
@@ -208,7 +211,7 @@ func extractBinaryName(cmd string) string {
 	return ""
 }
 
-func emitToolProgress(printer *ui.Printer, toolName, context string, start time.Time, toolCount int32) {
+func emitToolProgress(printer *ui.Printer, toolName, context string, start time.Time, toolCount int32, isCI bool) {
 	elapsed := time.Since(start).Truncate(time.Second)
 
 	var msg string
@@ -218,7 +221,9 @@ func emitToolProgress(printer *ui.Printer, toolName, context string, start time.
 		msg = fmt.Sprintf("%s (%s, %d tools)", toolName, elapsed, toolCount)
 	}
 
-	printer.Notice(sanitizeGHA(msg))
+	if isCI {
+		fmt.Fprintf(os.Stderr, "::notice::%s\n", sanitizeGHA(msg))
+	}
 	printer.Heartbeat(msg)
 }
 
