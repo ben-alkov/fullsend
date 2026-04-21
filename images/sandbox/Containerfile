@@ -133,8 +133,12 @@ RUN curl -fsSL "https://github.com/sheeki03/tirith/releases/download/v${TIRITH_V
 # every tool picks up the proxy CA without per-agent env files.
 # Remove after upstream fixes CA propagation.
 #
-# These must be set AFTER all RUN steps — the CA file only exists at
-# runtime inside the sandbox, not during CI builds.
+# The CA bundle path only exists at runtime (injected by OpenShell).
+# To avoid breaking curl/pip during builds of child images that inherit
+# these ENV vars, we create a symlink to the system CA bundle. At
+# runtime, OpenShell overwrites the file with the real proxy CA.
+RUN mkdir -p /etc/openshell-tls \
+    && ln -sf /etc/ssl/certs/ca-certificates.crt /etc/openshell-tls/ca-bundle.pem
 ENV GIT_SSL_CAINFO="/etc/openshell-tls/ca-bundle.pem" \
     SSL_CERT_FILE="/etc/openshell-tls/ca-bundle.pem" \
     REQUESTS_CA_BUNDLE="/etc/openshell-tls/ca-bundle.pem" \
