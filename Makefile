@@ -1,7 +1,8 @@
 .DEFAULT_GOAL := help
 .PHONY: help bootstrap lint lint-all check fmt \
-       mindmap go-build go-test go-lint go-fmt go-vet go-tidy e2e-test e2e-playwright \
-       e2e-export-session e2e-upload-session
+       mindmap go-build go-test go-lint go-fmt go-vet go-tidy \
+       script-test test \
+       e2e-test e2e-playwright e2e-export-session e2e-upload-session
 
 help:
 	@echo "Available targets:"
@@ -18,6 +19,8 @@ help:
 	@echo "  go-fmt               - Format Go code"
 	@echo "  go-vet               - Run go vet"
 	@echo "  go-tidy              - Run go mod tidy"
+	@echo "  script-test          - Run shell script tests (post-triage, validate-output-schema)"
+	@echo "  test                 - Run all checks: lint, go-vet, go-test, script-test"
 	@echo "  e2e-test             - Run admin e2e tests (requires E2E_GITHUB_SESSION_FILE or E2E_GITHUB_USERNAME + E2E_GITHUB_PASSWORD)"
 	@echo "  e2e-export-session   - Login to GitHub and export a Playwright session file"
 	@echo "  e2e-upload-session   - Export session and upload it as a GitHub repo secret"
@@ -88,6 +91,12 @@ go-vet:
 
 go-tidy:
 	go mod tidy
+
+script-test:
+	bash internal/scaffold/fullsend-repo/scripts/post-triage-test.sh
+	bash internal/scaffold/fullsend-repo/scripts/validate-output-schema-test.sh
+
+test: lint go-vet go-test script-test
 
 E2E_SESSION_FILE ?= $(CURDIR)/.playwright/session.json
 
