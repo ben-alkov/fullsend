@@ -457,6 +457,23 @@ func TestValidate_ModelValid(t *testing.T) {
 	}
 }
 
+func TestValidate_PostScriptWithoutValidationLoop(t *testing.T) {
+	h := &Harness{Agent: "agents/test.md", PostScript: "scripts/post.sh"}
+	require.NoError(t, h.Validate())
+}
+
+func TestValidate_PostScriptWithValidationLoop(t *testing.T) {
+	h := &Harness{
+		Agent:      "agents/test.md",
+		PostScript: "scripts/post.sh",
+		ValidationLoop: &ValidationLoop{
+			Script:        "scripts/validate.sh",
+			MaxIterations: 2,
+		},
+	}
+	require.NoError(t, h.Validate())
+}
+
 func TestValidate_NegativeTimeout(t *testing.T) {
 	h := &Harness{Agent: "agents/test.md", TimeoutMinutes: -1}
 	err := h.Validate()

@@ -44,7 +44,7 @@ func newRunCmd() *cobra.Command {
 	return cmd
 }
 
-func runAgent(agentName, fullsendDir, outputBase, targetRepo string, printer *ui.Printer) error {
+func runAgent(agentName, fullsendDir, outputBase, targetRepo string, printer *ui.Printer) (runErr error) {
 	printer.Banner()
 	printer.Blank()
 	printer.Header("Running agent: " + agentName)
@@ -70,16 +70,35 @@ func runAgent(agentName, fullsendDir, outputBase, targetRepo string, printer *ui
 		return fmt.Errorf("resolving paths: %w", err)
 	}
 
-	if err := h.ValidateRunnerEnv(); err != nil {
+	// Expand env vars in runner_env values. FULLSEND_DIR is injected so
+	// harness configs can reference files relative to the fullsend directory
+	// (e.g., ${FULLSEND_DIR}/schemas/triage-result.schema.json).
+	expander := func(key string) string {
+		if key == "FULLSEND_DIR" {
+			return absFullsendDir
+		}
+		return os.Getenv(key)
+	}
+	if err := h.ValidateRunnerEnvWith(expander); err != nil {
 		printer.StepFail("Environment validation failed")
 		return fmt.Errorf("validating env: %w", err)
 	}
 	for k, v := range h.RunnerEnv {
-		h.RunnerEnv[k] = os.ExpandEnv(v)
+		h.RunnerEnv[k] = os.Expand(v, expander)
 	}
 	if err := h.ValidateFilesExist(); err != nil {
 		printer.StepFail("File validation failed")
 		return fmt.Errorf("validating files: %w", err)
+	}
+	// Ensure scripts are executable. The GitHub Contents API does not
+	// preserve file permissions, so scripts written via admin install
+	// may lack the execute bit.
+	for _, script := range h.Scripts() {
+		if script != "" {
+			if chmodErr := os.Chmod(script, 0o755); chmodErr != nil {
+				printer.StepWarn("Could not chmod " + script + ": " + chmodErr.Error())
+			}
+		}
 	}
 	printer.StepDone(fmt.Sprintf("Harness loaded (%.1fs)", time.Since(harnessStart).Seconds()))
 
@@ -180,9 +199,28 @@ func runAgent(agentName, fullsendDir, outputBase, targetRepo string, printer *ui
 	}
 	runDir := filepath.Join(outputBase, sandboxName)
 
+	// validationPassed is declared here (before the post-script defer) so the
+	// defer closure can guard on it. The post-script must only run when
+	// validation has passed — running it on unvalidated output would violate
+	// ADR 0022's zero-trust model.
+	var validationPassed bool
+
 	// Post-script runs after sandbox cleanup (defers are LIFO).
+	// When a validation_loop is configured, the post-script only runs if
+	// validation passed (ADR 0022). When no validation_loop exists (e.g.,
+	// the code agent), the post-script runs unconditionally after a
+	// successful agent run — the post-script itself is responsible for
+	// any output checks it needs.
 	if h.PostScript != "" {
 		defer func() {
+			if h.ValidationLoop != nil && !validationPassed {
+				printer.StepWarn("Skipping post-script: validation did not pass")
+				return
+			}
+			if runErr != nil {
+				printer.StepWarn("Skipping post-script: agent run failed")
+				return
+			}
 			postStart := time.Now()
 			printer.StepStart("Running post-script: " + h.PostScript)
 			postCmd := exec.Command(h.PostScript)
@@ -191,7 +229,10 @@ func runAgent(agentName, fullsendDir, outputBase, targetRepo string, printer *ui
 			postCmd.Stdout = os.Stdout
 			postCmd.Stderr = os.Stderr
 			if err := postCmd.Run(); err != nil {
-				printer.StepWarn("Post-script failed: " + err.Error())
+				printer.StepFail("Post-script failed: " + err.Error())
+				if runErr == nil {
+					runErr = fmt.Errorf("post-script %s failed: %w", h.PostScript, err)
+				}
 			} else {
 				printer.StepDone(fmt.Sprintf("Post-script completed (%.1fs)", time.Since(postStart).Seconds()))
 			}
@@ -328,7 +369,6 @@ func runAgent(agentName, fullsendDir, outputBase, targetRepo string, printer *ui
 	}
 
 	var lastExitCode int
-	var validationPassed bool
 	var runCount int
 
 	for iteration := 1; iteration <= maxIterations; iteration++ {
@@ -494,8 +534,8 @@ func bootstrapSandbox(sshConfigPath, sandboxName, repoDir string, h *harness.Har
 	// Agent and skill definitions go in CLAUDE_CONFIG_DIR so `claude --agent`
 	// finds them regardless of the repo's own .claude/ directory. When
 	// CLAUDE_CONFIG_DIR is set, Claude uses it instead of ~/.claude/.
-	mkdirCmd := fmt.Sprintf("mkdir -p %s/agents %s/skills %s/hooks %s/bin %s/.env.d %s/.security %s",
-		sandbox.SandboxClaudeConfig, sandbox.SandboxClaudeConfig, sandbox.SandboxClaudeConfig, sandbox.SandboxWorkspace, sandbox.SandboxWorkspace, sandbox.SandboxWorkspace, sandbox.SandboxClaudeConfig)
+	mkdirCmd := fmt.Sprintf("mkdir -p %s/agents %s/skills %s/hooks %s/bin %s/.env.d %s/.security %s %s/.claude/hooks",
+		sandbox.SandboxClaudeConfig, sandbox.SandboxClaudeConfig, sandbox.SandboxClaudeConfig, sandbox.SandboxWorkspace, sandbox.SandboxWorkspace, sandbox.SandboxWorkspace, sandbox.SandboxClaudeConfig, sandbox.SandboxWorkspace)
 	if _, _, _, err := sandbox.SSH(sshConfigPath, sandboxName, mkdirCmd, 10*time.Second); err != nil {
 		return fmt.Errorf("creating workspace dirs: %w", err)
 	}
@@ -692,7 +732,10 @@ func buildClaudeCommand(agentName, model, repoDir string) string {
 	}
 
 	return fmt.Sprintf(
-		"cd %s && source %s && claude --print --output-format stream-json %s--agent '%s' --dangerously-skip-permissions 'Run the agent task'",
+		// --verbose increases log output in the job log. If artifact upload is
+		// added to this workflow, consider whether verbose output should be
+		// redacted or made conditional via an env var.
+		"cd %s && source %s && claude --print --verbose --output-format stream-json %s--agent '%s' --dangerously-skip-permissions 'Run the agent task'",
 		repoDir, envFile, modelFlag, safe,
 	)
 }

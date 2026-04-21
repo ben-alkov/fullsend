@@ -55,6 +55,14 @@ type Issue struct {
 	URL    string
 }
 
+// IssueComment represents a comment on an issue.
+type IssueComment struct {
+	ID        int
+	Body      string
+	Author    string
+	CreatedAt string
+}
+
 // Installation represents an app installation on an org.
 type Installation struct {
 	ID      int
@@ -122,6 +130,7 @@ type Client interface {
 	// Issue operations
 	CreateIssue(ctx context.Context, owner, repo, title, body string) (*Issue, error)
 	CloseIssue(ctx context.Context, owner, repo string, number int) error
+	ListIssueComments(ctx context.Context, owner, repo string, number int) ([]IssueComment, error)
 
 	// Change proposal merge
 	MergeChangeProposal(ctx context.Context, owner, repo string, number int) error

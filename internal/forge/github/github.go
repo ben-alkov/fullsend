@@ -916,6 +916,35 @@ func (c *LiveClient) CloseIssue(ctx context.Context, owner, repo string, number 
 	return nil
 }
 
+// ListIssueComments returns up to 100 comments on an issue (single page, no pagination).
+func (c *LiveClient) ListIssueComments(ctx context.Context, owner, repo string, number int) ([]forge.IssueComment, error) {
+	resp, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/issues/%d/comments?per_page=100", owner, repo, number))
+	if err != nil {
+		return nil, fmt.Errorf("list issue comments: %w", err)
+	}
+	var raw []struct {
+		ID   int    `json:"id"`
+		Body string `json:"body"`
+		User struct {
+			Login string `json:"login"`
+		} `json:"user"`
+		CreatedAt string `json:"created_at"`
+	}
+	if err := decodeJSON(resp, &raw); err != nil {
+		return nil, fmt.Errorf("decoding issue comments: %w", err)
+	}
+	comments := make([]forge.IssueComment, len(raw))
+	for i, r := range raw {
+		comments[i] = forge.IssueComment{
+			ID:        r.ID,
+			Body:      r.Body,
+			Author:    r.User.Login,
+			CreatedAt: r.CreatedAt,
+		}
+	}
+	return comments, nil
+}
+
 // MergeChangeProposal squash-merges a pull request by number.
 func (c *LiveClient) MergeChangeProposal(ctx context.Context, owner, repo string, number int) error {
 	resp, err := c.put(ctx, fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", owner, repo, number), map[string]string{"merge_method": "squash"})
@@ -969,8 +998,16 @@ func (c *LiveClient) GetWorkflowRunLogs(ctx context.Context, owner, repo string,
 	}
 	var jobsResult struct {
 		Jobs []struct {
-			ID   int    `json:"id"`
-			Name string `json:"name"`
+			ID         int    `json:"id"`
+			Name       string `json:"name"`
+			Status     string `json:"status"`
+			Conclusion string `json:"conclusion"`
+			Steps      []struct {
+				Name       string `json:"name"`
+				Number     int    `json:"number"`
+				Status     string `json:"status"`
+				Conclusion string `json:"conclusion"`
+			} `json:"steps"`
 		} `json:"jobs"`
 	}
 	if err := decodeJSON(resp, &jobsResult); err != nil {
@@ -979,24 +1016,39 @@ func (c *LiveClient) GetWorkflowRunLogs(ctx context.Context, owner, repo string,
 
 	var buf strings.Builder
 	for _, job := range jobsResult.Jobs {
+		fmt.Fprintf(&buf, "=== %s (job %d) [%s/%s] ===\n", job.Name, job.ID, job.Status, job.Conclusion)
+		// Print step-level summary first.
+		for _, step := range job.Steps {
+			marker := "✓"
+			if step.Conclusion == "failure" {
+				marker = "✗"
+			} else if step.Conclusion == "skipped" {
+				marker = "⊘"
+			} else if step.Status != "completed" {
+				marker = "…"
+			}
+			fmt.Fprintf(&buf, "  %s Step %d: %s [%s/%s]\n", marker, step.Number, step.Name, step.Status, step.Conclusion)
+		}
+		fmt.Fprintln(&buf)
+
 		// Download logs for each job (returns plain text, 302 redirect to download URL).
 		jobResp, err := c.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/actions/jobs/%d/logs", owner, repo, job.ID), nil)
 		if err != nil {
-			fmt.Fprintf(&buf, "=== %s (job %d) ===\n[failed to fetch logs: %v]\n\n", job.Name, job.ID, err)
+			fmt.Fprintf(&buf, "[failed to fetch logs: %v]\n\n", err)
 			continue
 		}
 		if jobResp.StatusCode < 200 || jobResp.StatusCode >= 300 {
 			jobResp.Body.Close()
-			fmt.Fprintf(&buf, "=== %s (job %d) ===\n[logs unavailable: HTTP %d]\n\n", job.Name, job.ID, jobResp.StatusCode)
+			fmt.Fprintf(&buf, "[logs unavailable: HTTP %d]\n\n", jobResp.StatusCode)
 			continue
 		}
 		logData, readErr := io.ReadAll(io.LimitReader(jobResp.Body, 1<<20)) // 1 MB per job
 		jobResp.Body.Close()
 		if readErr != nil {
-			fmt.Fprintf(&buf, "=== %s (job %d) ===\n[failed to read logs: %v]\n\n", job.Name, job.ID, readErr)
+			fmt.Fprintf(&buf, "[failed to read logs: %v]\n\n", readErr)
 			continue
 		}
-		fmt.Fprintf(&buf, "=== %s (job %d) ===\n%s\n", job.Name, job.ID, string(logData))
+		fmt.Fprintf(&buf, "%s\n", string(logData))
 	}
 	return buf.String(), nil
 }

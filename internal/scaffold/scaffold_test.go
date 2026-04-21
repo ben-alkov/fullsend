@@ -2,10 +2,14 @@ package scaffold
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/fullsend-ai/fullsend/internal/harness"
 )
 
 func TestFullsendRepoFilesExist(t *testing.T) {
@@ -25,11 +29,14 @@ func TestFullsendRepoFilesExist(t *testing.T) {
 		"harness/code.yaml",
 		"policies/triage.yaml",
 		"policies/code.yaml",
-		"scripts/validate-triage.sh",
+		"schemas/triage-result.schema.json",
+		"scripts/post-triage.sh",
+		"scripts/pre-triage.sh",
 		"scripts/scan-secrets",
 		"scripts/pre-code.sh",
 		"scripts/post-code.sh",
 		"scripts/reconcile-repos.sh",
+		"scripts/validate-output-schema.sh",
 		"skills/code-implementation/SKILL.md",
 		"templates/shim-workflow.yaml",
 	}
@@ -57,7 +64,7 @@ func TestWalkFullsendRepo(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	assert.True(t, len(paths) >= 22, "expected at least 22 files, got %d", len(paths))
+	assert.True(t, len(paths) >= 27, "expected at least 27 files, got %d", len(paths))
 }
 
 func TestTriageWorkflowContent(t *testing.T) {
@@ -137,4 +144,68 @@ func TestSetupAgentEnvContent(t *testing.T) {
 	s := string(content)
 	assert.Contains(t, s, "AGENT_PREFIX")
 	assert.Contains(t, s, "GITHUB_ENV")
+}
+
+func TestTriageAgentPromptContent(t *testing.T) {
+	content, err := FullsendRepoFile("agents/triage.md")
+	require.NoError(t, err)
+	s := string(content)
+	assert.Contains(t, s, "agent-result.json")
+	assert.Contains(t, s, "clarity_scores")
+	assert.Contains(t, s, "Anti-premature-resolution")
+}
+
+func TestTriageSchemaContent(t *testing.T) {
+	content, err := FullsendRepoFile("schemas/triage-result.schema.json")
+	require.NoError(t, err)
+	s := string(content)
+	assert.Contains(t, s, "$schema")
+	assert.Contains(t, s, "insufficient")
+	assert.Contains(t, s, "duplicate")
+	assert.Contains(t, s, "sufficient")
+}
+
+func TestHarnessesLoadAndValidate(t *testing.T) {
+	// Extract the full scaffold to a temp dir so harness.Load can resolve
+	// relative paths and validate that referenced files exist. This catches
+	// harness validation errors (e.g., missing fields, invalid combinations)
+	// the same way the runner would at startup.
+	dir := t.TempDir()
+	err := WalkFullsendRepo(func(path string, content []byte) error {
+		dest := filepath.Join(dir, path)
+		if mkErr := os.MkdirAll(filepath.Dir(dest), 0o755); mkErr != nil {
+			return mkErr
+		}
+		return os.WriteFile(dest, content, 0o644)
+	})
+	require.NoError(t, err, "extracting scaffold")
+
+	// Find all harness YAML files.
+	entries, err := os.ReadDir(filepath.Join(dir, "harness"))
+	require.NoError(t, err)
+
+	var loaded int
+	for _, e := range entries {
+		if e.IsDir() || (!strings.HasSuffix(e.Name(), ".yaml") && !strings.HasSuffix(e.Name(), ".yml")) {
+			continue
+		}
+		t.Run(e.Name(), func(t *testing.T) {
+			harnessPath := filepath.Join(dir, "harness", e.Name())
+			h, err := harness.Load(harnessPath)
+			require.NoError(t, err, "Load should succeed")
+
+			err = h.ResolveRelativeTo(dir)
+			require.NoError(t, err, "ResolveRelativeTo should succeed")
+
+			err = h.ValidateFilesExist()
+			require.NoError(t, err, "ValidateFilesExist should succeed")
+		})
+		loaded++
+	}
+	assert.True(t, loaded >= 2, "expected at least 2 harnesses, got %d", loaded)
+}
+
+func TestValidateTriageDeleted(t *testing.T) {
+	_, err := FullsendRepoFile("scripts/validate-triage.sh")
+	assert.Error(t, err, "validate-triage.sh should have been deleted")
 }

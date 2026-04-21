@@ -347,13 +347,13 @@ func (h *Harness) ResolveRelativeTo(baseDir string) error {
 	return nil
 }
 
-// ValidateRunnerEnv checks that all ${VAR} references in RunnerEnv and
-// HostFiles.Src expand to non-empty values in the host environment.
-func (h *Harness) ValidateRunnerEnv() error {
+// ValidateRunnerEnvWith checks that all ${VAR} references in RunnerEnv and
+// HostFiles.Src expand to non-empty values using the provided expander function.
+func (h *Harness) ValidateRunnerEnvWith(expander func(string) string) error {
 	checkVarRefs := func(source, value string) error {
 		for _, match := range envVarRef.FindAllStringSubmatch(value, -1) {
 			varName := match[1]
-			if os.Getenv(varName) == "" {
+			if expander(varName) == "" {
 				return fmt.Errorf("%s: host variable %s is not set (referenced in %q)", source, varName, value)
 			}
 		}
@@ -371,6 +371,12 @@ func (h *Harness) ValidateRunnerEnv() error {
 		}
 	}
 	return nil
+}
+
+// ValidateRunnerEnv checks that all ${VAR} references in RunnerEnv and
+// HostFiles.Src expand to non-empty values in the host environment.
+func (h *Harness) ValidateRunnerEnv() error {
+	return h.ValidateRunnerEnvWith(os.Getenv)
 }
 
 // ValidateFilesExist checks that all file paths referenced by the harness
@@ -422,4 +428,19 @@ func (h *Harness) ValidateFilesExist() error {
 		}
 	}
 	return nil
+}
+
+// Scripts returns all script paths configured in the harness.
+func (h *Harness) Scripts() []string {
+	var scripts []string
+	if h.PreScript != "" {
+		scripts = append(scripts, h.PreScript)
+	}
+	if h.PostScript != "" {
+		scripts = append(scripts, h.PostScript)
+	}
+	if h.ValidationLoop != nil && h.ValidationLoop.Script != "" {
+		scripts = append(scripts, h.ValidationLoop.Script)
+	}
+	return scripts
 }

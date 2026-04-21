@@ -494,6 +494,15 @@ func (f *FakeClient) CloseIssue(_ context.Context, _, _ string, _ int) error {
 	return f.err("CloseIssue")
 }
 
+func (f *FakeClient) ListIssueComments(_ context.Context, _, _ string, _ int) ([]IssueComment, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if e := f.err("ListIssueComments"); e != nil {
+		return nil, e
+	}
+	return nil, nil
+}
+
 func (f *FakeClient) MergeChangeProposal(_ context.Context, _, _ string, _ int) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
