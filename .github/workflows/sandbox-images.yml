@@ -1,4 +1,4 @@
-name: Sandbox Image
+name: Sandbox Images
 
 on:
   push:
