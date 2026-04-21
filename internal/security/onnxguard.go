@@ -124,9 +124,15 @@ func (s *ONNXGuardScanner) scoreText(ctx context.Context, text string) (float64,
 	return 0, nil
 }
 
+const maxSentenceBatch = 200
+
 func (s *ONNXGuardScanner) maxSentenceScore(ctx context.Context, sents []string) (float64, error) {
 	if len(sents) == 0 {
 		return 0, nil
+	}
+
+	if len(sents) > maxSentenceBatch {
+		sents = sents[:maxSentenceBatch]
 	}
 
 	result, err := s.pipeline.RunPipeline(ctx, sents)

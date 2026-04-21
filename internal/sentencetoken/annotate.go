@@ -27,8 +27,7 @@ func (a *typeBasedAnnotation) typeAnnotation(tok *token) {
 	if hasSentEndChars(tok) {
 		tok.SentBreak = true
 	} else if hasPeriodFinal(tok) && !strings.HasSuffix(tok.Tok, "..") {
-		chars := []rune(tok.Tok)
-		tokNoPeriod := strings.ToLower(tok.Tok[:len(chars)-1])
+		tokNoPeriod := strings.ToLower(tok.Tok[:len(tok.Tok)-1])
 		parts := strings.Split(tokNoPeriod, "-")
 		lastPart := parts[len(parts)-1]
 
@@ -180,7 +179,7 @@ func (a *multiPunctAnnotation) tokenAnnotation(tokOne, tokTwo *token) {
 		}
 
 		if isNonBreak && firstUpper(tokTwo) {
-			if a.s.OrthoContext[nextTyp]&112 != 0 {
+			if a.s.OrthoContext[nextTyp]&orthoLc != 0 {
 				tokOne.SentBreak = true
 			}
 		}

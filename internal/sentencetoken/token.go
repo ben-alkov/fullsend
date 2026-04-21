@@ -6,7 +6,6 @@ package sentencetoken
 
 import (
 	"encoding/json"
-	"fmt"
 	"regexp"
 	"strings"
 	"unicode"
@@ -16,7 +15,6 @@ var (
 	reEllipsis = regexp.MustCompile(`\.\.+$`)
 	reNumeric  = regexp.MustCompile(`-?[\.,]?\d[\d,\.-]*\.?$`)
 	reInitial  = regexp.MustCompile(`^[A-Za-z]\.$`)
-	reAlpha    = regexp.MustCompile(`^[A-Za-z]+$`)
 )
 
 type token struct {
@@ -30,10 +28,6 @@ type token struct {
 
 func newToken(tok string) *token {
 	return &token{Tok: tok}
-}
-
-func (t *token) String() string {
-	return fmt.Sprintf("<Token Tok: %q, SentBreak: %t, Abbr: %t, Position: %d>", t.Tok, t.SentBreak, t.Abbr, t.Position)
 }
 
 type setString map[string]int
@@ -153,16 +147,9 @@ func firstLower(t *token) bool {
 	return unicode.IsLower([]rune(t.Tok)[0])
 }
 
-func isEllipsis(t *token) bool  { return reEllipsis.MatchString(t.Tok) }
-func isInitial(t *token) bool   { return reInitial.MatchString(t.Tok) }
-func isAlpha(t *token) bool     { return reAlpha.MatchString(t.Tok) }
+func isEllipsis(t *token) bool    { return reEllipsis.MatchString(t.Tok) }
+func isInitial(t *token) bool     { return reInitial.MatchString(t.Tok) }
 func hasPeriodFinal(t *token) bool { return strings.HasSuffix(t.Tok, ".") }
-
-var reNonPunct = regexp.MustCompile(`[^\W\d]`)
-
-func isNonPunct(t *token) bool {
-	return reNonPunct.MatchString(tokenType(t))
-}
 
 // hasSentEndChars — prose's customized version that excludes entities like "Yahoo!".
 var reEntities = regexp.MustCompile(`Yahoo!`)

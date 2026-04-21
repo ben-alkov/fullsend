@@ -3,6 +3,7 @@ package sentencetoken
 import (
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // tokenizeWords splits text into tokens, preserving character positions.
@@ -21,7 +22,7 @@ func tokenizeWords(text string, onlyPeriodContext bool) []*token {
 	getNextWord := false
 
 	for i, char := range text {
-		if !unicode.IsSpace(char) && i != textLen-1 {
+		if !unicode.IsSpace(char) && i+utf8.RuneLen(char) != textLen {
 			continue
 		}
 

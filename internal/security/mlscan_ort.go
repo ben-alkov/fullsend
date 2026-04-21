@@ -22,7 +22,7 @@ var (
 func initMLScanner() {
 	modelPath := os.Getenv("MODEL_PATH")
 	if modelPath == "" {
-		modelPath = "/opt/huggingface/hub/models--protectai--deberta-v3-base-prompt-injection-v2/snapshots/e6535ca4ce3ba852083e75ec585d7c8aeb4be4c5/onnx"
+		modelPath = "/opt/fullsend/models/protectai-deberta-v3/onnx"
 	}
 	ortLibPath := os.Getenv("ORT_LIB_PATH")
 	if ortLibPath == "" {

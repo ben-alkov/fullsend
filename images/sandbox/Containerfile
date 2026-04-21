@@ -43,30 +43,21 @@ RUN curl -fsSL https://claude.ai/install.sh | bash
 # scanning. The fullsend binary loads the model directly via Go (hugot +
 # onnxruntime) — no Python, no cold-start latency.
 #
-# HF_HOME must point outside /root/ so the sandbox user (uid 998) can
-# read the cached model at runtime — /root/ is mode 700.
-ENV HF_HOME="/opt/huggingface" \
-    HF_HUB_OFFLINE="1"
-
-# Download ProtectAI DeBERTa-v3 ONNX model files. Uses Python + huggingface_hub
-# for the download, then removes huggingface_hub (Python itself stays for
-# pre-commit/gitlint). The model files are loaded at runtime by Go/onnxruntime.
+# Download ProtectAI DeBERTa-v3 ONNX model files directly via curl.
+# The model is loaded at runtime by Go/onnxruntime — no Python dependency.
 ARG PROTECTAI_MODEL_REV=e6535ca4ce3ba852083e75ec585d7c8aeb4be4c5
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 python3-pip \
-    && rm -rf /var/lib/apt/lists/* \
-    && /usr/bin/python3 -m pip install --no-cache-dir --break-system-packages \
-        "huggingface_hub==0.30.2" \
-    && HF_HUB_OFFLINE=0 /usr/bin/python3 -c "\
-import json, pathlib; \
-from huggingface_hub import hf_hub_download; \
-for f in ['onnx/model.onnx', 'onnx/config.json', 'onnx/tokenizer.json', 'onnx/special_tokens_map.json', 'onnx/tokenizer_config.json']: \
-    hf_hub_download('protectai/deberta-v3-base-prompt-injection-v2', f, revision='${PROTECTAI_MODEL_REV}'); \
-cfg = json.loads(pathlib.Path(hf_hub_download('protectai/deberta-v3-base-prompt-injection-v2', 'onnx/config.json', revision='${PROTECTAI_MODEL_REV}')).read_text()); \
-assert cfg.get('id2label', {}).get('1') == 'INJECTION', f\"label ordering mismatch: id2label={cfg.get('id2label')}\"" \
-    && echo "ProtectAI DeBERTa-v3 model pre-downloaded at rev ${PROTECTAI_MODEL_REV} (label ordering verified)" \
-    && /usr/bin/python3 -m pip uninstall -y huggingface_hub \
-    && rm -rf /var/lib/apt/lists/*
+ARG PROTECTAI_MODEL_DIR=/opt/fullsend/models/protectai-deberta-v3/onnx
+RUN mkdir -p "${PROTECTAI_MODEL_DIR}" \
+    && for f in model.onnx config.json tokenizer.json special_tokens_map.json tokenizer_config.json; do \
+         curl -fsSL \
+           "https://huggingface.co/protectai/deberta-v3-base-prompt-injection-v2/resolve/${PROTECTAI_MODEL_REV}/onnx/${f}" \
+           -o "${PROTECTAI_MODEL_DIR}/${f}"; \
+       done \
+    && /usr/bin/python3 -c "\
+import json; cfg = json.load(open('${PROTECTAI_MODEL_DIR}/config.json')); \
+assert cfg.get('id2label', {}).get('1') == 'INJECTION', \
+  f\"label ordering mismatch: id2label={cfg.get('id2label')}\"" \
+    && echo "ProtectAI DeBERTa-v3 model downloaded at rev ${PROTECTAI_MODEL_REV} (label ordering verified)"
 
 # ---------------------------------------------------------------------------
 # ONNX Runtime shared library — loaded by hugot at runtime.
@@ -74,13 +65,15 @@ assert cfg.get('id2label', {}).get('1') == 'INJECTION', f\"label ordering mismat
 # To update: bump ORT_VERSION from:
 #   https://github.com/microsoft/onnxruntime/releases
 ARG ORT_VERSION=1.24.1
+ARG ORT_SHA256=9142552248b735920f9390027e4512a2cacf8946a1ffcbe9071a5c210531026f
 RUN curl -fsSL \
       "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-${ORT_VERSION}.tgz" \
       -o /tmp/ort.tgz \
+    && echo "${ORT_SHA256}  /tmp/ort.tgz" | sha256sum -c - \
     && tar xzf /tmp/ort.tgz -C /tmp/ \
     && cp "/tmp/onnxruntime-linux-x64-${ORT_VERSION}/lib/libonnxruntime.so.${ORT_VERSION}" /usr/lib/ \
     && ln -sf "/usr/lib/libonnxruntime.so.${ORT_VERSION}" /usr/lib/libonnxruntime.so \
-    && ldconfig \
+    && /sbin/ldconfig \
     && rm -rf /tmp/ort.tgz "/tmp/onnxruntime-linux-x64-${ORT_VERSION}"
 
 # ---------------------------------------------------------------------------
@@ -105,14 +98,12 @@ RUN curl -fsSL \
 # even if pip is network-restricted inside the sandbox.
 ARG PRECOMMIT_VERSION=4.5.1
 ARG GITLINT_VERSION=0.19.1
-RUN /usr/bin/python3 -m pip install --no-cache-dir --break-system-packages \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3-pip \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir --break-system-packages \
       "pre-commit==${PRECOMMIT_VERSION}" \
       "gitlint-core==${GITLINT_VERSION}"
-RUN for bin in pre-commit gitlint; do \
-      if [ -x "/sandbox/.venv/bin/$bin" ]; then \
-        ln -sf "/sandbox/.venv/bin/$bin" "/usr/local/bin/$bin"; \
-      fi; \
-    done
 
 # ---------------------------------------------------------------------------
 # tirith — terminal security scanner for PreToolUse hooks.
