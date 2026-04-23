@@ -540,6 +540,22 @@ func bootstrapSandbox(sshConfigPath, sandboxName, repoDir string, h *harness.Har
 		return fmt.Errorf("creating workspace dirs: %w", err)
 	}
 
+	// Copy fullsend binary into sandbox so `fullsend scan context` works.
+	// The pre-agent security scan runs inside the sandbox and needs the
+	// fullsend CLI to scan context files.
+	fullsendBinary, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("finding fullsend executable: %w", err)
+	}
+	remoteBinary := fmt.Sprintf("%s/bin/fullsend", sandbox.SandboxWorkspace)
+	if err := sandbox.SCP(sshConfigPath, sandboxName, fullsendBinary, remoteBinary); err != nil {
+		return fmt.Errorf("copying fullsend binary to sandbox: %w", err)
+	}
+	chmodCmd := fmt.Sprintf("chmod +x %s", remoteBinary)
+	if _, _, _, err := sandbox.SSH(sshConfigPath, sandboxName, chmodCmd, 10*time.Second); err != nil {
+		return fmt.Errorf("chmod fullsend binary: %w", err)
+	}
+
 	// Copy agent definition to $CLAUDE_CONFIG_DIR/agents/.
 	if err := sandbox.SCP(sshConfigPath, sandboxName, h.Agent,
 		fmt.Sprintf("%s/agents/", sandbox.SandboxClaudeConfig)); err != nil {
@@ -787,9 +803,12 @@ func buildScanContextCommand(repoDir, traceID string) string {
 	sort.Strings(inames) // deterministic ordering
 	inameExpr := strings.Join(inames, " -o ")
 
+	// Source .env to get PATH with /tmp/workspace/bin where fullsend is installed.
+	envFile := sandbox.SandboxWorkspace + "/.env"
+
 	return fmt.Sprintf(
-		"FULLSEND_TRACE_ID='%s' find '%s' -maxdepth 3 -type f \\( %s \\) -exec fullsend scan context {} +",
-		traceID, escapedDir, inameExpr,
+		"source %s && FULLSEND_TRACE_ID='%s' find '%s' -maxdepth 3 -type f \\( %s \\) -exec fullsend scan context {} +",
+		envFile, traceID, escapedDir, inameExpr,
 	)
 }
 
