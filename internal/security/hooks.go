@@ -16,6 +16,9 @@ var SecretRedactPostToolHook []byte
 //go:embed hooks/tirith_check.py
 var TirithCheckHook []byte
 
+//go:embed hooks/unicode_posttool.py
+var UnicodePostToolHook []byte
+
 // hookEntry represents a single hook command in Claude settings.
 type hookEntry struct {
 	Type    string `json:"type"`
@@ -79,6 +82,16 @@ func GenerateClaudeSettings(h *harness.Harness) ([]byte, error) {
 		})
 	}
 
+	// Unicode scanning PostToolUse hook.
+	if unicodePostToolEnabled(sec) {
+		postToolMatchers = append(postToolMatchers, hookMatcher{
+			Matcher: "Bash|WebFetch|Read",
+			Hooks: []hookEntry{
+				{Type: "command", Command: "python3 " + SandboxHooksDir + "/unicode_posttool.py"},
+			},
+		})
+	}
+
 	if len(preToolMatchers) > 0 {
 		settings.Hooks["PreToolUse"] = preToolMatchers
 	}
@@ -102,6 +115,9 @@ func HookFiles(h *harness.Harness) map[string][]byte {
 	}
 	if secretRedactPostToolEnabled(sec) {
 		files["secret_redact_posttool.py"] = SecretRedactPostToolHook
+	}
+	if unicodePostToolEnabled(sec) {
+		files["unicode_posttool.py"] = UnicodePostToolHook
 	}
 
 	return files
@@ -134,4 +150,11 @@ func secretRedactPostToolEnabled(sec *harness.SecurityConfig) bool {
 		return true
 	}
 	return boolDefault(sec.SandboxHooks.SecretRedactPostTool, true)
+}
+
+func unicodePostToolEnabled(sec *harness.SecurityConfig) bool {
+	if sec == nil || sec.SandboxHooks == nil {
+		return true
+	}
+	return boolDefault(sec.SandboxHooks.UnicodePostTool, true)
 }
