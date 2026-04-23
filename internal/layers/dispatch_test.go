@@ -17,7 +17,7 @@ func newDispatchLayer(t *testing.T, client *forge.FakeClient, token string, repo
 	t.Helper()
 	var buf bytes.Buffer
 	printer := ui.New(&buf)
-	layer := NewDispatchTokenLayer("test-org", client, token, repoIDs, printer)
+	layer := NewDispatchTokenLayer("test-org", client, token, repoIDs, printer, nil)
 	return layer, &buf
 }
 
@@ -41,15 +41,19 @@ func TestDispatchTokenLayer_Install_CreatesOrgSecret(t *testing.T) {
 	assert.Equal(t, repoIDs, client.CreatedOrgSecrets[0].RepoIDs)
 }
 
-func TestDispatchTokenLayer_Install_SkipsEmptyToken(t *testing.T) {
-	client := &forge.FakeClient{}
+func TestDispatchTokenLayer_Install_ReusesExistingToken(t *testing.T) {
+	client := &forge.FakeClient{
+		OrgSecrets: map[string]bool{
+			"test-org/FULLSEND_DISPATCH_TOKEN": true,
+		},
+	}
 	repoIDs := []int64{100, 200}
 	layer, _ := newDispatchLayer(t, client, "", repoIDs)
 
 	err := layer.Install(context.Background())
 	require.NoError(t, err)
 
-	// No secret should be created when token is empty
+	// No secret should be created when reusing existing
 	assert.Empty(t, client.CreatedOrgSecrets)
 
 	// But SetOrgSecretRepos should still be called to update access list
@@ -134,4 +138,58 @@ func TestDispatchTokenLayer_RequiredScopes(t *testing.T) {
 	assert.Equal(t, []string{"admin:org"}, layer.RequiredScopes(OpInstall))
 	assert.Equal(t, []string{"admin:org"}, layer.RequiredScopes(OpUninstall))
 	assert.Equal(t, []string{"admin:org"}, layer.RequiredScopes(OpAnalyze))
+}
+
+func TestDispatchTokenLayer_Install_CallsPromptFn(t *testing.T) {
+	client := &forge.FakeClient{
+		OrgSecrets: map[string]bool{}, // secret does not exist
+	}
+	repoIDs := []int64{100, 200}
+
+	promptFn := func(ctx context.Context) (string, error) {
+		return "ghp_prompted_token", nil
+	}
+
+	var buf bytes.Buffer
+	printer := ui.New(&buf)
+	layer := NewDispatchTokenLayer("test-org", client, "", repoIDs, printer, promptFn)
+
+	err := layer.Install(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, client.CreatedOrgSecrets, 1)
+	assert.Equal(t, "test-org", client.CreatedOrgSecrets[0].Org)
+	assert.Equal(t, "FULLSEND_DISPATCH_TOKEN", client.CreatedOrgSecrets[0].Name)
+	assert.Equal(t, "ghp_prompted_token", client.CreatedOrgSecrets[0].Value)
+	assert.Equal(t, repoIDs, client.CreatedOrgSecrets[0].RepoIDs)
+}
+
+func TestDispatchTokenLayer_Install_ErrorWhenNoPromptFn(t *testing.T) {
+	client := &forge.FakeClient{
+		OrgSecrets: map[string]bool{}, // secret does not exist
+	}
+	layer, _ := newDispatchLayer(t, client, "", []int64{100})
+
+	err := layer.Install(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dispatch token not provided")
+	assert.Contains(t, err.Error(), "does not exist")
+}
+
+func TestDispatchTokenLayer_Install_PromptFnError(t *testing.T) {
+	client := &forge.FakeClient{
+		OrgSecrets: map[string]bool{}, // secret does not exist
+	}
+
+	promptFn := func(ctx context.Context) (string, error) {
+		return "", errors.New("user cancelled")
+	}
+
+	var buf bytes.Buffer
+	printer := ui.New(&buf)
+	layer := NewDispatchTokenLayer("test-org", client, "", []int64{100}, printer, promptFn)
+
+	err := layer.Install(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "user cancelled")
 }

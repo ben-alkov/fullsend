@@ -10,6 +10,11 @@ import (
 
 const dispatchTokenName = "FULLSEND_DISPATCH_TOKEN"
 
+// PromptTokenFunc is a callback that prompts the user for a dispatch token
+// interactively. It is called during Install when no token was provided at
+// construction time and the org secret doesn't already exist.
+type PromptTokenFunc func(ctx context.Context) (string, error)
+
 // DispatchTokenLayer manages the org-level dispatch token that enrolled
 // repos use to trigger workflow_dispatch events on the .fullsend repo.
 //
@@ -24,18 +29,23 @@ type DispatchTokenLayer struct {
 	dispatchToken   string  // the PAT value to store (empty if reusing existing)
 	enrolledRepoIDs []int64 // repo IDs that should have access to this secret
 	ui              *ui.Printer
+	promptFn        PromptTokenFunc // optional callback to prompt for token interactively
 }
 
 var _ Layer = (*DispatchTokenLayer)(nil)
 
 // NewDispatchTokenLayer creates a new DispatchTokenLayer.
-func NewDispatchTokenLayer(org string, client forge.Client, token string, repoIDs []int64, printer *ui.Printer) *DispatchTokenLayer {
+// If promptFn is non-nil, it will be called during Install to obtain a
+// dispatch token interactively when none was provided and the org secret
+// doesn't already exist.
+func NewDispatchTokenLayer(org string, client forge.Client, token string, repoIDs []int64, printer *ui.Printer, promptFn PromptTokenFunc) *DispatchTokenLayer {
 	return &DispatchTokenLayer{
 		org:             org,
 		client:          client,
 		dispatchToken:   token,
 		enrolledRepoIDs: repoIDs,
 		ui:              printer,
+		promptFn:        promptFn,
 	}
 }
 
@@ -55,12 +65,24 @@ func (l *DispatchTokenLayer) RequiredScopes(op Operation) []string {
 }
 
 // Install creates or updates the org-level dispatch token secret.
-// If dispatchToken is empty, the secret value is reused (not recreated),
-// but the repo access list is still updated if enrolledRepoIDs is set.
+// If dispatchToken is non-empty, the secret is created with that value.
+// If dispatchToken is empty, the method checks whether the secret already
+// exists. If it does, the repo access list is updated. If it doesn't and
+// promptFn is set, promptFn is called to obtain a token interactively.
+// If it doesn't exist and promptFn is nil, an error is returned.
 func (l *DispatchTokenLayer) Install(ctx context.Context) error {
-	if l.dispatchToken == "" {
-		l.ui.StepInfo("reusing existing dispatch token")
+	if l.dispatchToken != "" {
+		return l.createSecret(ctx, l.dispatchToken)
+	}
 
+	// No token provided — check if the secret already exists.
+	exists, err := l.client.OrgSecretExists(ctx, l.org, dispatchTokenName)
+	if err != nil {
+		return fmt.Errorf("checking org secret %s: %w", dispatchTokenName, err)
+	}
+
+	if exists {
+		l.ui.StepInfo("reusing existing dispatch token")
 		if len(l.enrolledRepoIDs) > 0 {
 			l.ui.StepStart("updating dispatch token repo access list")
 			if err := l.client.SetOrgSecretRepos(ctx, l.org, dispatchTokenName, l.enrolledRepoIDs); err != nil {
@@ -72,8 +94,22 @@ func (l *DispatchTokenLayer) Install(ctx context.Context) error {
 		return nil
 	}
 
+	// Secret doesn't exist — prompt for it if we can.
+	if l.promptFn == nil {
+		return fmt.Errorf("dispatch token not provided and org secret %s does not exist", dispatchTokenName)
+	}
+
+	token, err := l.promptFn(ctx)
+	if err != nil {
+		return fmt.Errorf("prompting for dispatch token: %w", err)
+	}
+
+	return l.createSecret(ctx, token)
+}
+
+func (l *DispatchTokenLayer) createSecret(ctx context.Context, token string) error {
 	l.ui.StepStart("creating org secret " + dispatchTokenName)
-	if err := l.client.CreateOrgSecret(ctx, l.org, dispatchTokenName, l.dispatchToken, l.enrolledRepoIDs); err != nil {
+	if err := l.client.CreateOrgSecret(ctx, l.org, dispatchTokenName, token, l.enrolledRepoIDs); err != nil {
 		l.ui.StepFail(fmt.Sprintf("failed to create org secret %s", dispatchTokenName))
 		return fmt.Errorf("creating org secret %s: %w", dispatchTokenName, err)
 	}

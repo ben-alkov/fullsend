@@ -346,7 +346,7 @@ func runDryRun(ctx context.Context, client forge.Client, printer *ui.Printer, or
 	}
 
 	enrolledRepoIDs := collectEnrolledRepoIDs(allRepos, enabledRepos)
-	stack := buildLayerStack(org, client, cfg, printer, user, hasPrivate, enabledRepos, agentCreds, "", enrolledRepoIDs, inferenceProvider)
+	stack := buildLayerStack(org, client, cfg, printer, user, hasPrivate, enabledRepos, agentCreds, enrolledRepoIDs, inferenceProvider, false, nil, nil)
 
 	if err := runPreflight(ctx, stack, layers.OpInstall, client, printer); err != nil {
 		return err
@@ -431,50 +431,16 @@ func runInstall(ctx context.Context, client forge.Client, printer *ui.Printer, o
 		return fmt.Errorf("getting authenticated user: %w", err)
 	}
 
-	// Build stack with empty dispatch token for preflight — we check scopes
-	// before prompting the user so we fail early on missing admin:org.
-	stack := buildLayerStack(org, client, cfg, printer, user, hasPrivate, enabledRepos, agentCreds, "", enrolledRepoIDs, inferenceProvider)
+	stack := buildLayerStack(org, client, cfg, printer, user, hasPrivate, enabledRepos, agentCreds, enrolledRepoIDs, inferenceProvider, vendorBinary, vendorFullsendBinary, func(ctx context.Context) (string, error) {
+		return promptDispatchToken(ctx, client, printer, org)
+	})
 
 	if err := runPreflight(ctx, stack, layers.OpInstall, client, printer); err != nil {
 		return err
 	}
 	printer.Blank()
 
-	// Create the .fullsend config repo and write workflow files BEFORE
-	// prompting for the dispatch token. The user needs the repo to exist
-	// so they can select it when creating the fine-grained PAT, and the
-	// triage.yml workflow must exist so we can verify the PAT by attempting
-	// a real dispatch. Both layers are idempotent, so running them again
-	// in the full stack is harmless.
-	printer.Header("Preparing config repo")
-	printer.Blank()
-	configRepoLayer := layers.NewConfigRepoLayer(org, client, cfg, printer, hasPrivate)
-	if err := configRepoLayer.Install(ctx); err != nil {
-		return fmt.Errorf("creating config repo: %w", err)
-	}
-	workflowsLayer := layers.NewWorkflowsLayer(org, client, printer, user)
-	if err := workflowsLayer.Install(ctx); err != nil {
-		return fmt.Errorf("writing workflows: %w", err)
-	}
-
-	if vendorBinary {
-		if err := vendorFullsendBinary(ctx, client, printer, org); err != nil {
-			return fmt.Errorf("vendoring binary: %w", err)
-		}
-	}
-	printer.Blank()
-
-	// Dispatch token setup — the .fullsend repo now exists so the user
-	// can select it when creating the fine-grained PAT.
-	dispatchToken, err := promptDispatchToken(ctx, client, printer, org)
-	if err != nil {
-		return err
-	}
-
-	// Rebuild stack with the actual dispatch token.
-	stack = buildLayerStack(org, client, cfg, printer, user, hasPrivate, enabledRepos, agentCreds, dispatchToken, enrolledRepoIDs, inferenceProvider)
-
-	printer.Header("Installing layers")
+	printer.Header("Installing")
 	printer.Blank()
 
 	if err := stack.InstallAll(ctx); err != nil {
@@ -523,7 +489,7 @@ func runUninstall(ctx context.Context, client forge.Client, printer *ui.Printer,
 		layers.NewWorkflowsLayer(org, client, printer, ""),
 		layers.NewSecretsLayer(org, client, nil, printer),
 		layers.NewInferenceLayer(org, client, nil, printer),
-		layers.NewDispatchTokenLayer(org, client, "", nil, printer),
+		layers.NewDispatchTokenLayer(org, client, "", nil, printer, nil),
 		layers.NewEnrollmentLayer(org, client, nil, nil, printer),
 	)
 
@@ -642,7 +608,7 @@ func runAnalyze(ctx context.Context, client forge.Client, printer *ui.Printer, o
 		inferenceProvider = vertex.NewAnalyzeOnly()
 	}
 
-	stack := buildLayerStack(org, client, cfg, printer, user, hasPrivate, nil, agentCreds, "", nil, inferenceProvider)
+	stack := buildLayerStack(org, client, cfg, printer, user, hasPrivate, nil, agentCreds, nil, inferenceProvider, false, nil, nil)
 
 	if err := runPreflight(ctx, stack, layers.OpAnalyze, client, printer); err != nil {
 		return err
@@ -662,16 +628,19 @@ func buildLayerStack(
 	hasPrivate bool,
 	enabledRepos []string,
 	agentCreds []layers.AgentCredentials,
-	dispatchToken string,
 	enrolledRepoIDs []int64,
 	inferenceProvider inference.Provider,
+	vendorBinary bool,
+	vendorFn layers.VendorFunc,
+	promptTokenFn layers.PromptTokenFunc,
 ) *layers.Stack {
 	return layers.NewStack(
 		layers.NewConfigRepoLayer(org, client, cfg, printer, hasPrivate),
 		layers.NewWorkflowsLayer(org, client, printer, user),
+		layers.NewVendorBinaryLayer(org, client, printer, vendorBinary, vendorFn),
 		layers.NewSecretsLayer(org, client, agentCreds, printer),
 		layers.NewInferenceLayer(org, client, inferenceProvider, printer),
-		layers.NewDispatchTokenLayer(org, client, dispatchToken, enrolledRepoIDs, printer),
+		layers.NewDispatchTokenLayer(org, client, "", enrolledRepoIDs, printer, promptTokenFn),
 		layers.NewEnrollmentLayer(org, client, enabledRepos, cfg.DisabledRepos(), printer),
 	)
 }

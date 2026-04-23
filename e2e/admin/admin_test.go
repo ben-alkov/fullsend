@@ -327,7 +327,7 @@ func runUninstall(t *testing.T, env *e2eEnv) {
 		layers.NewWorkflowsLayer(testOrg, env.client, env.printer, ""),
 		layers.NewSecretsLayer(testOrg, env.client, nil, env.printer),
 		layers.NewInferenceLayer(testOrg, env.client, nil, env.printer),
-		layers.NewDispatchTokenLayer(testOrg, env.client, "", nil, env.printer),
+		layers.NewDispatchTokenLayer(testOrg, env.client, "", nil, env.printer, nil),
 		layers.NewEnrollmentLayer(testOrg, env.client, nil, nil, env.printer),
 	)
 	errs := stack.UninstallAll(context.Background())
@@ -344,7 +344,7 @@ func runUninstallAllowNotFound(t *testing.T, env *e2eEnv) {
 		layers.NewWorkflowsLayer(testOrg, env.client, env.printer, ""),
 		layers.NewSecretsLayer(testOrg, env.client, nil, env.printer),
 		layers.NewInferenceLayer(testOrg, env.client, nil, env.printer),
-		layers.NewDispatchTokenLayer(testOrg, env.client, "", nil, env.printer),
+		layers.NewDispatchTokenLayer(testOrg, env.client, "", nil, env.printer, nil),
 		layers.NewEnrollmentLayer(testOrg, env.client, nil, nil, env.printer),
 	)
 	errs := stack.UninstallAll(context.Background())
@@ -490,7 +490,7 @@ func verifyNotInstalled(t *testing.T, env *e2eEnv) {
 		layers.NewWorkflowsLayer(testOrg, env.client, env.printer, ""),
 		layers.NewSecretsLayer(testOrg, env.client, nil, env.printer),
 		layers.NewInferenceLayer(testOrg, env.client, nil, env.printer),
-		layers.NewDispatchTokenLayer(testOrg, env.client, "", nil, env.printer),
+		layers.NewDispatchTokenLayer(testOrg, env.client, "", nil, env.printer, nil),
 		layers.NewEnrollmentLayer(testOrg, env.client, nil, nil, env.printer),
 	)
 	reports, err := stack.AnalyzeAll(ctx)
@@ -809,7 +809,7 @@ func buildTestLayerStack(
 		layers.NewWorkflowsLayer(org, client, printer, user),
 		layers.NewSecretsLayer(org, client, agentCreds, printer),
 		layers.NewInferenceLayer(org, client, inferenceProvider, printer),
-		layers.NewDispatchTokenLayer(org, client, dispatchToken, enrolledRepoIDs, printer),
+		layers.NewDispatchTokenLayer(org, client, dispatchToken, enrolledRepoIDs, printer, nil),
 		layers.NewEnrollmentLayer(org, client, enabledRepos, cfg.DisabledRepos(), printer),
 	)
 }
