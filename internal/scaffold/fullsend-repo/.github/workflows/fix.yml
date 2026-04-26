@@ -234,6 +234,11 @@ jobs:
             > "${REVIEW_FILE}" 2>/dev/null || echo "" > "${REVIEW_FILE}"
           BYTE_COUNT="$(wc -c < "${REVIEW_FILE}")"
           echo "Pre-fetched review body: ${BYTE_COUNT} bytes"
+          MAX_REVIEW_BYTES=1048576  # 1 MB
+          if [[ "${BYTE_COUNT}" -gt "${MAX_REVIEW_BYTES}" ]]; then
+            echo "::error::Review body is ${BYTE_COUNT} bytes (max: ${MAX_REVIEW_BYTES})"
+            exit 1
+          fi
           if [[ "${TRIGGER_SOURCE}" == "bot" && "${BYTE_COUNT}" -le 1 ]]; then
             echo "::error::Bot-triggered run but review body is empty — nothing to fix"
             exit 1

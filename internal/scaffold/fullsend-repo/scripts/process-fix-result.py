@@ -154,9 +154,9 @@ def main(argv=None):
     print(f"Processed: {fixed} fixed, {disagreed} disagreed")
 
     summary_body = build_summary_body(data)
-    post_summary(repo, pr_number, summary_body, dry_run)
+    success = post_summary(repo, pr_number, summary_body, dry_run)
 
-    return 0
+    return 0 if success else 2
 
 
 if __name__ == "__main__":
