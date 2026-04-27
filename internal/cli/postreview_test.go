@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"testing"
 
@@ -130,6 +131,22 @@ func TestMinimizeStaleReviews_MinimizesAll(t *testing.T) {
 	// Called before creating a new review, so the single existing review is stale.
 	require.Len(t, fc.MinimizedComments, 1)
 	assert.Equal(t, "PRR_100", fc.MinimizedComments[0].NodeID)
+}
+
+func TestMinimizeStaleReviews_ErrorTolerance(t *testing.T) {
+	fc := forge.NewFakeClient()
+	fc.AuthenticatedUser = "fullsend-bot"
+	fc.PRReviews = map[string][]forge.PullRequestReview{
+		"acme/repo/1": {
+			{ID: 100, NodeID: "PRR_100", User: "fullsend-bot", State: "COMMENTED", Body: "review 1"},
+			{ID: 200, NodeID: "PRR_200", User: "fullsend-bot", State: "APPROVED", Body: "review 2"},
+		},
+	}
+	fc.Errors["MinimizeComment"] = fmt.Errorf("GraphQL error")
+
+	printer := ui.New(io.Discard)
+	err := minimizeStaleReviews(context.Background(), fc, "acme", "repo", 1, printer)
+	require.NoError(t, err, "minimizeStaleReviews should not return error when MinimizeComment fails")
 }
 
 func TestMinimizeStaleReviews_NoReviews(t *testing.T) {

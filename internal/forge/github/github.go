@@ -1040,6 +1040,12 @@ func (c *LiveClient) UpdateIssueComment(ctx context.Context, owner, repo string,
 // The reason must be one of: ABUSE, OFF_TOPIC, OUTDATED, RESOLVED,
 // DUPLICATE, SPAM.
 func (c *LiveClient) MinimizeComment(ctx context.Context, nodeID, reason string) error {
+	switch reason {
+	case "ABUSE", "OFF_TOPIC", "OUTDATED", "RESOLVED", "DUPLICATE", "SPAM":
+	default:
+		return fmt.Errorf("minimize comment %s: invalid reason %q", nodeID, reason)
+	}
+
 	query := `mutation($id: ID!, $reason: ReportedContentClassifiers!) {
 		minimizeComment(input: {subjectId: $id, classifier: $reason}) {
 			minimizedComment { isMinimized }

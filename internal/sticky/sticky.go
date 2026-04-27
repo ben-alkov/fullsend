@@ -85,8 +85,18 @@ func FindMarkedComment(comments []forge.IssueComment, marker string) *forge.Issu
 	return nil
 }
 
-// detailsRe matches a <details>...<summary>Previous ...</summary>...</details> block.
-var detailsRe = regexp.MustCompile(`(?s)<details>\s*<summary>Previous [^<]*</summary>\s*(.*?)\s*</details>`)
+// History blocks are wrapped with sentinel comments so extraction is safe
+// even when review content contains nested <details> tags.
+const (
+	historyStart = "<!-- sticky:history-start -->"
+	historyEnd   = "<!-- sticky:history-end -->"
+)
+
+// detailsRe matches history blocks using sentinel comment delimiters.
+var detailsRe = regexp.MustCompile(`(?s)<details>\s*<summary>Previous [^<]*</summary>\s*` + regexp.QuoteMeta(historyStart) + `\s*(.*?)\s*` + regexp.QuoteMeta(historyEnd) + `\s*</details>`)
+
+// legacyDetailsRe matches old-format history blocks without sentinel comments.
+var legacyDetailsRe = regexp.MustCompile(`(?s)<details>\s*<summary>Previous [^<]*</summary>\s*(.*?)\s*</details>`)
 
 // BuildUpdatedBody collapses the old comment body into a flat list of
 // <details> blocks and prepends the new body. Footer content (delimited
@@ -106,27 +116,38 @@ func BuildUpdatedBody(oldBody, newBody string, cfg Config) string {
 	}
 
 	// Extract existing <details> blocks from old content to flatten history.
+	// Try sentinel-delimited blocks first, fall back to legacy format.
 	var historyBlocks []string
 	matches := detailsRe.FindAllStringSubmatch(oldContent, -1)
+	activeRe := detailsRe
+	if len(matches) == 0 {
+		matches = legacyDetailsRe.FindAllStringSubmatch(oldContent, -1)
+		activeRe = legacyDetailsRe
+	}
 	for _, m := range matches {
 		historyBlocks = append(historyBlocks, m[1])
 	}
 
 	// The "current" old content is everything minus the old <details> blocks.
-	currentOld := detailsRe.ReplaceAllString(oldContent, "")
+	currentOld := activeRe.ReplaceAllString(oldContent, "")
 	currentOld = strings.TrimSpace(currentOld)
 
 	// Build flat history: the old current content becomes the newest history
 	// entry, followed by any previously accumulated history entries.
+	// Each block is wrapped with sentinel comments for safe extraction.
 	var collapsed strings.Builder
 	if currentOld != "" {
 		collapsed.WriteString("\n\n<details>\n<summary>Previous run</summary>\n\n")
+		collapsed.WriteString(historyStart + "\n")
 		collapsed.WriteString(currentOld)
+		collapsed.WriteString("\n" + historyEnd)
 		collapsed.WriteString("\n\n</details>")
 	}
 	for i, block := range historyBlocks {
 		collapsed.WriteString(fmt.Sprintf("\n\n<details>\n<summary>Previous run (%d)</summary>\n\n", i+2))
+		collapsed.WriteString(historyStart + "\n")
 		collapsed.WriteString(strings.TrimSpace(block))
+		collapsed.WriteString("\n" + historyEnd)
 		collapsed.WriteString("\n\n</details>")
 	}
 

@@ -110,8 +110,9 @@ type FakeClient struct {
 	MinimizedComments []MinimizedCommentRecord
 	CreatedReviews    []ReviewRecord
 
-	// internal counter for change proposal numbers
+	// internal counters
 	proposalCounter int
+	commentCounter  int
 }
 
 // err checks for an injected error for the given method name.
@@ -571,8 +572,10 @@ func (f *FakeClient) CreateIssueComment(_ context.Context, owner, repo string, n
 	if e := f.err("CreateIssueComment"); e != nil {
 		return nil, e
 	}
+	f.commentCounter++
 	comment := IssueComment{
-		ID:        42, // fixed ID for test predictability
+		ID:        f.commentCounter,
+		NodeID:    fmt.Sprintf("IC_fake_%d", f.commentCounter),
 		Body:      body,
 		Author:    f.AuthenticatedUser,
 		CreatedAt: "2026-01-01T00:00:00Z",
@@ -597,6 +600,14 @@ func (f *FakeClient) UpdateIssueComment(_ context.Context, owner, repo string, c
 		CommentID: commentID,
 		Body:      body,
 	})
+	for key, comments := range f.IssueComments {
+		for i, c := range comments {
+			if c.ID == commentID {
+				f.IssueComments[key][i].Body = body
+				return nil
+			}
+		}
+	}
 	return nil
 }
 

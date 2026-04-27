@@ -91,6 +91,25 @@ func TestBuildUpdatedBody_FlatHistory(t *testing.T) {
 	}
 }
 
+func TestBuildUpdatedBody_NestedDetailsInContent(t *testing.T) {
+	cfg := Config{Marker: "<!-- m -->"}
+
+	// Run 1 content contains a <details> block (common in GitHub review output).
+	body1 := "<!-- m -->\nReview findings:\n<details>\n<summary>Expanded diff</summary>\nsome diff content\n</details>\nEnd of review."
+	body2 := "<!-- m -->\nRun 2 content."
+	result2 := BuildUpdatedBody(body1, body2, cfg)
+
+	// Run 2 → Run 3 to verify content survives multiple collapses.
+	body3 := "<!-- m -->\nRun 3 content."
+	result3 := BuildUpdatedBody(result2, body3, cfg)
+
+	// All content should be preserved.
+	assert.Contains(t, result3, "Run 3 content.")
+	assert.Contains(t, result3, "Run 2 content.")
+	assert.Contains(t, result3, "some diff content")
+	assert.Contains(t, result3, "End of review.")
+}
+
 func TestBuildUpdatedBody_FooterStripping(t *testing.T) {
 	oldBody := "<!-- fullsend:test -->\nOld review.\n\n<!-- fullsend:test-footer -->\n_some footer info_"
 	newBody := "<!-- fullsend:test -->\nNew review."

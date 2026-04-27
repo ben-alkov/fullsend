@@ -189,3 +189,60 @@ func TestMinimizeComment_GraphQLError(t *testing.T) {
 	assert.Contains(t, err.Error(), "minimize comment IC_kwDOTest")
 	assert.Contains(t, err.Error(), "Could not resolve to a node")
 }
+
+func TestMinimizeComment_InvalidReason(t *testing.T) {
+	client := New("test-token")
+	err := client.MinimizeComment(context.Background(), "IC_kwDOTest", "INVALID")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid reason")
+}
+
+func TestCreatePullRequestReview(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "POST", r.Method)
+		assert.Equal(t, "/repos/owner/repo/pulls/7/reviews", r.URL.Path)
+
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		assert.Equal(t, "APPROVE", body["event"])
+		assert.Equal(t, "Looks good!", body["body"])
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]any{"id": 999})
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, srv)
+	err := client.CreatePullRequestReview(context.Background(), "owner", "repo", 7, "APPROVE", "Looks good!")
+	require.NoError(t, err)
+}
+
+func TestListPullRequestReviews(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "GET", r.Method)
+		assert.Equal(t, "/repos/owner/repo/pulls/3/reviews", r.URL.Path)
+		assert.Equal(t, "100", r.URL.Query().Get("per_page"))
+
+		json.NewEncoder(w).Encode([]map[string]any{
+			{
+				"id":           10,
+				"node_id":      "PRR_abc",
+				"user":         map[string]any{"login": "reviewer"},
+				"state":        "APPROVED",
+				"body":         "LGTM",
+				"submitted_at": "2026-01-01T00:00:00Z",
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, srv)
+	reviews, err := client.ListPullRequestReviews(context.Background(), "owner", "repo", 3)
+	require.NoError(t, err)
+	require.Len(t, reviews, 1)
+	assert.Equal(t, 10, reviews[0].ID)
+	assert.Equal(t, "PRR_abc", reviews[0].NodeID)
+	assert.Equal(t, "reviewer", reviews[0].User)
+	assert.Equal(t, "APPROVED", reviews[0].State)
+	assert.Equal(t, "LGTM", reviews[0].Body)
+}
