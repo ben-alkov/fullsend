@@ -33,12 +33,21 @@ func (c Config) maxSize() int {
 // bearing the marker, collapse old content into history, and create or
 // update in-place.
 func Post(ctx context.Context, client forge.Client, owner, repo string, number int, body string, cfg Config, printer *ui.Printer) error {
+	if strings.TrimSpace(body) == "" {
+		return fmt.Errorf("comment body is empty")
+	}
+	if strings.TrimSpace(cfg.Marker) == "" {
+		return fmt.Errorf("marker is empty")
+	}
+
+	botUser, _ := client.GetAuthenticatedUser(ctx)
+
 	comments, err := client.ListIssueComments(ctx, owner, repo, number)
 	if err != nil {
 		return fmt.Errorf("listing comments: %w", err)
 	}
 
-	existing := FindMarkedComment(comments, cfg.Marker)
+	existing := FindMarkedComment(comments, cfg.Marker, botUser)
 	markedBody := cfg.Marker + "\n" + body
 
 	if existing != nil {
@@ -75,9 +84,14 @@ func Post(ctx context.Context, client forge.Client, owner, repo string, number i
 }
 
 // FindMarkedComment returns the first comment whose body contains the
-// given marker string, or nil if none is found.
-func FindMarkedComment(comments []forge.IssueComment, marker string) *forge.IssueComment {
+// given marker string, or nil if none is found. When botUser is non-empty,
+// only comments authored by that user are considered. This prevents
+// untrusted users from spoofing the marker in their own comments.
+func FindMarkedComment(comments []forge.IssueComment, marker, botUser string) *forge.IssueComment {
 	for i := range comments {
+		if botUser != "" && comments[i].Author != botUser {
+			continue
+		}
 		if strings.Contains(comments[i].Body, marker) {
 			return &comments[i]
 		}
@@ -132,30 +146,47 @@ func BuildUpdatedBody(oldBody, newBody string, cfg Config) string {
 	currentOld := activeRe.ReplaceAllString(oldContent, "")
 	currentOld = strings.TrimSpace(currentOld)
 
-	// Build flat history: the old current content becomes the newest history
-	// entry, followed by any previously accumulated history entries.
-	// Each block is wrapped with sentinel comments for safe extraction.
-	var collapsed strings.Builder
+	// Assemble history entries and drop the oldest ones first if the
+	// combined body would exceed the size limit. This avoids blind
+	// byte-level truncation that could sever HTML sentinels and corrupt
+	// history on subsequent runs.
+	type histEntry struct {
+		summary string
+		content string
+	}
+	var entries []histEntry
 	if currentOld != "" {
-		collapsed.WriteString("\n\n<details>\n<summary>Previous run</summary>\n\n")
-		collapsed.WriteString(historyStart + "\n")
-		collapsed.WriteString(currentOld)
-		collapsed.WriteString("\n" + historyEnd)
-		collapsed.WriteString("\n\n</details>")
+		entries = append(entries, histEntry{summary: "Previous run", content: currentOld})
 	}
 	for i, block := range historyBlocks {
-		collapsed.WriteString(fmt.Sprintf("\n\n<details>\n<summary>Previous run (%d)</summary>\n\n", i+2))
-		collapsed.WriteString(historyStart + "\n")
-		collapsed.WriteString(strings.TrimSpace(block))
-		collapsed.WriteString("\n" + historyEnd)
-		collapsed.WriteString("\n\n</details>")
+		entries = append(entries, histEntry{
+			summary: fmt.Sprintf("Previous run (%d)", i+2),
+			content: strings.TrimSpace(block),
+		})
 	}
 
-	combined := newBody + collapsed.String()
+	formatHistory := func(ents []histEntry) string {
+		var b strings.Builder
+		for _, e := range ents {
+			b.WriteString(fmt.Sprintf("\n\n<details>\n<summary>%s</summary>\n\n", e.summary))
+			b.WriteString(historyStart + "\n")
+			b.WriteString(e.content)
+			b.WriteString("\n" + historyEnd)
+			b.WriteString("\n\n</details>")
+		}
+		return b.String()
+	}
 
-	// Re-append footer.
+	footerStr := ""
 	if footer != "" {
-		combined += "\n\n" + footer
+		footerStr = "\n\n" + footer
+	}
+
+	combined := newBody + formatHistory(entries) + footerStr
+
+	for len(combined) > cfg.maxSize() && len(entries) > 0 {
+		entries = entries[:len(entries)-1]
+		combined = newBody + formatHistory(entries) + footerStr
 	}
 
 	if len(combined) > cfg.maxSize() {

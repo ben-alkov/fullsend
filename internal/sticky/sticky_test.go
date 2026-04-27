@@ -21,21 +21,42 @@ var testCfg = Config{
 
 func TestFindMarkedComment(t *testing.T) {
 	comments := []forge.IssueComment{
-		{ID: 1, Body: "regular comment"},
-		{ID: 2, Body: "<!-- fullsend:test -->\nmarked"},
-		{ID: 3, Body: "another comment"},
+		{ID: 1, Body: "regular comment", Author: "human"},
+		{ID: 2, Body: "<!-- fullsend:test -->\nmarked", Author: "bot"},
+		{ID: 3, Body: "another comment", Author: "human"},
 	}
 
-	found := FindMarkedComment(comments, "<!-- fullsend:test -->")
+	found := FindMarkedComment(comments, "<!-- fullsend:test -->", "bot")
 	require.NotNil(t, found)
 	assert.Equal(t, 2, found.ID)
 
-	notFound := FindMarkedComment(comments, "<!-- fullsend:other -->")
+	notFound := FindMarkedComment(comments, "<!-- fullsend:other -->", "bot")
 	assert.Nil(t, notFound)
 }
 
+func TestFindMarkedComment_IgnoresSpoofedMarker(t *testing.T) {
+	comments := []forge.IssueComment{
+		{ID: 1, Body: "<!-- fullsend:test -->\nspoofed by attacker", Author: "attacker"},
+		{ID: 2, Body: "<!-- fullsend:test -->\nreal bot comment", Author: "bot"},
+	}
+
+	found := FindMarkedComment(comments, "<!-- fullsend:test -->", "bot")
+	require.NotNil(t, found)
+	assert.Equal(t, 2, found.ID, "should skip spoofed comment from attacker")
+}
+
+func TestFindMarkedComment_EmptyBotUser(t *testing.T) {
+	comments := []forge.IssueComment{
+		{ID: 1, Body: "<!-- fullsend:test -->\nmarked", Author: "anyone"},
+	}
+
+	found := FindMarkedComment(comments, "<!-- fullsend:test -->", "")
+	require.NotNil(t, found, "empty botUser should match any author")
+	assert.Equal(t, 1, found.ID)
+}
+
 func TestFindMarkedComment_Empty(t *testing.T) {
-	found := FindMarkedComment(nil, "<!-- test -->")
+	found := FindMarkedComment(nil, "<!-- test -->", "bot")
 	assert.Nil(t, found)
 }
 
@@ -152,6 +173,24 @@ func TestTruncateBody_OverLimit(t *testing.T) {
 	assert.Contains(t, result, "truncated")
 }
 
+func TestBuildUpdatedBody_DropsOldestHistoryOnOverflow(t *testing.T) {
+	cfg := Config{Marker: "<!-- m -->", MaxSize: 500}
+
+	body1 := "<!-- m -->\n" + strings.Repeat("A", 100)
+	body2 := "<!-- m -->\n" + strings.Repeat("B", 100)
+	result2 := BuildUpdatedBody(body1, body2, cfg)
+
+	body3 := "<!-- m -->\n" + strings.Repeat("C", 100)
+	result3 := BuildUpdatedBody(result2, body3, cfg)
+
+	body4 := "<!-- m -->\n" + strings.Repeat("D", 100)
+	result4 := BuildUpdatedBody(result3, body4, cfg)
+
+	assert.LessOrEqual(t, len(result4), 500, "combined body should not exceed maxSize")
+	assert.Contains(t, result4, strings.Repeat("D", 100), "current content must be preserved")
+	assert.NotContains(t, result4, "truncated", "should drop history blocks, not blind-truncate")
+}
+
 func TestTruncateBody_RuneSafe(t *testing.T) {
 	// Build a string with multi-byte UTF-8 characters that would be split
 	// at a naive byte boundary.
@@ -210,6 +249,36 @@ func TestPost_DryRun(t *testing.T) {
 
 	assert.Empty(t, client.IssueComments)
 	assert.Empty(t, client.UpdatedComments)
+}
+
+func TestPost_EmptyBody(t *testing.T) {
+	client := forge.NewFakeClient()
+	printer := ui.New(io.Discard)
+
+	cfg := Config{Marker: "<!-- test -->"}
+	err := Post(context.Background(), client, "o", "r", 1, "", cfg, printer)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "empty")
+}
+
+func TestPost_WhitespaceBody(t *testing.T) {
+	client := forge.NewFakeClient()
+	printer := ui.New(io.Discard)
+
+	cfg := Config{Marker: "<!-- test -->"}
+	err := Post(context.Background(), client, "o", "r", 1, "  \n\t  ", cfg, printer)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "empty")
+}
+
+func TestPost_EmptyMarker(t *testing.T) {
+	client := forge.NewFakeClient()
+	printer := ui.New(io.Discard)
+
+	cfg := Config{Marker: ""}
+	err := Post(context.Background(), client, "o", "r", 1, "Body.", cfg, printer)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "marker")
 }
 
 func TestPost_DryRunExisting(t *testing.T) {
