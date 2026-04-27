@@ -34,6 +34,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           STALE_DAYS: "30"
-        run: >-
+        run: >-  # schedule trigger has no inputs — dry-run is false (live) by design
           ./hack/clean-stale-branches
           ${{ github.event.inputs.dry-run == 'true' && '--dry-run' || '' }}
