@@ -625,7 +625,10 @@ func runAnalyze(ctx context.Context, client forge.Client, printer *ui.Printer, o
 	var inferenceProvider inference.Provider
 	if providerName := loadExistingInferenceProvider(ctx, client, org); providerName != "" {
 		mode := vertex.AuthModeSAKey
-		if wifExists, _ := client.RepoSecretExists(ctx, org, forge.ConfigRepoName, vertex.SecretWIFProvider); wifExists {
+		wifExists, err := client.RepoSecretExists(ctx, org, forge.ConfigRepoName, vertex.SecretWIFProvider)
+		if err != nil {
+			printer.StepWarn(fmt.Sprintf("Could not check WIF secret: %v (defaulting to SA key mode)", err))
+		} else if wifExists {
 			mode = vertex.AuthModeWIF
 		}
 		inferenceProvider = vertex.NewAnalyzeOnly(mode)
