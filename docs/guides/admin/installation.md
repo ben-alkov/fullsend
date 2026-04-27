@@ -17,7 +17,7 @@ This guide walks through installing fullsend in a GitHub organization and enroll
 
 - **GCP project** with the [Vertex AI API](https://console.cloud.google.com/apis/library/aiplatform.googleapis.com) enabled
 
-Available regions for Claude on Vertex AI include `us-east5`, `europe-west1`, and `asia-southeast1`. Check the [Vertex AI documentation](https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/use-claude#regions) for the latest list.
+The default region is `global`. For a list of all available regions, see the [Vertex AI documentation](https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/use-claude#regions).
 
 ## 1. Set up GCP authentication
 
@@ -134,7 +134,7 @@ export REPO_NAME="<repo-name>"
 fullsend admin install "$ORG_NAME" \
   --repo "$REPO_NAME" \
   --gcp-project "$GCP_PROJECT" \
-  --gcp-region us-east5 \
+  --gcp-region global \
   --gcp-wif-provider "$WIF_PROVIDER" \
   --gcp-wif-sa-email "$WIF_SA_EMAIL"
 ```
@@ -147,7 +147,7 @@ export REPO_NAME="<repo-name>"
 fullsend admin install "$ORG_NAME" \
   --repo "$REPO_NAME" \
   --gcp-project "$GCP_PROJECT" \
-  --gcp-region us-east5 \
+  --gcp-region global \
   --gcp-credentials-file sa-key.json
 rm sa-key.json
 ```
@@ -163,7 +163,7 @@ If you already have fullsend installed with a service account key:
      --repo "$REPO_NAME" \
      --skip-app-setup \
      --gcp-project "$GCP_PROJECT" \
-     --gcp-region us-east5 \
+     --gcp-region global \
      --gcp-wif-provider "$WIF_PROVIDER" \
      --gcp-wif-sa-email "$WIF_SA_EMAIL"
    ```
