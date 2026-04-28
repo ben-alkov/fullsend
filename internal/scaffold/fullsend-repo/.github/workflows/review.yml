@@ -108,6 +108,9 @@ jobs:
         with:
           credentials_json: ${{ secrets.FULLSEND_GCP_SA_KEY_JSON }}
 
+      # GCP_OIDC_TOKEN_FILE is expected by google-github-actions/auth when using
+      # WIF. For non-WIF (SA key), we set it to an empty file to avoid undefined
+      # variable errors in downstream steps that may reference it.
       - name: Set GCP_OIDC_TOKEN_FILE for non-WIF
         if: vars.FULLSEND_GCP_AUTH_MODE != 'wif'
         run: |

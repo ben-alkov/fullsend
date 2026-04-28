@@ -41,6 +41,10 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: .fullsend
 
+      # Note: SOURCE_REPO is not validated here. Validation (format check, owner
+      # check, enrollment allowlist) is performed by downstream agent workflows
+      # before they act on the repository. This keeps the dispatcher simple and
+      # ensures validation happens at the point of use.
       - name: Find and trigger agent workflows for stage
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -61,8 +65,8 @@ jobs:
 
             # Extract stage from comment (first line with # fullsend-stage:)
             # Format: # fullsend-stage: <stage-name>
-            # Stage names must not contain colons
-            workflow_stage=$(grep -E '^# fullsend-stage:' "$workflow" | head -1 | sed -n 's/^# fullsend-stage: *\(.*\)/\1/p')
+            # Stage names must not contain colons or trailing whitespace
+            workflow_stage=$(grep -E '^# fullsend-stage:' "$workflow" | head -1 | sed -n 's/^# fullsend-stage: *\([^ ]*\).*/\1/p')
 
             # Skip if no stage marker or doesn't match
             [[ -z "$workflow_stage" ]] && continue
