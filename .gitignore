@@ -6,3 +6,4 @@ __pycache__/
 _site/
 bin/
 .playwright/
+.claude/settings.local.json

@@ -82,7 +82,6 @@ func TestDispatchWorkflowContent(t *testing.T) {
 	assert.Contains(t, s, "permissions:")
 	assert.Contains(t, s, "actions: write")
 	assert.Contains(t, s, "contents: read")
-	assert.Contains(t, s, "id-token: write")
 	assert.Contains(t, s, "set -euo pipefail")
 	assert.Contains(t, s, "dispatched=0")
 	assert.Contains(t, s, "No workflows found for stage")

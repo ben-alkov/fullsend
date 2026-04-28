@@ -27,10 +27,9 @@ jobs:
     permissions:
       actions: write
       contents: read
-      id-token: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Generate token for triggering workflows
         id: app-token
