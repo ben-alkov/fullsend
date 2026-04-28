@@ -1098,6 +1098,12 @@ func (c *LiveClient) GetPullRequestHeadSHA(ctx context.Context, owner, repo stri
 // CreatePullRequestReview submits a formal review on a pull request.
 // The event must be one of: APPROVE, REQUEST_CHANGES, COMMENT.
 func (c *LiveClient) CreatePullRequestReview(ctx context.Context, owner, repo string, number int, event, body string) error {
+	switch event {
+	case "APPROVE", "REQUEST_CHANGES", "COMMENT":
+	default:
+		return fmt.Errorf("create review on #%d: invalid event %q", number, event)
+	}
+
 	payload := map[string]string{
 		"event": event,
 		"body":  body,

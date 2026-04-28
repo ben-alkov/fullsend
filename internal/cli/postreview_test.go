@@ -89,9 +89,10 @@ func TestCheckStaleHead_Matches(t *testing.T) {
 	fc.PullRequestHeadSHA = "abc1234567890"
 	printer := ui.New(io.Discard)
 
-	stale, err := checkStaleHead(context.Background(), fc, "o", "r", 1, "abc1234567890", false, printer)
+	stale, currentSHA, err := checkStaleHead(context.Background(), fc, "o", "r", 1, "abc1234567890", false, printer)
 	require.NoError(t, err)
 	assert.False(t, stale)
+	assert.Equal(t, "abc1234567890", currentSHA)
 }
 
 func TestCheckStaleHead_Stale(t *testing.T) {
@@ -99,16 +100,17 @@ func TestCheckStaleHead_Stale(t *testing.T) {
 	fc.PullRequestHeadSHA = "new_sha_456"
 	printer := ui.New(io.Discard)
 
-	stale, err := checkStaleHead(context.Background(), fc, "o", "r", 1, "old_sha_123", false, printer)
+	stale, currentSHA, err := checkStaleHead(context.Background(), fc, "o", "r", 1, "old_sha_123", false, printer)
 	require.NoError(t, err)
 	assert.True(t, stale)
+	assert.Equal(t, "new_sha_456", currentSHA)
 }
 
 func TestCheckStaleHead_DryRun(t *testing.T) {
 	fc := forge.NewFakeClient()
 	printer := ui.New(io.Discard)
 
-	stale, err := checkStaleHead(context.Background(), fc, "o", "r", 1, "any_sha", true, printer)
+	stale, _, err := checkStaleHead(context.Background(), fc, "o", "r", 1, "any_sha", true, printer)
 	require.NoError(t, err)
 	assert.False(t, stale, "dry run should not report stale")
 }
@@ -120,7 +122,7 @@ func TestPostStaleHeadNotice(t *testing.T) {
 	printer := ui.New(io.Discard)
 
 	cfg := sticky.Config{Marker: "<!-- test -->"}
-	err := postStaleHeadNotice(context.Background(), fc, "o", "r", 1, "old_sha_123", cfg, printer)
+	err := postStaleHeadNotice(context.Background(), fc, "o", "r", 1, "old_sha_123", "new_sha_456", cfg, printer)
 	require.Error(t, err, "should return an error indicating staleness")
 	assert.Contains(t, err.Error(), "stale")
 

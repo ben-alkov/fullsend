@@ -56,6 +56,10 @@ has moved, a stale-head failure is posted instead.`,
 				return fmt.Errorf("--token or GITHUB_TOKEN required")
 			}
 
+			if pr <= 0 {
+				return fmt.Errorf("--pr must be a positive integer, got %d", pr)
+			}
+
 			parts := strings.SplitN(repo, "/", 2)
 			if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 				return fmt.Errorf("--repo must be in owner/repo format, got %q", repo)
@@ -88,12 +92,12 @@ has moved, a stale-head failure is posted instead.`,
 			// Stale-head check: refuse to post a review against code
 			// that has changed since the agent reviewed it.
 			if parsed.HeadSHA != "" {
-				stale, err := checkStaleHead(cmd.Context(), client, owner, repoName, pr, parsed.HeadSHA, dryRun, printer)
+				stale, currentSHA, err := checkStaleHead(cmd.Context(), client, owner, repoName, pr, parsed.HeadSHA, dryRun, printer)
 				if err != nil {
 					return err
 				}
 				if stale {
-					return postStaleHeadNotice(cmd.Context(), client, owner, repoName, pr, parsed.HeadSHA, cfg, printer)
+					return postStaleHeadNotice(cmd.Context(), client, owner, repoName, pr, parsed.HeadSHA, currentSHA, cfg, printer)
 				}
 			}
 
@@ -146,27 +150,29 @@ func reviewActionToEvent(action string) (string, bool) {
 }
 
 // checkStaleHead compares the reviewed SHA against the current PR HEAD.
-// Returns true if the HEAD has moved (review is stale).
-func checkStaleHead(ctx context.Context, client forge.Client, owner, repo string, pr int, reviewedSHA string, dryRun bool, printer *ui.Printer) (bool, error) {
+// Returns (stale, currentSHA, error). When stale is true, currentSHA
+// contains the actual PR HEAD so callers can include it in notices
+// without a redundant API call.
+func checkStaleHead(ctx context.Context, client forge.Client, owner, repo string, pr int, reviewedSHA string, dryRun bool, printer *ui.Printer) (bool, string, error) {
 	printer.StepStart("Checking PR HEAD against reviewed SHA")
 
 	if dryRun {
 		printer.StepInfo("Dry run — would check HEAD SHA")
-		return false, nil
+		return false, "", nil
 	}
 
 	currentSHA, err := client.GetPullRequestHeadSHA(ctx, owner, repo, pr)
 	if err != nil {
-		return false, fmt.Errorf("fetching PR HEAD: %w", err)
+		return false, "", fmt.Errorf("fetching PR HEAD: %w", err)
 	}
 
 	if currentSHA != reviewedSHA {
 		printer.StepInfo(fmt.Sprintf("Stale: reviewed %s but HEAD is now %s", reviewedSHA[:minLen(len(reviewedSHA), 12)], currentSHA[:minLen(len(currentSHA), 12)]))
-		return true, nil
+		return true, currentSHA, nil
 	}
 
 	printer.StepDone("HEAD matches reviewed SHA")
-	return false, nil
+	return false, currentSHA, nil
 }
 
 func minLen(a, b int) int {
@@ -178,9 +184,7 @@ func minLen(a, b int) int {
 
 // postStaleHeadNotice posts a failure comment when the PR HEAD has moved
 // since the review was generated.
-func postStaleHeadNotice(ctx context.Context, client forge.Client, owner, repo string, pr int, reviewedSHA string, cfg sticky.Config, printer *ui.Printer) error {
-	currentSHA, _ := client.GetPullRequestHeadSHA(ctx, owner, repo, pr)
-
+func postStaleHeadNotice(ctx context.Context, client forge.Client, owner, repo string, pr int, reviewedSHA, currentSHA string, cfg sticky.Config, printer *ui.Printer) error {
 	body := fmt.Sprintf(`## Review: automated review
 
 **Outcome:** failure

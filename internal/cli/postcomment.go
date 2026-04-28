@@ -45,6 +45,10 @@ The --result flag accepts a file path or "-" for stdin.`,
 				return fmt.Errorf("--token or GITHUB_TOKEN required")
 			}
 
+			if number <= 0 {
+				return fmt.Errorf("--number must be a positive integer, got %d", number)
+			}
+
 			parts := strings.SplitN(repo, "/", 2)
 			if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 				return fmt.Errorf("--repo must be in owner/repo format, got %q", repo)
