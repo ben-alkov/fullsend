@@ -866,16 +866,21 @@ func buildScanContextCommand(repoDir, traceID string) string {
 	envFile := sandbox.SandboxWorkspace + "/.env"
 
 	return fmt.Sprintf(
-		"source %s && FULLSEND_TRACE_ID='%s' find '%s' -maxdepth 5 -type f \\( %s \\) -exec fullsend scan context {} +",
-		envFile, traceID, escapedDir, inameExpr,
+		"source %s && FULLSEND_TRACE_ID='%s' find '%s' -maxdepth %d -type f \\( %s \\) -exec fullsend scan context {} +",
+		envFile, traceID, escapedDir, maxContextScanDepth, inameExpr,
 	)
 }
+
+// maxContextScanDepth is the maximum directory depth for scanning context
+// files. Shared between host-side (scanRepoContextFiles) and sandbox-side
+// (buildScanContextCommand) scans to ensure parity.
+const maxContextScanDepth = 5
 
 // scanRepoContextFiles walks the target repo directory for known context
 // files (CLAUDE.md, AGENTS.md, SKILL.md, etc.) and runs the InputPipeline
 // on each. Returns all findings across scanned files.
 func scanRepoContextFiles(repoDir string) []security.Finding {
-	const maxScanDepth = 5
+	const maxScanDepth = maxContextScanDepth
 	const maxContextFileSize int64 = 1 << 20 // 1 MB
 
 	pipeline := security.InputPipeline()
