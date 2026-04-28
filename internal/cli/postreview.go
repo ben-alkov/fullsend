@@ -85,7 +85,7 @@ has moved, a stale-head failure is posted instead.`,
 				parsed.HeadSHA = headSHA
 			}
 			if parsed.HeadSHA != "" && !hexSHARe.MatchString(parsed.HeadSHA) {
-				return fmt.Errorf("head SHA must be a hex string (7-64 chars), got %q", parsed.HeadSHA)
+				return fmt.Errorf("head SHA must be a 40 or 64 character hex string, got %q", parsed.HeadSHA)
 			}
 
 			printer.Header("Post Review")
@@ -173,7 +173,7 @@ func checkStaleHead(ctx context.Context, client forge.Client, owner, repo string
 		return false, "", fmt.Errorf("fetching PR HEAD: %w", err)
 	}
 
-	if currentSHA != reviewedSHA {
+	if !strings.EqualFold(currentSHA, reviewedSHA) {
 		printer.StepInfo(fmt.Sprintf("Stale: reviewed %s but HEAD is now %s", reviewedSHA[:min(len(reviewedSHA), 12)], currentSHA[:min(len(currentSHA), 12)]))
 		return true, currentSHA, nil
 	}
@@ -203,7 +203,9 @@ func postFailureNotice(ctx context.Context, client forge.Client, owner, repo str
 	printer.StepStart("Review agent reported failure, posting notice")
 
 	reason := parsed.Reason
-	if !reasonRe.MatchString(reason) {
+	if reason == "" {
+		reason = "unknown"
+	} else if !reasonRe.MatchString(reason) {
 		reason = "invalid-reason"
 	}
 

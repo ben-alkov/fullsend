@@ -163,6 +163,32 @@ func TestPostFailureNotice_WithoutBody(t *testing.T) {
 	assert.Contains(t, comments[0].Body, "NOT reviewed")
 }
 
+func TestPostFailureNotice_EmptyReason(t *testing.T) {
+	fc := forge.NewFakeClient()
+	fc.AuthenticatedUser = "bot"
+	printer := ui.New(io.Discard)
+
+	cfg := sticky.Config{Marker: "<!-- test -->"}
+	parsed := ReviewResult{Action: "failure", Reason: ""}
+	err := postFailureNotice(context.Background(), fc, "o", "r", 1, parsed, cfg, printer)
+	require.NoError(t, err)
+
+	comments := fc.IssueComments["o/r/1"]
+	require.Len(t, comments, 1)
+	assert.Contains(t, comments[0].Body, "unknown")
+	assert.Contains(t, comments[0].Body, "NOT reviewed")
+}
+
+func TestCheckStaleHead_CaseInsensitive(t *testing.T) {
+	fc := forge.NewFakeClient()
+	fc.PullRequestHeadSHA = "abc1234567890abcdef1234567890abcdef123456"
+	printer := ui.New(io.Discard)
+
+	stale, _, err := checkStaleHead(context.Background(), fc, "o", "r", 1, "ABC1234567890ABCDEF1234567890ABCDEF123456", false, printer)
+	require.NoError(t, err)
+	assert.False(t, stale, "case-insensitive SHAs should match")
+}
+
 func TestSubmitFormalReview_CreatesAndMinimizesStale(t *testing.T) {
 	fc := forge.NewFakeClient()
 	fc.AuthenticatedUser = "fullsend-bot"
