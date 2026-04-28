@@ -148,6 +148,9 @@ type Client interface {
 	UpdateIssueComment(ctx context.Context, owner, repo string, commentID int, body string) error
 	MinimizeComment(ctx context.Context, nodeID, reason string) error
 
+	// Pull request operations
+	GetPullRequestHeadSHA(ctx context.Context, owner, repo string, number int) (string, error)
+
 	// Pull request review operations
 	CreatePullRequestReview(ctx context.Context, owner, repo string, number int, event, body string) error
 	ListPullRequestReviews(ctx context.Context, owner, repo string, number int) ([]PullRequestReview, error)

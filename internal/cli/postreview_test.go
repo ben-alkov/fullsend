@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/fullsend-ai/fullsend/internal/forge"
+	"github.com/fullsend-ai/fullsend/internal/sticky"
 	"github.com/fullsend-ai/fullsend/internal/ui"
 )
 
@@ -44,6 +45,22 @@ func TestParseReviewResult_EmptyBody(t *testing.T) {
 	assert.Contains(t, err.Error(), "empty body")
 }
 
+func TestParseReviewResult_FailureAllowsEmptyBody(t *testing.T) {
+	input := `{"action": "failure", "reason": "tool-failure"}`
+	result, err := parseReviewResult(input)
+	require.NoError(t, err)
+	assert.Equal(t, "failure", result.Action)
+	assert.Equal(t, "tool-failure", result.Reason)
+	assert.Empty(t, result.Body)
+}
+
+func TestParseReviewResult_HeadSHA(t *testing.T) {
+	input := `{"body": "Review", "action": "approve", "head_sha": "abc1234"}`
+	result, err := parseReviewResult(input)
+	require.NoError(t, err)
+	assert.Equal(t, "abc1234", result.HeadSHA)
+}
+
 func TestReviewActionToEvent(t *testing.T) {
 	tests := []struct {
 		action    string
@@ -67,6 +84,83 @@ func TestReviewActionToEvent(t *testing.T) {
 	}
 }
 
+func TestCheckStaleHead_Matches(t *testing.T) {
+	fc := forge.NewFakeClient()
+	fc.PullRequestHeadSHA = "abc1234567890"
+	printer := ui.New(io.Discard)
+
+	stale, err := checkStaleHead(context.Background(), fc, "o", "r", 1, "abc1234567890", false, printer)
+	require.NoError(t, err)
+	assert.False(t, stale)
+}
+
+func TestCheckStaleHead_Stale(t *testing.T) {
+	fc := forge.NewFakeClient()
+	fc.PullRequestHeadSHA = "new_sha_456"
+	printer := ui.New(io.Discard)
+
+	stale, err := checkStaleHead(context.Background(), fc, "o", "r", 1, "old_sha_123", false, printer)
+	require.NoError(t, err)
+	assert.True(t, stale)
+}
+
+func TestCheckStaleHead_DryRun(t *testing.T) {
+	fc := forge.NewFakeClient()
+	printer := ui.New(io.Discard)
+
+	stale, err := checkStaleHead(context.Background(), fc, "o", "r", 1, "any_sha", true, printer)
+	require.NoError(t, err)
+	assert.False(t, stale, "dry run should not report stale")
+}
+
+func TestPostStaleHeadNotice(t *testing.T) {
+	fc := forge.NewFakeClient()
+	fc.AuthenticatedUser = "bot"
+	fc.PullRequestHeadSHA = "new_sha_456"
+	printer := ui.New(io.Discard)
+
+	cfg := sticky.Config{Marker: "<!-- test -->"}
+	err := postStaleHeadNotice(context.Background(), fc, "o", "r", 1, "old_sha_123", cfg, printer)
+	require.Error(t, err, "should return an error indicating staleness")
+	assert.Contains(t, err.Error(), "stale")
+
+	comments := fc.IssueComments["o/r/1"]
+	require.Len(t, comments, 1)
+	assert.Contains(t, comments[0].Body, "stale-head")
+	assert.Contains(t, comments[0].Body, "old_sha_123")
+}
+
+func TestPostFailureNotice_WithBody(t *testing.T) {
+	fc := forge.NewFakeClient()
+	fc.AuthenticatedUser = "bot"
+	printer := ui.New(io.Discard)
+
+	cfg := sticky.Config{Marker: "<!-- test -->"}
+	parsed := ReviewResult{Action: "failure", Body: "Custom failure message", Reason: "tool-failure"}
+	err := postFailureNotice(context.Background(), fc, "o", "r", 1, parsed, cfg, printer)
+	require.NoError(t, err)
+
+	comments := fc.IssueComments["o/r/1"]
+	require.Len(t, comments, 1)
+	assert.Contains(t, comments[0].Body, "Custom failure message")
+}
+
+func TestPostFailureNotice_WithoutBody(t *testing.T) {
+	fc := forge.NewFakeClient()
+	fc.AuthenticatedUser = "bot"
+	printer := ui.New(io.Discard)
+
+	cfg := sticky.Config{Marker: "<!-- test -->"}
+	parsed := ReviewResult{Action: "failure", Reason: "token-limit"}
+	err := postFailureNotice(context.Background(), fc, "o", "r", 1, parsed, cfg, printer)
+	require.NoError(t, err)
+
+	comments := fc.IssueComments["o/r/1"]
+	require.Len(t, comments, 1)
+	assert.Contains(t, comments[0].Body, "token-limit")
+	assert.Contains(t, comments[0].Body, "NOT reviewed")
+}
+
 func TestSubmitFormalReview_CreatesAndMinimizesStale(t *testing.T) {
 	fc := forge.NewFakeClient()
 	fc.AuthenticatedUser = "fullsend-bot"
@@ -83,12 +177,9 @@ func TestSubmitFormalReview_CreatesAndMinimizesStale(t *testing.T) {
 	err := submitFormalReview(context.Background(), fc, "acme", "repo", 1, parsed, false, printer)
 	require.NoError(t, err)
 
-	// Should have created one review.
 	require.Len(t, fc.CreatedReviews, 1)
 	assert.Equal(t, "APPROVE", fc.CreatedReviews[0].Event)
 
-	// Stale reviews are minimized BEFORE creating the new one, so both
-	// existing reviews by fullsend-bot (IDs 100, 300) are minimized.
 	require.Len(t, fc.MinimizedComments, 2)
 	assert.Equal(t, "PRR_100", fc.MinimizedComments[0].NodeID)
 	assert.Equal(t, "OUTDATED", fc.MinimizedComments[0].Reason)
@@ -128,7 +219,6 @@ func TestMinimizeStaleReviews_MinimizesAll(t *testing.T) {
 	printer := ui.New(io.Discard)
 	err := minimizeStaleReviews(context.Background(), fc, "acme", "repo", 1, printer)
 	require.NoError(t, err)
-	// Called before creating a new review, so the single existing review is stale.
 	require.Len(t, fc.MinimizedComments, 1)
 	assert.Equal(t, "PRR_100", fc.MinimizedComments[0].NodeID)
 }

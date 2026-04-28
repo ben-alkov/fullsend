@@ -19,25 +19,33 @@ const reviewMarker = "<!-- fullsend:review-agent -->"
 
 func newPostReviewCmd() *cobra.Command {
 	var (
-		repo   string
-		pr     int
-		result string
-		token  string
-		dryRun bool
+		repo    string
+		pr      int
+		result  string
+		token   string
+		headSHA string
+		dryRun  bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "post-review",
 		Short: "Post or update a sticky review comment on a PR",
-		Long: `Posts review findings as a sticky issue comment on a pull request.
+		Long: `Posts review findings as a sticky issue comment on a pull request,
+then submits a formal GitHub PR review with the disposition.
 
 On first run, creates a new comment with a hidden HTML marker.
 On re-runs, finds the existing comment, collapses old content into
-a <details> block, and edits in-place. This prevents review comment
-flooding on force-push, manual re-run, or workflow retry.
+a <details> block, and edits in-place. Stale formal reviews by the
+same user are minimized before submitting a new one.
 
-The --result flag accepts a file path containing the review body text,
-or reads from stdin if set to "-".`,
+The --result flag accepts a file path containing a JSON review result
+(with action, body, and optionally head_sha fields), or reads from
+stdin if set to "-". Plain text input is treated as a comment-only
+review.
+
+When --head-sha is provided (or head_sha is in the JSON), the CLI
+verifies that the PR HEAD still matches before posting. If the HEAD
+has moved, a stale-head failure is posted instead.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			printer := ui.New(os.Stdout)
 
@@ -64,6 +72,11 @@ or reads from stdin if set to "-".`,
 				return fmt.Errorf("parsing review result: %w", err)
 			}
 
+			// CLI flag takes precedence over JSON field.
+			if headSHA != "" {
+				parsed.HeadSHA = headSHA
+			}
+
 			printer.Header("Post Review")
 
 			client := gh.New(token)
@@ -71,6 +84,25 @@ or reads from stdin if set to "-".`,
 				Marker: reviewMarker,
 				DryRun: dryRun,
 			}
+
+			// Stale-head check: refuse to post a review against code
+			// that has changed since the agent reviewed it.
+			if parsed.HeadSHA != "" {
+				stale, err := checkStaleHead(cmd.Context(), client, owner, repoName, pr, parsed.HeadSHA, dryRun, printer)
+				if err != nil {
+					return err
+				}
+				if stale {
+					return postStaleHeadNotice(cmd.Context(), client, owner, repoName, pr, parsed.HeadSHA, cfg, printer)
+				}
+			}
+
+			// Failure action: post a failure notice as a sticky comment,
+			// skip formal review.
+			if strings.ToLower(parsed.Action) == "failure" {
+				return postFailureNotice(cmd.Context(), client, owner, repoName, pr, parsed, cfg, printer)
+			}
+
 			if err := sticky.Post(cmd.Context(), client, owner, repoName, pr, parsed.Body, cfg, printer); err != nil {
 				return err
 			}
@@ -81,8 +113,9 @@ or reads from stdin if set to "-".`,
 
 	cmd.Flags().StringVar(&repo, "repo", "", "repository in owner/repo format (required)")
 	cmd.Flags().IntVar(&pr, "pr", 0, "pull request number (required)")
-	cmd.Flags().StringVar(&result, "result", "-", "path to review body file, or '-' for stdin")
+	cmd.Flags().StringVar(&result, "result", "-", "path to review result file, or '-' for stdin")
 	cmd.Flags().StringVar(&token, "token", "", "GitHub token (default: $GITHUB_TOKEN)")
+	cmd.Flags().StringVar(&headSHA, "head-sha", "", "expected PR HEAD SHA (skips review if HEAD has moved)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print what would be posted without making API calls")
 	_ = cmd.MarkFlagRequired("repo")
 	_ = cmd.MarkFlagRequired("pr")
@@ -92,8 +125,10 @@ or reads from stdin if set to "-".`,
 
 // ReviewResult represents a parsed review result file.
 type ReviewResult struct {
-	Body   string `json:"body"`
-	Action string `json:"action"` // "approve", "request-changes", "comment"
+	Body    string `json:"body"`
+	Action  string `json:"action"`   // "approve", "request-changes", "comment", "failure"
+	HeadSHA string `json:"head_sha"` // commit SHA the agent reviewed
+	Reason  string `json:"reason"`   // failure reason (when action is "failure")
 }
 
 // reviewActionToEvent maps a ReviewResult action to a GitHub PR review event.
@@ -108,6 +143,78 @@ func reviewActionToEvent(action string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+// checkStaleHead compares the reviewed SHA against the current PR HEAD.
+// Returns true if the HEAD has moved (review is stale).
+func checkStaleHead(ctx context.Context, client forge.Client, owner, repo string, pr int, reviewedSHA string, dryRun bool, printer *ui.Printer) (bool, error) {
+	printer.StepStart("Checking PR HEAD against reviewed SHA")
+
+	if dryRun {
+		printer.StepInfo("Dry run — would check HEAD SHA")
+		return false, nil
+	}
+
+	currentSHA, err := client.GetPullRequestHeadSHA(ctx, owner, repo, pr)
+	if err != nil {
+		return false, fmt.Errorf("fetching PR HEAD: %w", err)
+	}
+
+	if currentSHA != reviewedSHA {
+		printer.StepInfo(fmt.Sprintf("Stale: reviewed %s but HEAD is now %s", reviewedSHA[:minLen(len(reviewedSHA), 12)], currentSHA[:minLen(len(currentSHA), 12)]))
+		return true, nil
+	}
+
+	printer.StepDone("HEAD matches reviewed SHA")
+	return false, nil
+}
+
+func minLen(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// postStaleHeadNotice posts a failure comment when the PR HEAD has moved
+// since the review was generated.
+func postStaleHeadNotice(ctx context.Context, client forge.Client, owner, repo string, pr int, reviewedSHA string, cfg sticky.Config, printer *ui.Printer) error {
+	currentSHA, _ := client.GetPullRequestHeadSHA(ctx, owner, repo, pr)
+
+	body := fmt.Sprintf(`## Review: automated review
+
+**Outcome:** failure
+**Reason:** stale-head
+
+The review agent reviewed commit `+"`%s`"+` but the PR HEAD is now `+"`%s`"+`. This review was discarded to avoid approving unreviewed code.`, reviewedSHA, currentSHA)
+
+	if err := sticky.Post(ctx, client, owner, repo, pr, body, cfg, printer); err != nil {
+		return fmt.Errorf("posting stale-head notice: %w", err)
+	}
+	return fmt.Errorf("review stale: reviewed %s but HEAD is now %s", reviewedSHA, currentSHA)
+}
+
+// postFailureNotice posts a failure comment as a sticky comment.
+func postFailureNotice(ctx context.Context, client forge.Client, owner, repo string, pr int, parsed ReviewResult, cfg sticky.Config, printer *ui.Printer) error {
+	printer.StepStart("Review agent reported failure, posting notice")
+
+	var body string
+	if parsed.Body != "" {
+		body = parsed.Body
+	} else {
+		body = fmt.Sprintf(`## Review: automated review
+
+**Outcome:** failure
+**Reason:** %s
+
+This PR was NOT reviewed. Do not count this as an approval.`, parsed.Reason)
+	}
+
+	if err := sticky.Post(ctx, client, owner, repo, pr, body, cfg, printer); err != nil {
+		return fmt.Errorf("posting failure notice: %w", err)
+	}
+	printer.StepDone("Failure notice posted")
+	return nil
 }
 
 // submitFormalReview minimizes stale reviews by the same user, then
@@ -178,13 +285,14 @@ func minimizeStaleReviews(ctx context.Context, client forge.Client, owner, repo 
 
 // parseReviewResult attempts to parse the body as a JSON ReviewResult.
 // If parsing fails, treats the entire input as a plain-text body.
-// Returns an error if the JSON is valid but the body field is empty.
+// Returns an error if the JSON is valid but the body field is empty
+// (unless the action is "failure", which may omit the body).
 func parseReviewResult(input string) (ReviewResult, error) {
 	var result ReviewResult
 	if err := json.Unmarshal([]byte(input), &result); err != nil {
 		return ReviewResult{Body: input, Action: "comment"}, nil
 	}
-	if result.Body == "" {
+	if result.Body == "" && strings.ToLower(result.Action) != "failure" {
 		return ReviewResult{}, fmt.Errorf("review result JSON has empty body field")
 	}
 	if result.Action == "" {

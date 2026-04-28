@@ -1076,6 +1076,25 @@ func (c *LiveClient) MinimizeComment(ctx context.Context, nodeID, reason string)
 	return nil
 }
 
+// GetPullRequestHeadSHA returns the current HEAD commit SHA of a pull request.
+func (c *LiveClient) GetPullRequestHeadSHA(ctx context.Context, owner, repo string, number int) (string, error) {
+	resp, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, repo, number))
+	if err != nil {
+		return "", fmt.Errorf("get pull request #%d: %w", number, err)
+	}
+	defer resp.Body.Close()
+
+	var pr struct {
+		Head struct {
+			SHA string `json:"sha"`
+		} `json:"head"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&pr); err != nil {
+		return "", fmt.Errorf("decode pull request #%d: %w", number, err)
+	}
+	return pr.Head.SHA, nil
+}
+
 // CreatePullRequestReview submits a formal review on a pull request.
 // The event must be one of: APPROVE, REQUEST_CHANGES, COMMENT.
 func (c *LiveClient) CreatePullRequestReview(ctx context.Context, owner, repo string, number int, event, body string) error {

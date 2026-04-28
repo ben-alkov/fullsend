@@ -92,6 +92,9 @@ type FakeClient struct {
 	// Issue comments for ListIssueComments / UpdateIssueComment.
 	IssueComments map[string][]IssueComment // key: "owner/repo/number"
 
+	// Pull request head SHA for GetPullRequestHeadSHA.
+	PullRequestHeadSHA string
+
 	// Pull request reviews for ListPullRequestReviews.
 	PRReviews map[string][]PullRequestReview // key: "owner/repo/number"
 
@@ -622,6 +625,15 @@ func (f *FakeClient) MinimizeComment(_ context.Context, nodeID, reason string) e
 		Reason: reason,
 	})
 	return nil
+}
+
+func (f *FakeClient) GetPullRequestHeadSHA(_ context.Context, _, _ string, _ int) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if e := f.err("GetPullRequestHeadSHA"); e != nil {
+		return "", e
+	}
+	return f.PullRequestHeadSHA, nil
 }
 
 func (f *FakeClient) CreatePullRequestReview(_ context.Context, owner, repo string, number int, event, body string) error {
