@@ -214,14 +214,24 @@ func TestShouldScan(t *testing.T) {
 }
 
 func TestHasCriticalFindings(t *testing.T) {
-	assert.True(t, HasCriticalFindings([]Finding{{Severity: "critical"}}))
-	assert.True(t, HasCriticalFindings([]Finding{
-		{Severity: "high"},
-		{Severity: "critical"},
-	}))
-	assert.False(t, HasCriticalFindings([]Finding{{Severity: "high"}}))
-	assert.False(t, HasCriticalFindings([]Finding{{Severity: "medium"}}))
-	assert.False(t, HasCriticalFindings(nil))
+	t.Run("single critical", func(t *testing.T) {
+		assert.True(t, HasCriticalFindings([]Finding{{Severity: "critical"}}))
+	})
+	t.Run("critical among others", func(t *testing.T) {
+		assert.True(t, HasCriticalFindings([]Finding{
+			{Severity: "high"},
+			{Severity: "critical"},
+		}))
+	})
+	t.Run("high only", func(t *testing.T) {
+		assert.False(t, HasCriticalFindings([]Finding{{Severity: "high"}}))
+	})
+	t.Run("medium only", func(t *testing.T) {
+		assert.False(t, HasCriticalFindings([]Finding{{Severity: "medium"}}))
+	})
+	t.Run("nil findings", func(t *testing.T) {
+		assert.False(t, HasCriticalFindings(nil))
+	})
 }
 
 func TestContextInjectionScanner_SkillFiles(t *testing.T) {

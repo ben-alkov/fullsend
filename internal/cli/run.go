@@ -316,7 +316,7 @@ func runAgent(agentName, fullsendDir, outputBase, targetRepo string, printer *ui
 	}
 
 	// 8c. Host-side scan (Path A): scan the target repo's context files
-	// (CLAUDE.md, AGENTS.md, SKILL.md, etc.) before they reach the sandbox.
+	// (CLAUDE.md, AGENTS.md, SKILL.md, etc.) before the agent processes them.
 	// The target branch may contain attacker-controlled files from a PR.
 	if h.SecurityEnabled() {
 		printer.StepStart("Scanning target repo context files")
@@ -575,11 +575,16 @@ func bootstrapSandbox(sshConfigPath, sandboxName, repoDir string, h *harness.Har
 		return fmt.Errorf("chmod fullsend binary: %w", err)
 	}
 
-	// Host-side scan (Path A): check agent definition for injection before
-	// copying into sandbox. Complements the in-sandbox scan (Path B).
+	// Host-side scan (Path A): check agent definition and skills for injection
+	// before copying into sandbox. Complements the in-sandbox scan (Path B).
+	var scanPipeline *security.Pipeline
 	if h.SecurityEnabled() {
+		scanPipeline = security.InputPipeline()
+	}
+
+	if scanPipeline != nil {
 		if content, err := os.ReadFile(h.Agent); err == nil {
-			result := security.InputPipeline().Scan(string(content))
+			result := scanPipeline.Scan(string(content))
 			if security.HasCriticalFindings(result.Findings) {
 				if h.FailModeClosed() {
 					return fmt.Errorf("agent definition %q blocked: critical injection findings", h.Agent)
@@ -599,12 +604,10 @@ func bootstrapSandbox(sshConfigPath, sandboxName, repoDir string, h *harness.Har
 	// scripts/, references/, and assets/ bundled with the skill per the
 	// agentskills.io specification).
 	for _, skillPath := range h.Skills {
-		// Host-side scan (Path A): check SKILL.md for injection before
-		// copying into sandbox.
-		if h.SecurityEnabled() {
+		if scanPipeline != nil {
 			skillFile := filepath.Join(skillPath, "SKILL.md")
 			if content, err := os.ReadFile(skillFile); err == nil {
-				result := security.InputPipeline().Scan(string(content))
+				result := scanPipeline.Scan(string(content))
 				if security.HasCriticalFindings(result.Findings) {
 					if h.FailModeClosed() {
 						return fmt.Errorf("skill %q blocked: critical injection findings in SKILL.md", skillPath)
@@ -880,11 +883,22 @@ func scanRepoContextFiles(repoDir string) []security.Finding {
 
 	err := filepath.WalkDir(repoDir, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			return walkErr
+			relPath, _ := filepath.Rel(repoDir, path)
+			allFindings = append(allFindings, security.Finding{
+				Scanner:  "context_injection",
+				Name:     "scan_error",
+				Severity: "medium",
+				Detail:   fmt.Sprintf("could not access %s: %v", relPath, walkErr),
+				Position: -1,
+			})
+			if d != nil && d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		if d.IsDir() {
 			rel, _ := filepath.Rel(repoDir, path)
-			if rel != "." && strings.Count(rel, string(os.PathSeparator)) >= maxScanDepth {
+			if rel != "." && strings.Count(rel, string(os.PathSeparator)) >= maxScanDepth-1 {
 				return filepath.SkipDir
 			}
 			return nil
@@ -916,7 +930,7 @@ func scanRepoContextFiles(repoDir string) []security.Finding {
 			Scanner:  "context_injection",
 			Name:     "scan_error",
 			Severity: "high",
-			Detail:   fmt.Sprintf("failed to walk repo directory: %v", err),
+			Detail:   fmt.Sprintf("walk terminated: %v", err),
 			Position: -1,
 		})
 	}
