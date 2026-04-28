@@ -1,0 +1,69 @@
+# Dispatcher workflow that fans out to agent workflows based on stage
+name: Dispatch
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: 'Stage name (triage, code, review)'
+        required: true
+        type: string
+      event_type:
+        description: 'Original GitHub event type'
+        required: true
+        type: string
+      source_repo:
+        description: 'Source repository (owner/repo)'
+        required: true
+        type: string
+      event_payload:
+        description: 'GitHub event payload as JSON'
+        required: true
+        type: string
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate token for triggering workflows
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.FULLSEND_FULLSEND_CLIENT_ID }}
+          private-key: ${{ secrets.FULLSEND_FULLSEND_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: .fullsend
+
+      - name: Find and trigger agent workflows for stage
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          STAGE: ${{ inputs.stage }}
+          EVENT_TYPE: ${{ inputs.event_type }}
+          SOURCE_REPO: ${{ inputs.source_repo }}
+          EVENT_PAYLOAD: ${{ inputs.event_payload }}
+        run: |
+          echo "Scanning for workflows with stage: $STAGE"
+
+          for workflow in .github/workflows/*.yml .github/workflows/*.yaml; do
+            # Skip if file doesn't exist (glob expansion when no matches)
+            [[ -f "$workflow" ]] || continue
+
+            # Extract stage from comment (first line with # fullsend-stage:)
+            workflow_stage=$(grep -E '^# fullsend-stage:' "$workflow" | head -1 | cut -d: -f2 | tr -d ' ')
+
+            # Skip if no stage marker or doesn't match
+            [[ -z "$workflow_stage" ]] && continue
+            [[ "$workflow_stage" != "$STAGE" ]] && continue
+
+            workflow_name=$(basename "$workflow")
+            echo "Triggering $workflow_name for stage $STAGE"
+
+            gh workflow run "$workflow_name" \
+              --repo "$GITHUB_REPOSITORY" \
+              -f event_type="$EVENT_TYPE" \
+              -f source_repo="$SOURCE_REPO" \
+              -f event_payload="$EVENT_PAYLOAD"
+          done

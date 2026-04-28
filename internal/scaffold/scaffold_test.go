@@ -14,6 +14,7 @@ import (
 
 func TestFullsendRepoFilesExist(t *testing.T) {
 	expected := []string{
+		".github/workflows/dispatch.yml",
 		".github/workflows/triage.yml",
 		".github/workflows/code.yml",
 		".github/workflows/review.yml",
@@ -58,6 +59,26 @@ func TestShimTemplateContent(t *testing.T) {
 	assert.Contains(t, s, "dispatch-review")
 	assert.Contains(t, s, "permissions:")
 	assert.Contains(t, s, "contents: read")
+	assert.Contains(t, s, "FULLSEND_DISPATCH_TOKEN")
+	assert.Contains(t, s, "gh workflow run dispatch.yml")
+	assert.Contains(t, s, "stage=triage")
+	assert.Contains(t, s, "stage=code")
+	assert.Contains(t, s, "stage=review")
+}
+
+func TestDispatchWorkflowContent(t *testing.T) {
+	content, err := FullsendRepoFile(".github/workflows/dispatch.yml")
+	require.NoError(t, err)
+	s := string(content)
+	assert.Contains(t, s, "workflow_dispatch")
+	assert.Contains(t, s, "stage:")
+	assert.Contains(t, s, "event_type:")
+	assert.Contains(t, s, "source_repo:")
+	assert.Contains(t, s, "event_payload:")
+	assert.Contains(t, s, "# fullsend-stage:")
+	assert.Contains(t, s, "gh workflow run")
+	assert.Contains(t, s, "FULLSEND_FULLSEND_CLIENT_ID")
+	assert.Contains(t, s, "FULLSEND_FULLSEND_APP_PRIVATE_KEY")
 }
 
 func TestWalkFullsendRepo(t *testing.T) {
@@ -67,13 +88,14 @@ func TestWalkFullsendRepo(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	assert.True(t, len(paths) >= 28, "expected at least 28 files, got %d", len(paths))
+	assert.True(t, len(paths) >= 29, "expected at least 29 files, got %d", len(paths))
 }
 
 func TestTriageWorkflowContent(t *testing.T) {
 	content, err := FullsendRepoFile(".github/workflows/triage.yml")
 	require.NoError(t, err)
 	s := string(content)
+	assert.Contains(t, s, "# fullsend-stage: triage")
 	assert.Contains(t, s, "workflow_dispatch")
 	assert.Contains(t, s, "event_type")
 	assert.Contains(t, s, "source_repo")
