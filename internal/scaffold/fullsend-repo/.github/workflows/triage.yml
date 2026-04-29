@@ -22,11 +22,6 @@ jobs:
   triage:
     name: Triage
     runs-on: ubuntu-latest
-    # Job-level env vars allow referencing inputs in step-level env blocks
-    # via ${{ env.DISPATCH_* }}, which step-level env cannot access inputs directly.
-    env:
-      DISPATCH_SOURCE_REPO: ${{ inputs.source_repo }}
-      DISPATCH_EVENT_PAYLOAD: ${{ inputs.event_payload }}
     permissions:
       actions: write
       contents: read
@@ -39,7 +34,7 @@ jobs:
 
       - name: Validate source repo is enrolled
         env:
-          SOURCE_REPO: ${{ env.DISPATCH_SOURCE_REPO }}
+          SOURCE_REPO: ${{ inputs.source_repo }}
         run: |
           # Format check — must be owner/repo, safe characters only
           if [[ ! "$SOURCE_REPO" =~ ^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$ ]]; then
@@ -71,7 +66,7 @@ jobs:
       - name: Checkout target repository
         uses: actions/checkout@v6
         with:
-          repository: ${{ env.DISPATCH_SOURCE_REPO }}
+          repository: ${{ inputs.source_repo }}
           token: ${{ steps.app-token.outputs.token }}
           path: target-repo
           fetch-depth: 1
@@ -122,6 +117,6 @@ jobs:
       - name: Run triage agent
         uses: ./.github/actions/fullsend
         env:
-          GITHUB_ISSUE_URL: ${{ fromJSON(env.DISPATCH_EVENT_PAYLOAD).issue.html_url }}
+          GITHUB_ISSUE_URL: ${{ fromJSON(inputs.event_payload).issue.html_url }}
         with:
           agent: triage
