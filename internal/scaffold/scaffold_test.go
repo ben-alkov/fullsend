@@ -90,6 +90,10 @@ func TestDispatchWorkflowContent(t *testing.T) {
 	assert.Contains(t, s, "Validate inputs")
 	assert.Contains(t, s, "Invalid source_repo format")
 	assert.Contains(t, s, "Invalid stage name")
+	// Verify the sed pattern restricts stage names to [a-z][a-z0-9_-]*
+	assert.Contains(t, s, `\([a-z][a-z0-9_-]*\)`)
+	// Verify stage name validation uses the same pattern
+	assert.Contains(t, s, `^[a-z][a-z0-9_-]*$`)
 }
 
 func TestWalkFullsendRepo(t *testing.T) {
@@ -113,6 +117,10 @@ func TestTriageWorkflowContent(t *testing.T) {
 	assert.Contains(t, s, "event_payload")
 	assert.Contains(t, s, "setup-agent-env.sh")
 	assert.Contains(t, s, "fullsend")
+	// Verify concurrency group prevents overlapping runs for same issue
+	assert.Contains(t, s, "concurrency:")
+	assert.Contains(t, s, "fullsend-triage-")
+	assert.Contains(t, s, "cancel-in-progress: true")
 }
 
 func TestCompositeActionContent(t *testing.T) {
@@ -144,6 +152,28 @@ func TestCodeWorkflowContent(t *testing.T) {
 	assert.Contains(t, s, "sandbox-token")
 	assert.Contains(t, s, "push-token")
 	assert.Contains(t, s, "permission-contents: read")
+	// Verify concurrency group prevents overlapping runs for same issue
+	assert.Contains(t, s, "concurrency:")
+	assert.Contains(t, s, "fullsend-code-")
+	assert.Contains(t, s, "cancel-in-progress: true")
+}
+
+func TestReviewWorkflowContent(t *testing.T) {
+	content, err := FullsendRepoFile(".github/workflows/review.yml")
+	require.NoError(t, err)
+	s := string(content)
+	assert.Contains(t, s, "# fullsend-stage: review")
+	assert.Contains(t, s, "workflow_dispatch")
+	assert.Contains(t, s, "event_type")
+	assert.Contains(t, s, "source_repo")
+	assert.Contains(t, s, "event_payload")
+	assert.Contains(t, s, "FULLSEND_REVIEW_CLIENT_ID")
+	assert.Contains(t, s, "sandbox-token")
+	assert.Contains(t, s, "review-token")
+	// Verify concurrency group prevents overlapping runs
+	assert.Contains(t, s, "concurrency:")
+	assert.Contains(t, s, "fullsend-review-")
+	assert.Contains(t, s, "cancel-in-progress: true")
 }
 
 func TestCodeHarnessContent(t *testing.T) {
