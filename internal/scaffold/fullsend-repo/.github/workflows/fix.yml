@@ -16,7 +16,7 @@ on:
       trigger_source:
         required: true
         type: string
-        description: '"bot" (review agent) or "human" (/fix command)'
+        description: 'Username that triggered the fix (bot or human)'
       pr_number:
         required: false
         type: string
@@ -170,7 +170,7 @@ jobs:
           # binary rejects empty runner_env values). The agent checks
           # TRIGGER_SOURCE before reading this value.
           INSTRUCTION="none"
-          if [[ "${TRIGGER_SOURCE}" == "human" ]]; then
+          if [[ ! "${TRIGGER_SOURCE}" =~ \[bot\]$ ]]; then
             COMMENT_BODY="$(echo "${EVENT_PAYLOAD}" | jq -r '.comment.body // empty')"
             if [[ -n "${COMMENT_BODY}" ]]; then
               # Strip the /fix prefix to get the instruction.
@@ -255,7 +255,7 @@ jobs:
             echo "::error::Review body is ${BYTE_COUNT} bytes (max: ${MAX_REVIEW_BYTES})"
             exit 1
           fi
-          if [[ "${TRIGGER_SOURCE}" == "bot" && "${BYTE_COUNT}" -le 1 ]]; then
+          if [[ "${TRIGGER_SOURCE}" =~ \[bot\]$ && "${BYTE_COUNT}" -le 1 ]]; then
             echo "::error::Bot-triggered run but review body is empty — nothing to fix"
             exit 1
           fi

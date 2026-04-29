@@ -21,7 +21,7 @@ on:
         required: true
         type: string
       trigger_source:
-        description: 'Trigger source for fix stage ("bot" or "human")'
+        description: 'Trigger source username (for fix stage audit trail)'
         required: false
         type: string
 
