@@ -50,6 +50,7 @@ jobs:
         env:
           STAGE: ${{ inputs.stage }}
           SOURCE_REPO: ${{ inputs.source_repo }}
+          TRIGGER_SOURCE: ${{ inputs.trigger_source }}
         run: |
           set -euo pipefail
 
@@ -63,6 +64,14 @@ jobs:
           if [[ ! "$STAGE" =~ ^[a-z][a-z0-9_-]*$ ]]; then
             echo "::error::Invalid stage name: must start with lowercase letter and contain only [a-z0-9_-]"
             exit 1
+          fi
+
+          # Validate trigger_source format if provided (GitHub username with optional [bot] suffix)
+          if [[ -n "${TRIGGER_SOURCE:-}" ]]; then
+            if [[ ! "$TRIGGER_SOURCE" =~ ^[a-zA-Z0-9_-]+(\[bot\])?$ ]]; then
+              echo "::error::Invalid trigger_source format: must be alphanumeric with optional [bot] suffix"
+              exit 1
+            fi
           fi
 
       - name: Find and trigger agent workflows for stage
@@ -128,7 +137,7 @@ jobs:
             )
 
             # Forward trigger_source if provided (fix stage only)
-            if [[ -n "${TRIGGER_SOURCE:-}" ]]; then
+            if [[ -n "${TRIGGER_SOURCE:-}" ]] && [[ "$STAGE" == "fix" ]]; then
               DISPATCH_ARGS+=(-f trigger_source="$TRIGGER_SOURCE")
             fi
 

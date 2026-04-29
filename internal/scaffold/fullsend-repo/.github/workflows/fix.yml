@@ -16,7 +16,7 @@ on:
       trigger_source:
         required: true
         type: string
-        description: 'Username that triggered the fix (bot or human)'
+        description: 'GitHub username that triggered the fix; bot accounts end with [bot]'
       pr_number:
         required: false
         type: string
