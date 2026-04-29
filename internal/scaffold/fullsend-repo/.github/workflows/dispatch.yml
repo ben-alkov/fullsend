@@ -42,10 +42,25 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: .fullsend
 
-      # Note: SOURCE_REPO is not validated here. Validation (format check, owner
-      # check, enrollment allowlist) is performed by downstream agent workflows
-      # before they act on the repository. This keeps the dispatcher simple and
-      # ensures validation happens at the point of use.
+      - name: Validate inputs
+        env:
+          STAGE: ${{ inputs.stage }}
+          SOURCE_REPO: ${{ inputs.source_repo }}
+        run: |
+          set -euo pipefail
+
+          # Validate source_repo format (defense-in-depth before fan-out)
+          if [[ ! "$SOURCE_REPO" =~ ^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$ ]]; then
+            echo "::error::Invalid source_repo format: must be owner/repo"
+            exit 1
+          fi
+
+          # Validate stage name format (alphanumeric, underscore, hyphen only)
+          if [[ ! "$STAGE" =~ ^[a-z][a-z0-9_-]*$ ]]; then
+            echo "::error::Invalid stage name: must start with lowercase letter and contain only [a-z0-9_-]"
+            exit 1
+          fi
+
       - name: Find and trigger agent workflows for stage
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -66,9 +81,9 @@ jobs:
 
             # Extract stage from comment (first line with # fullsend-stage:)
             # Format: # fullsend-stage: <stage-name>
-            # Stage names must not contain colons or trailing whitespace
+            # Stage names: lowercase letter + [a-z0-9_-]*
             # || true prevents pipefail abort when grep finds no match
-            workflow_stage=$(grep -E '^# fullsend-stage:' "$workflow" | head -1 | sed -n 's/^# fullsend-stage: *\([^ ]*\).*/\1/p' || true)
+            workflow_stage=$(grep -E '^# fullsend-stage:' "$workflow" | head -1 | sed -n 's/^# fullsend-stage: *\([a-z][a-z0-9_-]*\).*/\1/p' || true)
 
             # Skip if no stage marker or doesn't match
             [[ -z "$workflow_stage" ]] && continue
@@ -77,16 +92,15 @@ jobs:
             workflow_name=$(basename "$workflow")
             echo "Triggering $workflow_name for stage $STAGE"
 
-            if gh workflow run "$workflow_name" \
+            if ! output=$(gh workflow run "$workflow_name" \
               --repo "$GITHUB_REPOSITORY" \
               -f event_type="$EVENT_TYPE" \
               -f source_repo="$SOURCE_REPO" \
-              -f event_payload="$EVENT_PAYLOAD"; then
-              dispatched=$((dispatched + 1))
-            else
-              echo "::error::Failed to dispatch $workflow_name"
+              -f event_payload="$EVENT_PAYLOAD" 2>&1); then
+              echo "::error::Failed to dispatch $workflow_name: $output"
               exit 1
             fi
+            dispatched=$((dispatched + 1))
           done
 
           if [[ $dispatched -eq 0 ]]; then

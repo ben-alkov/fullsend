@@ -22,6 +22,8 @@ jobs:
   triage:
     name: Triage
     runs-on: ubuntu-latest
+    # Job-level env vars allow referencing inputs in step-level env blocks
+    # via ${{ env.DISPATCH_* }}, which step-level env cannot access inputs directly.
     env:
       DISPATCH_SOURCE_REPO: ${{ inputs.source_repo }}
       DISPATCH_EVENT_PAYLOAD: ${{ inputs.event_payload }}

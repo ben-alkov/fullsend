@@ -87,6 +87,9 @@ func TestDispatchWorkflowContent(t *testing.T) {
 	assert.Contains(t, s, "No workflows found for stage")
 	assert.Contains(t, s, "|| true")
 	assert.Contains(t, s, "permissions: {}")
+	assert.Contains(t, s, "Validate inputs")
+	assert.Contains(t, s, "Invalid source_repo format")
+	assert.Contains(t, s, "Invalid stage name")
 }
 
 func TestWalkFullsendRepo(t *testing.T) {
