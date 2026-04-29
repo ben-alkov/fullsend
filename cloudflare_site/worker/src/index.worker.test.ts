@@ -4,7 +4,7 @@ import {
   waitOnExecutionContext,
 } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import worker, { type Env } from "./index";
+import worker, { handleAdminApi, type Env } from "./index";
 
 const IncomingRequest = Request;
 
@@ -506,5 +506,23 @@ describe("site worker admin API", () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error?: string };
     expect(body.error).toBe("invalid_json");
+  });
+
+  it("handleAdminApi fallthrough returns 404 with CORS (no out-of-scope cors reference)", async () => {
+    const site = "https://worker.test";
+    const url = new URL(`${site}/api/oauth/future-slot`);
+    const req = new IncomingRequest(url, {
+      method: "GET",
+      headers: { Origin: "http://localhost:5173" },
+    });
+    const ctx = createExecutionContext();
+    const res = await handleAdminApi(req, env, url);
+    await waitOnExecutionContext(ctx);
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).toBe("not_found");
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(
+      "http://localhost:5173",
+    );
   });
 });

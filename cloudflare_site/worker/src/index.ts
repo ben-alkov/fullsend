@@ -450,7 +450,8 @@ async function handleGithubUser(
   }
 }
 
-async function handleAdminApi(
+/** Exported for regression tests (e.g. admin API fallthrough must not reference out-of-scope locals). */
+export async function handleAdminApi(
   request: Request,
   env: Env,
   url: URL,
@@ -514,7 +515,10 @@ async function handleAdminApi(
 
   return new Response(JSON.stringify({ error: "not_found" }), {
     status: 404,
-    headers: { "content-type": "application/json", ...cors },
+    headers: {
+      "content-type": "application/json",
+      ...corsHeaders(corsOrigin),
+    },
   });
 }
 

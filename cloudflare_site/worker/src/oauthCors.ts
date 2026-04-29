@@ -33,6 +33,12 @@ export function isLocalhostHttpOrigin(origin: string): boolean {
 /**
  * `redirect_uri` for the GitHub App web flow: SPA entry under `/admin/` on loopback (dev)
  * or HTTPS (production / Workers previews).
+ *
+ * **HTTPS entries intentionally accept any host** (e.g. `https://example.com/admin/`), including
+ * hosts you do not control, because Cloudflare preview URLs are not enumerable. This predicate only
+ * constrains **protocol + path shape**. Actual redirect safety comes from: **GitHub App callback
+ * URL registration** (GitHub will not redirect to arbitrary hosts), **PKCE** (`code_verifier`),
+ * **`Origin` tab-binding** on `POST /api/oauth/token`, Turnstile, and rate limits.
  */
 export function isAllowedOAuthRedirectUri(redirectUri: string): boolean {
   let u: URL;
@@ -49,9 +55,6 @@ export function isAllowedOAuthRedirectUri(redirectUri: string): boolean {
       u.hostname === "[::1]"
     );
   }
-  // HTTPS: any host with an `/admin/` callback path is allowed so preview Workers URLs work
-  // without listing every hostname. The GitHub App’s registered callback URLs, PKCE, and
-  // tab-binding (`Origin` on token exchange) are the primary redirect protections.
   return u.protocol === "https:";
 }
 
