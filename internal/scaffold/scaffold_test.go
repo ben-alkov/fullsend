@@ -65,10 +65,21 @@ func TestShimDispatchCodeExcludesPRContext(t *testing.T) {
 	require.NoError(t, err)
 	s := string(content)
 
-	// The dispatch-code job's issue_comment branch must exclude PR contexts
-	// so /code only fires on issue comments, not PR comments. See #533.
-	assert.Contains(t, s, "!github.event.issue.pull_request",
-		"dispatch-code must exclude PR contexts with !github.event.issue.pull_request guard")
+	// The guard must appear between "dispatch-code:" and the next job
+	// definition, not just anywhere in the file. See #533.
+	codeIdx := strings.Index(s, "dispatch-code:")
+	require.NotEqual(t, -1, codeIdx, "dispatch-code job must exist")
+
+	// Find the next job after dispatch-code (next top-level "  dispatch-" or end of file).
+	rest := s[codeIdx+len("dispatch-code:"):]
+	nextJob := strings.Index(rest, "\n  dispatch-")
+	if nextJob == -1 {
+		nextJob = len(rest)
+	}
+	codeBlock := rest[:nextJob]
+
+	assert.Contains(t, codeBlock, "!github.event.issue.pull_request",
+		"dispatch-code job must exclude PR contexts with !github.event.issue.pull_request guard")
 }
 
 func TestWalkFullsendRepo(t *testing.T) {
