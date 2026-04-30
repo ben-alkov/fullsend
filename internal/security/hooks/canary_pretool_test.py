@@ -11,7 +11,8 @@ HOOK_PATH = os.path.join(os.path.dirname(__file__), "canary_pretool.py")
 
 
 def _run_hook(stdin_data: str, env_extra: dict[str, str] | None = None) -> tuple[int, str]:
-    env = {**os.environ, **(env_extra or {})}
+    env = {k: v for k, v in os.environ.items() if k != "FULLSEND_CANARY_TOKEN"}
+    env.update(env_extra or {})
     result = subprocess.run(
         [sys.executable, HOOK_PATH],
         input=stdin_data,

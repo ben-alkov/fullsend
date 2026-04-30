@@ -81,7 +81,7 @@ def main() -> None:
     if not isinstance(tool_result, str):
         tool_result = json.dumps(tool_result)
 
-    if canary in tool_result:
+    if canary.lower() in tool_result.lower():
         tool_name = hook_input.get("tool_name", "unknown")
         reason = f"CANARY_LEAKED: canary token found in {tool_name} result"
         log_finding("canary_leak", "critical", reason, "block")
