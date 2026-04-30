@@ -88,8 +88,9 @@ def main() -> None:
     if tool_name in allowed_tools:
         sys.exit(0)
 
-    reason = f"Tool '{tool_name}' is NOT in the allowlist ({', '.join(sorted(allowed_tools))})"
-    log_finding("tool_blocked", "critical", reason, "block")
+    detail = f"Tool '{tool_name}' is NOT in the allowlist ({', '.join(sorted(allowed_tools))})"
+    log_finding("tool_blocked", "critical", detail, "block")
+    reason = f"Tool '{tool_name}' is NOT in the allowlist"
     json.dump({"decision": "block", "reason": reason}, sys.stdout)
     sys.exit(1)
 
