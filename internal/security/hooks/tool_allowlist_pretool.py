@@ -33,9 +33,9 @@ _ERR_OVERSIZED = '{"decision":"block","reason":"ALLOWLIST_HOOK_ERROR: input exce
 DEFAULT_TRIAGE_ALLOWLIST: frozenset[str] = frozenset(
     {
         "mcp__github__issue_read",
-        "mcp__github__issue_comment",
-        "mcp__github__label_add",
-        "mcp__github__label_remove",
+        "mcp__github__add_issue_comment",
+        "mcp__github__issue_write",
+        "mcp__github__list_issues",
         "mcp__github__search_issues",
     }
 )

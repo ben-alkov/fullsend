@@ -31,6 +31,14 @@ def test_default_allowlist_allows_issue_read():
     assert stdout == ""
 
 
+def test_default_allowlist_allows_add_issue_comment():
+    code, stdout = _run_hook(
+        json.dumps({"tool_name": "mcp__github__add_issue_comment"}),
+    )
+    assert code == 0
+    assert stdout == ""
+
+
 def test_default_allowlist_blocks_bash():
     code, stdout = _run_hook(
         json.dumps({"tool_name": "Bash"}),
