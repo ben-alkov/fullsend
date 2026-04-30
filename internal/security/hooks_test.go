@@ -23,7 +23,7 @@ func TestGenerateClaudeSettings_AllDefaults(t *testing.T) {
 	assert.Contains(t, hooks, "PostToolUse")
 
 	preTools := hooks["PreToolUse"].([]any)
-	assert.Len(t, preTools, 2) // tirith + ssrf (tool_allowlist disabled by default)
+	assert.Len(t, preTools, 3) // tirith + ssrf + canary_pretool (tool_allowlist disabled by default)
 
 	postTools := hooks["PostToolUse"].([]any)
 	assert.Len(t, postTools, 2) // Bash|WebFetch|Read chain + canary * matcher
@@ -59,7 +59,7 @@ func TestGenerateClaudeSettings_TirithDisabled(t *testing.T) {
 
 	hooks := settings["hooks"].(map[string]any)
 	preTools := hooks["PreToolUse"].([]any)
-	assert.Len(t, preTools, 1) // only ssrf
+	assert.Len(t, preTools, 2) // ssrf + canary_pretool
 }
 
 func TestGenerateClaudeSettings_AllHooksDisabled(t *testing.T) {
@@ -73,6 +73,7 @@ func TestGenerateClaudeSettings_AllHooksDisabled(t *testing.T) {
 				SecretRedactPostTool:    &disabled,
 				UnicodePostTool:         &disabled,
 				ContextSuppressPostTool: &disabled,
+				CanaryPreTool:           &disabled,
 				CanaryPostTool:          &disabled,
 				// ToolAllowlistPreTool omitted — already disabled by default
 			},
@@ -92,12 +93,13 @@ func TestGenerateClaudeSettings_AllHooksDisabled(t *testing.T) {
 func TestHookFiles_AllDefaults(t *testing.T) {
 	h := &harness.Harness{Agent: "test.md"}
 	files := HookFiles(h)
-	assert.Len(t, files, 6) // 5 existing + canary (tool_allowlist disabled by default)
+	assert.Len(t, files, 7) // 5 existing + canary_pretool + canary_posttool (tool_allowlist disabled by default)
 	assert.Contains(t, files, "tirith_check.py")
 	assert.Contains(t, files, "ssrf_pretool.py")
 	assert.Contains(t, files, "secret_redact_posttool.py")
 	assert.Contains(t, files, "unicode_posttool.py")
 	assert.Contains(t, files, "context_suppress_posttool.py")
+	assert.Contains(t, files, "canary_pretool.py")
 	assert.Contains(t, files, "canary_posttool.py")
 	assert.NotContains(t, files, "tool_allowlist_pretool.py")
 
@@ -118,7 +120,7 @@ func TestHookFiles_SSRFDisabled(t *testing.T) {
 		},
 	}
 	files := HookFiles(h)
-	assert.Len(t, files, 5) // canary still enabled
+	assert.Len(t, files, 6) // both canary hooks still enabled
 	assert.NotContains(t, files, "ssrf_pretool.py")
 }
 
@@ -133,7 +135,7 @@ func TestHookFiles_UnicodeDisabled(t *testing.T) {
 		},
 	}
 	files := HookFiles(h)
-	assert.Len(t, files, 5) // canary still enabled
+	assert.Len(t, files, 6) // both canary hooks still enabled
 	assert.NotContains(t, files, "unicode_posttool.py")
 }
 
@@ -143,6 +145,7 @@ func TestEmbeddedHooksNotEmpty(t *testing.T) {
 	assert.NotEmpty(t, TirithCheckHook)
 	assert.NotEmpty(t, UnicodePostToolHook)
 	assert.NotEmpty(t, ContextSuppressPostToolHook)
+	assert.NotEmpty(t, CanaryPreToolHook)
 	assert.NotEmpty(t, CanaryPostToolHook)
 	assert.NotEmpty(t, ToolAllowlistPreToolHook)
 }
@@ -225,7 +228,7 @@ func TestGenerateClaudeSettings_ContextSuppressDisabled(t *testing.T) {
 	assert.Len(t, chainedHooks, 2) // secret_redact + unicode
 }
 
-func TestGenerateClaudeSettings_CanaryDisabled(t *testing.T) {
+func TestGenerateClaudeSettings_CanaryPostToolDisabled(t *testing.T) {
 	disabled := false
 	h := &harness.Harness{
 		Agent: "test.md",
@@ -243,10 +246,39 @@ func TestGenerateClaudeSettings_CanaryDisabled(t *testing.T) {
 
 	hooks := settings["hooks"].(map[string]any)
 	postTools := hooks["PostToolUse"].([]any)
-	assert.Len(t, postTools, 1) // only the chain matcher, no canary
+	assert.Len(t, postTools, 1) // only the chain matcher, no canary posttool
 
 	matcher := postTools[0].(map[string]any)
 	assert.Equal(t, "Bash|WebFetch|Read", matcher["matcher"])
+
+	// canary_pretool should still be in PreToolUse
+	preTools := hooks["PreToolUse"].([]any)
+	assert.Len(t, preTools, 3) // tirith + ssrf + canary_pretool
+}
+
+func TestGenerateClaudeSettings_CanaryPreToolDisabled(t *testing.T) {
+	disabled := false
+	h := &harness.Harness{
+		Agent: "test.md",
+		Security: &harness.SecurityConfig{
+			SandboxHooks: &harness.SandboxHooks{
+				CanaryPreTool: &disabled,
+			},
+		},
+	}
+	data, err := GenerateClaudeSettings(h)
+	require.NoError(t, err)
+
+	var settings map[string]any
+	require.NoError(t, json.Unmarshal(data, &settings))
+
+	hooks := settings["hooks"].(map[string]any)
+	preTools := hooks["PreToolUse"].([]any)
+	assert.Len(t, preTools, 2) // tirith + ssrf, no canary_pretool
+
+	// canary_posttool should still be in PostToolUse
+	postTools := hooks["PostToolUse"].([]any)
+	assert.Len(t, postTools, 2) // chain + canary_posttool
 }
 
 func TestGenerateClaudeSettings_ToolAllowlistEnabled(t *testing.T) {
@@ -267,10 +299,10 @@ func TestGenerateClaudeSettings_ToolAllowlistEnabled(t *testing.T) {
 
 	hooks := settings["hooks"].(map[string]any)
 	preTools := hooks["PreToolUse"].([]any)
-	assert.Len(t, preTools, 3) // tirith + ssrf + tool_allowlist
+	assert.Len(t, preTools, 4) // tirith + ssrf + canary_pretool + tool_allowlist
 
 	// Tool allowlist should be the last PreToolUse matcher with * scope.
-	allowlistMatcher := preTools[2].(map[string]any)
+	allowlistMatcher := preTools[3].(map[string]any)
 	assert.Equal(t, "*", allowlistMatcher["matcher"])
 }
 
@@ -285,7 +317,7 @@ func TestHookFiles_ToolAllowlistEnabled(t *testing.T) {
 		},
 	}
 	files := HookFiles(h)
-	assert.Len(t, files, 7) // 6 default + tool_allowlist
+	assert.Len(t, files, 8) // 7 default + tool_allowlist
 	assert.Contains(t, files, "tool_allowlist_pretool.py")
 }
 
@@ -300,6 +332,6 @@ func TestHookFiles_ContextSuppressDisabled(t *testing.T) {
 		},
 	}
 	files := HookFiles(h)
-	assert.Len(t, files, 5) // canary still enabled
+	assert.Len(t, files, 6) // both canary hooks still enabled
 	assert.NotContains(t, files, "context_suppress_posttool.py")
 }

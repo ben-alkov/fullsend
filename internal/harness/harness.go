@@ -116,7 +116,8 @@ type SandboxHooks struct {
 	SecretRedactPostTool    *bool                `yaml:"secret_redact_posttool,omitempty"`    // default: true
 	UnicodePostTool         *bool                `yaml:"unicode_posttool,omitempty"`          // default: true
 	ContextSuppressPostTool *bool                `yaml:"context_suppress_posttool,omitempty"` // default: true
-	CanaryPostTool          *bool                `yaml:"canary_posttool,omitempty"`            // default: true
+	CanaryPreTool           *bool                `yaml:"canary_pretool,omitempty"`              // default: true
+	CanaryPostTool          *bool                `yaml:"canary_posttool,omitempty"`              // default: true
 	ToolAllowlistPreTool    *ToolAllowlistConfig `yaml:"tool_allowlist_pretool,omitempty"`
 }
 

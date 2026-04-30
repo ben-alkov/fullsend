@@ -22,6 +22,9 @@ var UnicodePostToolHook []byte
 //go:embed hooks/context_suppress_posttool.py
 var ContextSuppressPostToolHook []byte
 
+//go:embed hooks/canary_pretool.py
+var CanaryPreToolHook []byte
+
 //go:embed hooks/canary_posttool.py
 var CanaryPostToolHook []byte
 
@@ -77,6 +80,17 @@ func GenerateClaudeSettings(h *harness.Harness) ([]byte, error) {
 			Matcher: "Bash|WebFetch",
 			Hooks: []hookEntry{
 				{Type: "command", Command: "python3 " + SandboxHooksDir + "/ssrf_pretool.py"},
+			},
+		})
+	}
+
+	// Canary PreToolUse hook (Bash + WebFetch). Catches exfiltration of
+	// the canary token via tool inputs before data leaves the sandbox.
+	if canaryPreToolEnabled(sec) {
+		preToolMatchers = append(preToolMatchers, hookMatcher{
+			Matcher: "Bash|WebFetch",
+			Hooks: []hookEntry{
+				{Type: "command", Command: "python3 " + SandboxHooksDir + "/canary_pretool.py"},
 			},
 		})
 	}
@@ -161,6 +175,9 @@ func HookFiles(h *harness.Harness) map[string][]byte {
 	if contextSuppressPostToolEnabled(sec) {
 		files["context_suppress_posttool.py"] = ContextSuppressPostToolHook
 	}
+	if canaryPreToolEnabled(sec) {
+		files["canary_pretool.py"] = CanaryPreToolHook
+	}
 	if canaryPostToolEnabled(sec) {
 		files["canary_posttool.py"] = CanaryPostToolHook
 	}
@@ -212,6 +229,13 @@ func contextSuppressPostToolEnabled(sec *harness.SecurityConfig) bool {
 		return true
 	}
 	return boolDefault(sec.SandboxHooks.ContextSuppressPostTool, true)
+}
+
+func canaryPreToolEnabled(sec *harness.SecurityConfig) bool {
+	if sec == nil || sec.SandboxHooks == nil {
+		return true // default: enabled
+	}
+	return boolDefault(sec.SandboxHooks.CanaryPreTool, true)
 }
 
 func canaryPostToolEnabled(sec *harness.SecurityConfig) bool {
