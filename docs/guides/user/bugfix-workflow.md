@@ -13,9 +13,9 @@ When someone files a bug, fullsend's agent pipeline processes it through three s
 Each stage is triggered by labels and can be restarted with slash commands. The pipeline uses GitHub's native primitives (issues, PRs, labels, branch protection) as its coordination layer — there is no central orchestrator. See [ADR 0002](../../ADRs/0002-initial-fullsend-design.md) for the full design.
 
 ```
-Issue filed → Triage → ready-to-code → Code Agent → ready-for-review → Review → ready-for-merge → Merge
-                │                          ↑                              │
-                │                          └── changes requested (planned) ┘
+Issue filed → Triage → ready-to-code → Code Agent → PR opened → Review → ready-for-merge → Merge
+                │                          ↑                                │
+                │                          └── changes requested (planned) ─┘
                 ├── duplicate → closed
                 ├── not-ready → waiting for info
                 └── not-reproducible → human intervention
@@ -44,7 +44,7 @@ These labels track where an issue is in the pipeline:
 | `not-ready` | Missing information | Triage comment explains what's needed; add a comment or edit the issue body to fix |
 | `not-reproducible` | Bug couldn't be reproduced in the sandbox | Human intervention required; triage comment documents what was tried |
 | `ready-to-code` | Triage passed | Code agent picks it up |
-| `ready-for-review` | PR with passing CI ready for review | Review agents evaluate the PR |
+| `ready-for-review` | PR ready for review (manual trigger) | Review agents evaluate the PR |
 | `ready-for-merge` | All reviewers unanimously approved | PR can be merged per governance policy |
 | `requires-manual-review` | Reviewers disagreed or flagged security concerns | Human must decide |
 
@@ -68,7 +68,7 @@ When the code agent opens a PR:
 - The PR description summarizes what was changed and why.
 - The code agent has already run the test suite in its sandbox and iterated until tests pass.
 - After pushing, GitHub's required checks run. If checks fail, the code agent fetches logs, fixes the issue, and pushes again (up to a configurable retry cap).
-- Once checks are green, the PR is labeled `ready-for-review` and the review agents take over.
+- Once checks are green, the review agents take over automatically (triggered by the PR creation or push event).
 
 ### Reviewing agent output
 
@@ -117,11 +117,11 @@ The code agent:
 3. **Tests iteratively.** Runs the test suite, incorporates triage-provided tests if present, writes new tests if needed. Iterates until tests pass.
 4. **Opens a PR.** Links the issue, describes the changes.
 5. **Handles CI failures.** Fetches failing check logs, fixes issues, pushes again. Repeats until all required checks pass (up to a configurable cap, default defined in `config.yaml` as `defaults.max_implementation_retries`).
-6. **Hands off to review.** Labels `ready-for-review`.
+6. **Hands off to review.** The PR creation or push triggers review dispatch automatically via `pull_request_target`.
 
 ### Stage 3: Review
 
-**Triggered by:** `ready-for-review` label, `/review` command, or push to the PR branch.
+**Triggered by:** `pull_request_target` events (PR opened, push to PR branch, or marked ready for review), `/review` command, or `ready-for-review` label.
 
 The review swarm:
 
@@ -141,7 +141,7 @@ Once the PR is merged (by human, merge queue, or automation per org governance),
 
 ### Stopping automation
 
-- Remove the triggering label. Without `ready-to-code` or `ready-for-review`, the next stage won't fire.
+- Remove the triggering label (`ready-to-code`) to prevent the next stage from starting. Note: review is triggered automatically by PR events (`pull_request_target`), so closing the PR is the way to stop review dispatch.
 - Close the issue. Agents don't act on closed issues (except `/triage` which explicitly reopens).
 
 ### Restarting a stage
