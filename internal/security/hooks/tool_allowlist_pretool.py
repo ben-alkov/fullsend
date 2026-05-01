@@ -10,7 +10,8 @@ writes JSON to stdout if blocking. Exit 0 = allow, exit 1 = block.
 
 Environment variables:
   FULLSEND_TOOL_ALLOWLIST: Comma-separated list of allowed tool names.
-                            If unset, uses the default triage agent allowlist.
+                            Required when this hook is enabled.
+                            If unset, all tools are blocked (fail-closed).
                             If set to empty string "", all tools are blocked.
 """
 
@@ -29,16 +30,6 @@ _ERR_UNEXPECTED = (
     '{"decision":"block","reason":"ALLOWLIST_HOOK_ERROR: unexpected error reading input"}'
 )
 _ERR_OVERSIZED = '{"decision":"block","reason":"ALLOWLIST_HOOK_ERROR: input exceeds 10 MB limit"}'
-
-DEFAULT_TRIAGE_ALLOWLIST: frozenset[str] = frozenset(
-    {
-        "mcp__github__issue_read",
-        "mcp__github__add_issue_comment",
-        "mcp__github__issue_write",
-        "mcp__github__list_issues",
-        "mcp__github__search_issues",
-    }
-)
 
 
 def log_finding(name: str, severity: str, detail: str, action: str) -> None:
@@ -63,7 +54,7 @@ def log_finding(name: str, severity: str, detail: str, action: str) -> None:
 
 def _parse_allowlist(env_value: str | None) -> frozenset[str]:
     if env_value is None:
-        return DEFAULT_TRIAGE_ALLOWLIST
+        return frozenset()
     tools = {t.strip() for t in env_value.split(",") if t.strip()}
     return frozenset(tools)
 

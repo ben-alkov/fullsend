@@ -23,31 +23,13 @@ def _run_hook(stdin_data: str, env_extra: dict[str, str] | None = None) -> tuple
     return result.returncode, result.stdout
 
 
-def test_default_allowlist_allows_issue_read():
+def test_unset_allowlist_blocks_all():
     code, stdout = _run_hook(
         json.dumps({"tool_name": "mcp__github__issue_read"}),
-    )
-    assert code == 0
-    assert stdout == ""
-
-
-def test_default_allowlist_allows_add_issue_comment():
-    code, stdout = _run_hook(
-        json.dumps({"tool_name": "mcp__github__add_issue_comment"}),
-    )
-    assert code == 0
-    assert stdout == ""
-
-
-def test_default_allowlist_blocks_bash():
-    code, stdout = _run_hook(
-        json.dumps({"tool_name": "Bash"}),
     )
     assert code == 1
     response = json.loads(stdout)
     assert response["decision"] == "block"
-    assert "Bash" in response["reason"]
-    assert "NOT in the allowlist" in response["reason"]
 
 
 def test_custom_allowlist_allows_listed_tool():
