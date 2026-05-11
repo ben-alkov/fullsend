@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterTree } from "./filterTree";
+import { filterTree, highlightSegments } from "./filterTree";
 import type { ManifestNode } from "virtual:fullsend-docs";
 
 const tree: ManifestNode[] = [
@@ -128,6 +128,104 @@ describe("filterTree", () => {
           },
         ],
       },
+    ]);
+  });
+
+  it("matches multiple words separately (fuzzy)", () => {
+    const result = filterTree(tree, "install guide");
+    expect(result).toEqual([
+      {
+        type: "dir",
+        name: "guides",
+        children: [
+          {
+            type: "dir",
+            name: "admin",
+            children: [
+              {
+                type: "file",
+                name: "installation",
+                routeKey: "guides/admin/installation",
+                title: "Installation Guide",
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("matches against file routeKey (path)", () => {
+    const result = filterTree(tree, "admin config");
+    expect(result).toEqual([
+      {
+        type: "dir",
+        name: "guides",
+        children: [
+          {
+            type: "dir",
+            name: "admin",
+            children: [
+              {
+                type: "file",
+                name: "config",
+                routeKey: "guides/admin/config",
+                title: "Configuration",
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("multi-word query with no combined match returns empty", () => {
+    const result = filterTree(tree, "admin readme");
+    expect(result).toEqual([]);
+  });
+});
+
+describe("highlightSegments", () => {
+  it("returns full text when query is empty", () => {
+    expect(highlightSegments("Hello", "")).toEqual([
+      { text: "Hello", highlight: false },
+    ]);
+  });
+
+  it("highlights single word match", () => {
+    expect(highlightSegments("Installation Guide", "install")).toEqual([
+      { text: "Install", highlight: true },
+      { text: "ation Guide", highlight: false },
+    ]);
+  });
+
+  it("highlights multiple words independently", () => {
+    const result = highlightSegments("Installation Guide", "guide inst");
+    expect(result).toEqual([
+      { text: "Inst", highlight: true },
+      { text: "allation ", highlight: false },
+      { text: "Guide", highlight: true },
+    ]);
+  });
+
+  it("merges overlapping highlights", () => {
+    const result = highlightSegments("abcdef", "abc bcd");
+    expect(result).toEqual([
+      { text: "abcd", highlight: true },
+      { text: "ef", highlight: false },
+    ]);
+  });
+
+  it("returns unhighlighted text when no match", () => {
+    expect(highlightSegments("Hello", "xyz")).toEqual([
+      { text: "Hello", highlight: false },
+    ]);
+  });
+
+  it("is case-insensitive", () => {
+    expect(highlightSegments("README", "read")).toEqual([
+      { text: "READ", highlight: true },
+      { text: "ME", highlight: false },
     ]);
   });
 });
