@@ -426,9 +426,11 @@
         </button>
       </div>
       <div class="docs-tree-filter-wrap">
-        <svg class="docs-tree-filter-icon" width="14" height="14" viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+      <div class="docs-tree-filter-icon-wrapper">
+        <svg class="docs-tree-filter-icon" width="16" height="16" viewBox="0 0 16 16" focusable="false" aria-hidden="true">
           <path fill="currentColor" d="M11.5 7a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0Zm-.82 4.74a6 6 0 1 1 1.06-1.06l3.04 3.04a.75.75 0 1 1-1.06 1.06l-3.04-3.04Z"/>
         </svg>
+        </div>
         <input
           class="docs-tree-filter"
           type="text"
@@ -443,7 +445,7 @@
             aria-label="Clear filter"
             onclick={() => filterQuery = ""}
           >
-            <svg width="12" height="12" viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 16 16" focusable="false" aria-hidden="true">
               <path fill="currentColor" d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z"/>
             </svg>
           </button>
