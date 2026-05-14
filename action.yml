@@ -147,12 +147,44 @@ runs:
         tar xzf "/tmp/${GATEWAY_ASSET}" -C "${RUNNER_TEMP}/fullsend"
         rm -f "/tmp/${GATEWAY_ASSET}"
 
+    - name: Install Podman
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y podman
+        podman --version
+
+    - name: Configure rootless Podman
+      shell: bash
+      run: |
+        test -f /sys/fs/cgroup/cgroup.controllers || { echo "::error::cgroups v2 required"; exit 1; }
+        whoami_user="$(whoami)"
+        grep -q "^${whoami_user}:" /etc/subuid || sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 "${whoami_user}"
+        podman system migrate
+        podman info
+
+    - name: Start Podman API service
+      shell: bash
+      run: |
+        SOCKET_PATH="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/podman/podman.sock"
+        if [ ! -S "${SOCKET_PATH}" ]; then
+          mkdir -p "$(dirname "${SOCKET_PATH}")"
+          podman system service --time=0 "unix://${SOCKET_PATH}" &
+          for i in $(seq 1 30); do
+            [ -S "${SOCKET_PATH}" ] && podman --url "unix://${SOCKET_PATH}" info >/dev/null 2>&1 && break
+            sleep 1
+          done
+          [ -S "${SOCKET_PATH}" ] || { echo "::error::Podman socket not ready"; exit 1; }
+        fi
+        echo "OPENSHELL_PODMAN_SOCKET=${SOCKET_PATH}" >> "${GITHUB_ENV}"
+
     - name: Pull sandbox images
       shell: bash
       run: |
         set -euo pipefail
-        echo "${SANDBOX_TOKEN}" | docker login ghcr.io -u x-access-token --password-stdin
-        docker pull ghcr.io/nvidia/openshell/supervisor:latest
+        echo "${SANDBOX_TOKEN}" | podman login ghcr.io -u x-access-token --password-stdin
+        podman pull ghcr.io/nvidia/openshell/supervisor:latest
+        podman pull ghcr.io/nvidia/openshell-community/sandboxes/base:latest
       env:
         SANDBOX_TOKEN: ${{ inputs.sandbox-token || github.token }}
 
@@ -164,17 +196,20 @@ runs:
         GATEWAY_LOG="${GITHUB_WORKSPACE}/output/openshell-gateway.log"
         mkdir -p "${GITHUB_WORKSPACE}/output"
 
+        HANDSHAKE_SECRET="ci-$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
+
+        OPENSHELL_SSH_HANDSHAKE_SECRET="${HANDSHAKE_SECRET}" \
+        OPENSHELL_SUPERVISOR_IMAGE="ghcr.io/nvidia/openshell/supervisor:latest" \
         "${RUNNER_TEMP}/fullsend/openshell-gateway" \
           --bind-address 0.0.0.0 \
           --port 8080 \
           --health-port 8081 \
           --ssh-gateway-port 8080 \
-          --drivers docker \
-          --grpc-endpoint http://host.docker.internal:8080 \
+          --drivers podman \
           --disable-tls \
           --db-url "sqlite:/tmp/gateway.db?mode=rwc" \
-          --sandbox-image-pull-policy IfNotPresent \
-          --docker-supervisor-image "ghcr.io/nvidia/openshell/supervisor:latest" \
+          --sandbox-image "ghcr.io/nvidia/openshell-community/sandboxes/base:latest" \
+          --sandbox-image-pull-policy missing \
           --log-level info >"${GATEWAY_LOG}" 2>&1 &
 
         for i in $(seq 1 30); do
