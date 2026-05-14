@@ -269,7 +269,7 @@ body {
 .docs-tree-filter-icon {
   position: absolute;
   left: 0.85rem;
-  top: 50%;
+  top: 56%;
   transform: translateY(-50%);
   color: var(--docs-muted, #888);
   pointer-events: none;
@@ -295,7 +295,7 @@ body {
 .docs-tree-filter-clear {
   position: absolute;
   right: 0.75rem;
-  top: 50%;
+  top: 56%;
   transform: translateY(-50%);
   display: inline-flex;
   align-items: center;
