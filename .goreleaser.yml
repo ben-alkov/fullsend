@@ -27,10 +27,10 @@ changelog:
   sort: asc
   filters:
     exclude:
-      - "^ci:"
-      - "^docs:"
-      - "^test:"
-      - "^chore:"
+      - '^ci(\(.*\))?:'
+      - '^docs(\(.*\))?:'
+      - '^test(\(.*\))?:'
+      - '^chore(\(.*\))?:'
   groups:
     - title: Features
       regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
