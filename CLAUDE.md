@@ -11,6 +11,7 @@ Fullsend is a platform for fully autonomous agentic development for GitHub-hoste
 - Keep core problem documents organization-agnostic. Organization-specific details belong in `docs/problems/applied/<org-name>/`.
 - The target audience is any contributor community considering autonomous agents — keep language accessible, avoid presuming solutions.
 - Always run `make lint` before submitting changes and fix any failures.
+- Use [Conventional Commits](https://www.conventionalcommits.org/) for all commit messages. See [CONTRIBUTING.md](CONTRIBUTING.md#commit-messages) for the full specification. This is critical — GoReleaser uses commit prefixes to generate release notes.
 - Never commit secrets (tokens, API keys, PEM keys, gcloud credentials) or sensitive data (GCP project names, service account identifiers, Model Armor template names, internal hostnames). Use environment variables with no defaults for sensitive values.
 
 ## Go code
