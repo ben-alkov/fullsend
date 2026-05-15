@@ -207,7 +207,7 @@ func Create(name string, providers []string, image, policy string) error {
 	gatewayLogs, _ := CollectLogs(name, "gateway")
 
 	var containerLogs string
-	listCmd := exec.Command("podman", "ps", "-a", "--filter", "name=openshell-"+name, "--format", "{{.Names}}")
+	listCmd := exec.Command("podman", "ps", "-a", "--format", "{{.Names}}")
 	if listOut, err := listCmd.Output(); err == nil {
 		for _, cname := range strings.Split(strings.TrimSpace(string(listOut)), "\n") {
 			if cname == "" {
