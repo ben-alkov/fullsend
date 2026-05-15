@@ -267,7 +267,6 @@ Shared flags (valid for both per-org and per-repo):
 
 Per-org-only flags are rejected when an `owner/repo` argument is given:
 - `--enroll-all`, `--enroll-none` — control org-wide repository enrollment
-- `--vendor-fullsend-binary` — uploads a development binary to the `.fullsend` config repo
 
 All other flags are shared between per-org and per-repo modes — per-repo can create GitHub Apps, deploy a mint, and manage public apps when existing infrastructure is not found.
 

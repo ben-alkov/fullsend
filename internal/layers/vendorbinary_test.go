@@ -17,7 +17,7 @@ func newVendorBinaryLayer(t *testing.T, client *forge.FakeClient, enabled bool, 
 	t.Helper()
 	var buf bytes.Buffer
 	printer := ui.New(&buf)
-	layer := NewVendorBinaryLayer("test-org", client, printer, enabled, vendorFn)
+	layer := NewVendorBinaryLayer("test-org", ".fullsend", client, printer, enabled, vendorFn)
 	return layer, &buf
 }
 
@@ -37,9 +37,10 @@ func TestVendorBinaryLayer_RequiredScopes(t *testing.T) {
 func TestVendorBinaryLayer_EnabledCallsVendorFn(t *testing.T) {
 	client := &forge.FakeClient{}
 	called := false
-	vendorFn := func(ctx context.Context, c forge.Client, p *ui.Printer, org string) error {
+	vendorFn := func(ctx context.Context, c forge.Client, p *ui.Printer, owner, repo string) error {
 		called = true
-		assert.Equal(t, "test-org", org)
+		assert.Equal(t, "test-org", owner)
+		assert.Equal(t, ".fullsend", repo)
 		return nil
 	}
 
@@ -52,7 +53,7 @@ func TestVendorBinaryLayer_EnabledCallsVendorFn(t *testing.T) {
 
 func TestVendorBinaryLayer_EnabledVendorFnError(t *testing.T) {
 	client := &forge.FakeClient{}
-	vendorFn := func(_ context.Context, _ forge.Client, _ *ui.Printer, _ string) error {
+	vendorFn := func(_ context.Context, _ forge.Client, _ *ui.Printer, _, _ string) error {
 		return errors.New("cross-compile failed")
 	}
 

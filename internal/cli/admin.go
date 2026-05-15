@@ -103,7 +103,7 @@ var rolePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 
 // perOrgOnlyFlags are flags that only apply to per-org mode.
 var perOrgOnlyFlags = []string{
-	"vendor-fullsend-binary", "enroll-all", "enroll-none",
+	"enroll-all", "enroll-none",
 }
 
 // skipMintDispatcher implements dispatch.Dispatcher for --skip-mint-check mode.
@@ -139,6 +139,7 @@ type perRepoInstallConfig struct {
 	MintSkipDeploy      bool
 	SkipMintCheck       bool
 	AppSet              string
+	VendorBinary        bool
 }
 
 // wifProviderPattern validates the full WIF provider resource name format
@@ -292,6 +293,7 @@ Inference authentication:
 					MintSkipDeploy:      mintSkipDeploy,
 					SkipMintCheck:       skipMintCheck,
 					AppSet:              appSet,
+					VendorBinary:        vendorBinary,
 				})
 			}
 
@@ -553,6 +555,7 @@ func runPerRepoInstall(ctx context.Context, c perRepoInstallConfig) error {
 	mintSourceDir := c.MintSourceDir
 	mintSkipDeploy := c.MintSkipDeploy
 	skipMintCheck := c.SkipMintCheck
+	vendorBinary := c.VendorBinary
 
 	if strings.Contains(repoFullName, "://") || strings.HasPrefix(repoFullName, "www.") {
 		return fmt.Errorf("expected owner/repo format, got a URL — use just the owner/repo portion (e.g. acme/widget)")
@@ -803,6 +806,10 @@ func runPerRepoInstall(ctx context.Context, c perRepoInstallConfig) error {
 		for _, name := range secretNames {
 			printer.StepInfo(fmt.Sprintf("  %s", name))
 		}
+		if vendorBinary {
+			printer.Blank()
+			printer.StepInfo("Would cross-compile and upload vendored binary to .fullsend/bin/fullsend")
+		}
 		return nil
 	}
 
@@ -975,6 +982,12 @@ func runPerRepoInstall(ctx context.Context, c perRepoInstallConfig) error {
 	}
 	printer.StepDone(fmt.Sprintf("Set %d repository secrets", len(repoSecrets)))
 
+	if vendorBinary {
+		if err := vendorFullsendBinary(ctx, client, printer, owner, repo); err != nil {
+			return fmt.Errorf("vendoring binary: %w", err)
+		}
+	}
+
 	printer.Blank()
 	printer.StepDone(fmt.Sprintf("Per-repo installation complete for %s/%s", owner, repo))
 	return nil
@@ -982,7 +995,7 @@ func runPerRepoInstall(ctx context.Context, c perRepoInstallConfig) error {
 
 // vendorFullsendBinary cross-compiles the fullsend binary for linux/amd64
 // and uploads it to .fullsend/bin/fullsend via layers.VendorBinary.
-func vendorFullsendBinary(ctx context.Context, client forge.Client, printer *ui.Printer, org string) error {
+func vendorFullsendBinary(ctx context.Context, client forge.Client, printer *ui.Printer, owner, repo string) error {
 	printer.StepStart("Cross-compiling fullsend for linux/amd64")
 
 	tmpBinary, err := os.CreateTemp("", "fullsend-linux-amd64-*")
@@ -1006,7 +1019,7 @@ func vendorFullsendBinary(ctx context.Context, client forge.Client, printer *ui.
 	printer.StepDone("Cross-compiled fullsend for linux/amd64")
 
 	printer.StepStart("Uploading vendored binary to .fullsend/bin/fullsend")
-	if err := layers.VendorBinary(ctx, client, org, tmpBinary.Name()); err != nil {
+	if err := layers.VendorBinary(ctx, client, owner, repo, tmpBinary.Name()); err != nil {
 		printer.StepFail("Failed to upload vendored binary")
 		return err
 	}
@@ -1784,7 +1797,7 @@ func buildLayerStack(
 	return layers.NewStack(
 		layers.NewConfigRepoLayer(org, client, cfg, printer, privateRepo),
 		layers.NewWorkflowsLayer(org, client, printer, user),
-		layers.NewVendorBinaryLayer(org, client, printer, vendorBinary, vendorFn),
+		layers.NewVendorBinaryLayer(org, forge.ConfigRepoName, client, printer, vendorBinary, vendorFn),
 		layers.NewSecretsLayer(org, client, agentCreds, printer).WithOIDCMode(),
 		layers.NewInferenceLayer(org, client, inferenceProvider, printer),
 		dispatchLayer,
