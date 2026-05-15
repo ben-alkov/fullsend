@@ -100,3 +100,10 @@ repos:
         language: script
         files: ^internal/scaffold/fullsend-repo/(\.github/workflows/|templates/)
         pass_filenames: false
+
+      - id: lint-scaffold-workflows
+        name: actionlint scaffold workflow templates
+        entry: ./hack/lint-scaffold-workflows
+        language: script
+        files: ^internal/scaffold/fullsend-repo/(\.github/workflows/|templates/)
+        pass_filenames: false
