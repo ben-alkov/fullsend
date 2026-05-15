@@ -54,7 +54,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: fullsend-ai/fullsend
-          ref: feat/migrate-to-openshell-0.0.38
+          ref: v0
           path: .defaults
           sparse-checkout: |
             internal/scaffold/fullsend-repo/
