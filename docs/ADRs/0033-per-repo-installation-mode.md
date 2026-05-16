@@ -171,7 +171,7 @@ This is the key new artifact, published in `fullsend-ai/fullsend/.github/workflo
 
 The routing logic (identical to per-org `dispatch.yml`) maps:
 - `issues` + `labeled` → stage based on label name (`ready-to-code` → code, `ready-for-review` → review)
-- `issue_comment` + slash commands → `/triage`, `/code`, `/review`, `/fix`, `/retro`
+- `issue_comment` + slash commands → `/fs-triage`, `/fs-code`, `/fs-review`, `/fs-fix`, `/fs-retro`, `/fs-prioritize`
 - `issue_comment` + `needs-info` label (non-command) → auto-triage
 - `pull_request_target` + `opened`/`synchronize`/`ready_for_review` → review
 - `pull_request_target` + `closed` → retro

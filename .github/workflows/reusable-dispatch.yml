@@ -146,6 +146,11 @@ jobs:
                     fi
                   fi
                   ;;
+                /fs-prioritize)
+                  if [[ "${COMMENT_USER_TYPE}" != "Bot" ]] && is_authorized; then
+                    STAGE="prioritize"
+                  fi
+                  ;;
                 *)
                   if has_label "needs-info" && ! has_label "type/feature"; then
                     if [[ "${COMMENT_USER_TYPE}" != "Bot" ]]; then
