@@ -1877,12 +1877,13 @@ func TestProvisioner_ImplementsDispatcher(t *testing.T) {
 }
 
 func TestCopyAgentPEM_CopiesSecret(t *testing.T) {
+	fakePEM := []byte("-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAK...\n-----END RSA PRIVATE KEY-----")
 	fake := newFakeGCFClient()
 	fake.secrets = map[string]bool{
 		"fullsend-srcorg--triage-app-pem": true,
 	}
 	fake.secretData = map[string][]byte{
-		"fullsend-srcorg--triage-app-pem": []byte("-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----"),
+		"fullsend-srcorg--triage-app-pem": fakePEM,
 	}
 	fake.errs["GetSecret"] = nil
 
@@ -1891,10 +1892,7 @@ func TestCopyAgentPEM_CopiesSecret(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.True(t, fake.secrets["fullsend-dstorg--triage-app-pem"])
-	assert.Equal(t,
-		[]byte("-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----"),
-		fake.secretData["fullsend-dstorg--triage-app-pem"],
-	)
+	assert.Equal(t, fakePEM, fake.secretData["fullsend-dstorg--triage-app-pem"])
 }
 
 func TestCopyAgentPEM_DestinationExists_EnsuresIAM(t *testing.T) {
