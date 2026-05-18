@@ -1165,7 +1165,26 @@ func (p *Provisioner) ProvisionWIF(ctx context.Context) (wifProvider string, err
 		p.cfg.WIFProvider = BuildRepoProviderID(parts[0], parts[1])
 		attrCondition = fmt.Sprintf("assertion.repository == '%s'", p.cfg.Repo)
 	} else {
-		attrCondition = buildAttributeCondition(orgs)
+		// Merge with existing WIF provider orgs to avoid clobbering
+		// other orgs' access when re-installing a single org.
+		allOrgs := make([]string, len(orgs))
+		copy(allOrgs, orgs)
+		existingProvider, getErr := p.gcpAPI.GetWIFProvider(ctx, projectNumber, p.cfg.WIFPoolName, p.cfg.WIFProvider)
+		if getErr == nil && existingProvider != nil {
+			existingOrgs := parseConditionOrgs(existingProvider.AttributeCondition)
+			seen := make(map[string]bool)
+			for _, org := range allOrgs {
+				seen[org] = true
+			}
+			for _, org := range existingOrgs {
+				if !seen[org] {
+					allOrgs = append(allOrgs, org)
+					seen[org] = true
+				}
+			}
+			sort.Strings(allOrgs)
+		}
+		attrCondition = buildAttributeCondition(allOrgs)
 	}
 
 	audiences := []string{oidcAudience, iamAudience(projectNumber, p.cfg.WIFPoolName, p.cfg.WIFProvider)}

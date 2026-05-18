@@ -1829,6 +1829,43 @@ func TestProvisionWIF_OrgScoped_Unchanged(t *testing.T) {
 	assert.Contains(t, fake.projectIAMBindings[0].Member, "attribute.repository/acme/.fullsend")
 }
 
+func TestProvisionWIF_OrgScoped_MergesExistingOrgs(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.wifProvider = &WIFProviderInfo{
+		AttributeCondition: "assertion.repository_owner in ['beta', 'gamma']",
+	}
+	p := NewProvisioner(Config{
+		ProjectID:  "my-project",
+		GitHubOrgs: []string{"acme"},
+	}, fake)
+
+	_, err := p.ProvisionWIF(context.Background())
+	require.NoError(t, err)
+
+	assert.Contains(t, fake.calls, "GetWIFProvider")
+	assert.Equal(t, "assertion.repository_owner in ['acme', 'beta', 'gamma']",
+		fake.lastWIFProviderConfig.AttributeCondition)
+
+	// IAM binding should only be for the installing org, not the merged ones.
+	require.Len(t, fake.projectIAMBindings, 1)
+	assert.Contains(t, fake.projectIAMBindings[0].Member, "attribute.repository/acme/.fullsend")
+}
+
+func TestProvisionWIF_OrgScoped_GetProviderError_StillProceeds(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.errs["GetWIFProvider"] = fmt.Errorf("transient error")
+	p := NewProvisioner(Config{
+		ProjectID:  "my-project",
+		GitHubOrgs: []string{"acme"},
+	}, fake)
+
+	_, err := p.ProvisionWIF(context.Background())
+	require.NoError(t, err)
+
+	assert.Equal(t, "assertion.repository_owner == 'acme'",
+		fake.lastWIFProviderConfig.AttributeCondition)
+}
+
 func TestBuildAttributeCondition(t *testing.T) {
 	t.Run("single org scopes to repository_owner", func(t *testing.T) {
 		got := buildAttributeCondition([]string{"myorg"})
