@@ -175,9 +175,6 @@ Secrets and variables are deployed at different scopes depending on the installa
 **Org-level variable:**
 - `FULLSEND_MINT_URL` — URL of the token mint Cloud Function
 
-**.fullsend repo secrets (per role):**
-- `FULLSEND_{ROLE}_APP_PRIVATE_KEY` — PEM private key (stored in Secret Manager, not as repo secret in OIDC mode)
-
 **.fullsend repo variables (per role):**
 - `FULLSEND_{ROLE}_CLIENT_ID` — GitHub App client ID
 
