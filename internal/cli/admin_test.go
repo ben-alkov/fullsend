@@ -1485,6 +1485,66 @@ func TestInstallCmd_PerRepoAcceptsValidWIFProvider(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestFilterKnownSlugsByAppSet(t *testing.T) {
+	// Simulates the filtering in runAppSetup: config-loaded knownSlugs from a
+	// different app-set must not shadow the requested app-set's conventions.
+	tests := []struct {
+		name     string
+		appSet   string
+		slugs    map[string]string
+		wantKeys []string
+	}{
+		{
+			name:     "matching app-set preserved",
+			appSet:   "fullsend-ai",
+			slugs:    map[string]string{"coder": "fullsend-ai-coder", "review": "fullsend-ai-review"},
+			wantKeys: []string{"coder", "review"},
+		},
+		{
+			name:     "different app-set filtered out",
+			appSet:   "fullsend-ai",
+			slugs:    map[string]string{"coder": "konflux-ci-coder", "review": "konflux-ci-review"},
+			wantKeys: nil,
+		},
+		{
+			name:     "mixed app-sets keeps only matching",
+			appSet:   "fullsend-ai",
+			slugs:    map[string]string{"coder": "fullsend-ai-coder", "review": "konflux-ci-review"},
+			wantKeys: []string{"coder"},
+		},
+		{
+			name:     "empty slugs stays empty",
+			appSet:   "fullsend-ai",
+			slugs:    map[string]string{},
+			wantKeys: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			slugs := make(map[string]string)
+			for k, v := range tt.slugs {
+				slugs[k] = v
+			}
+
+			prefix := tt.appSet + "-"
+			for role, slug := range slugs {
+				if !strings.HasPrefix(slug, prefix) {
+					delete(slugs, role)
+				}
+			}
+
+			var gotKeys []string
+			for k := range slugs {
+				gotKeys = append(gotKeys, k)
+			}
+			sort.Strings(gotKeys)
+			sort.Strings(tt.wantKeys)
+			assert.Equal(t, tt.wantKeys, gotKeys)
+		})
+	}
+}
+
 func TestInstallCmd_SkipMintCheckStillValidatesWIFProvider(t *testing.T) {
 	cmd := newRootCmd()
 	cmd.SetArgs([]string{"admin", "install", "acme",

@@ -1311,9 +1311,17 @@ func runAppSetup(ctx context.Context, client forge.Client, printer *ui.Printer, 
 		WithStoredAppIDs(storedAppIDs)
 
 	// Merge known slugs: config-based first, then shared app overrides.
+	// Filter config slugs to the requested app-set so that an existing
+	// install of app-set A doesn't shadow a new install of app-set B.
 	knownSlugs := loadKnownSlugs(ctx, client, org)
 	if knownSlugs == nil {
 		knownSlugs = make(map[string]string)
+	}
+	prefix := appSet + "-"
+	for role, slug := range knownSlugs {
+		if !strings.HasPrefix(slug, prefix) {
+			delete(knownSlugs, role)
+		}
 	}
 	for role, slug := range sharedSlugs {
 		knownSlugs[role] = slug
