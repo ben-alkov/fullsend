@@ -744,7 +744,8 @@ func TestSubmitFormalReview_FiltersByPRFiles(t *testing.T) {
 	fc.PRFiles = map[string][]string{
 		"acme/repo/1": {"changed.go", "also-changed.go"},
 	}
-	printer := ui.New(io.Discard)
+	var out bytes.Buffer
+	printer := ui.New(&out)
 
 	findings := []ReviewFinding{
 		{File: "changed.go", Line: 10, Severity: "high", Category: "bug", Description: "In diff"},
@@ -758,6 +759,7 @@ func TestSubmitFormalReview_FiltersByPRFiles(t *testing.T) {
 	require.Len(t, fc.CreatedReviews[0].Comments, 2, "finding on not-in-diff.go should be filtered out")
 	assert.Equal(t, "changed.go", fc.CreatedReviews[0].Comments[0].Path)
 	assert.Equal(t, "also-changed.go", fc.CreatedReviews[0].Comments[1].Path)
+	assert.Contains(t, out.String(), "1 finding(s) omitted: file not in PR diff")
 }
 
 func TestSubmitFormalReview_ListPRFilesErrorFallsBack(t *testing.T) {

@@ -312,6 +312,18 @@ func submitFormalReview(ctx context.Context, client forge.Client, owner, repo st
 
 	inlineComments := findingsToReviewComments(findings, diffFiles)
 
+	if diffFiles != nil {
+		eligible := 0
+		for _, f := range findings {
+			if f.File != "" && f.Line > 0 {
+				eligible++
+			}
+		}
+		if filtered := eligible - len(inlineComments); filtered > 0 {
+			printer.StepWarn(fmt.Sprintf("%d finding(s) omitted: file not in PR diff", filtered))
+		}
+	}
+
 	var reviewBody string
 	if event == "REQUEST_CHANGES" {
 		reviewBody = "See the review comment above for full details."
