@@ -707,7 +707,8 @@ func TestFindingsToReviewComments(t *testing.T) {
 		{File: "c.go", Line: 20, Severity: "critical", Category: "security", Description: "Desc C", Remediation: "Fix it"},
 	}
 
-	comments := findingsToReviewComments(findings)
+	comments, filtered := findingsToReviewComments(findings, nil)
+	assert.Equal(t, 0, filtered)
 	require.Len(t, comments, 2)
 
 	assert.Equal(t, "a.go", comments[0].Path)
@@ -719,6 +720,86 @@ func TestFindingsToReviewComments(t *testing.T) {
 	assert.Equal(t, 20, comments[1].Line)
 	assert.Contains(t, comments[1].Body, "critical")
 	assert.Contains(t, comments[1].Body, "Fix it")
+}
+
+func TestFindingsToReviewComments_FiltersByDiffFiles(t *testing.T) {
+	findings := []ReviewFinding{
+		{File: "changed.go", Line: 10, Severity: "high", Category: "bug", Description: "In diff"},
+		{File: "not-changed.go", Line: 5, Severity: "low", Category: "docs", Description: "Not in diff"},
+		{File: "also-changed.go", Line: 20, Severity: "medium", Category: "style", Description: "Also in diff"},
+	}
+	diffFiles := map[string]bool{
+		"changed.go":      true,
+		"also-changed.go": true,
+	}
+
+	comments, filtered := findingsToReviewComments(findings, diffFiles)
+	assert.Equal(t, 1, filtered)
+	require.Len(t, comments, 2)
+	assert.Equal(t, "changed.go", comments[0].Path)
+	assert.Equal(t, "also-changed.go", comments[1].Path)
+}
+
+func TestSubmitFormalReview_FiltersByPRFiles(t *testing.T) {
+	fc := forge.NewFakeClient()
+	fc.AuthenticatedUser = "fullsend-bot"
+	fc.PRFiles = map[string][]string{
+		"acme/repo/1": {"changed.go", "also-changed.go"},
+	}
+	var out bytes.Buffer
+	printer := ui.New(&out)
+
+	findings := []ReviewFinding{
+		{File: "changed.go", Line: 10, Severity: "high", Category: "bug", Description: "In diff"},
+		{File: "not-in-diff.go", Line: 5, Severity: "medium", Category: "style", Description: "Should be filtered"},
+		{File: "also-changed.go", Line: 20, Severity: "low", Category: "docs", Description: "Also in diff"},
+	}
+
+	err := submitFormalReview(context.Background(), fc, "acme", "repo", 1, "request-changes", "", "", findings, false, printer)
+	require.NoError(t, err)
+	require.Len(t, fc.CreatedReviews, 1)
+	require.Len(t, fc.CreatedReviews[0].Comments, 2, "finding on not-in-diff.go should be filtered out")
+	assert.Equal(t, "changed.go", fc.CreatedReviews[0].Comments[0].Path)
+	assert.Equal(t, "also-changed.go", fc.CreatedReviews[0].Comments[1].Path)
+	assert.Contains(t, out.String(), "1 finding(s) omitted: file not in PR diff")
+}
+
+func TestSubmitFormalReview_ListPRFilesErrorFallsBack(t *testing.T) {
+	fc := forge.NewFakeClient()
+	fc.AuthenticatedUser = "fullsend-bot"
+	fc.Errors["ListPullRequestFiles"] = fmt.Errorf("API rate limited")
+	printer := ui.New(io.Discard)
+
+	findings := []ReviewFinding{
+		{File: "any-file.go", Line: 10, Severity: "high", Category: "bug", Description: "Should pass through"},
+	}
+
+	err := submitFormalReview(context.Background(), fc, "acme", "repo", 1, "request-changes", "", "", findings, false, printer)
+	require.NoError(t, err)
+	require.Len(t, fc.CreatedReviews, 1)
+	require.Len(t, fc.CreatedReviews[0].Comments, 1, "all comments should pass through when ListPullRequestFiles fails")
+	assert.Equal(t, "any-file.go", fc.CreatedReviews[0].Comments[0].Path)
+}
+
+func TestSubmitFormalReview_EmptyPRFileListFallsBack(t *testing.T) {
+	fc := forge.NewFakeClient()
+	fc.AuthenticatedUser = "fullsend-bot"
+	fc.PRFiles = map[string][]string{
+		"acme/repo/1": {},
+	}
+	var out bytes.Buffer
+	printer := ui.New(&out)
+
+	findings := []ReviewFinding{
+		{File: "any-file.go", Line: 10, Severity: "high", Category: "bug", Description: "Should pass through"},
+	}
+
+	err := submitFormalReview(context.Background(), fc, "acme", "repo", 1, "request-changes", "", "", findings, false, printer)
+	require.NoError(t, err)
+	require.Len(t, fc.CreatedReviews, 1)
+	// When PR file list is empty, filtering is disabled — all comments pass through unfiltered.
+	require.Len(t, fc.CreatedReviews[0].Comments, 1, "comments pass through unfiltered when PR file list is empty")
+	assert.Contains(t, out.String(), "PR file list is empty")
 }
 
 func TestFormatFindingComment(t *testing.T) {
