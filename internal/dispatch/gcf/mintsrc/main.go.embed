@@ -226,7 +226,7 @@ var githubOrgPattern = regexp.MustCompile(`^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-z
 // GitHub allows repos starting with dot (e.g., .fullsend, .github).
 var repoNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_.][a-zA-Z0-9._-]{0,99}$`)
 
-const maxRepos = 100
+const maxRepos = 500
 
 // mintRequest is the JSON body sent by .fullsend agent workflows.
 type mintRequest struct {
@@ -475,7 +475,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(req.Repos) > maxRepos {
-		writeError(w, http.StatusBadRequest, "too many repos (max 100)")
+		writeError(w, http.StatusBadRequest, "too many repos (max 500)")
 		return
 	}
 	for _, repo := range req.Repos {
