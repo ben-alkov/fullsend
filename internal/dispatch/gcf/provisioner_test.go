@@ -384,8 +384,8 @@ func TestProvisioner_Provision_FullFlow(t *testing.T) {
 
 	expected := []string{
 		"GetFunction", // auto-routing check (no existing function → full deploy)
-		"GetProjectNumber",
 		"CreateServiceAccount",
+		"GetProjectNumber",
 		"CreateWIFPool",
 		"GetWIFProvider",
 		"CreateWIFProvider",
