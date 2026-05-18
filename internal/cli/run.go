@@ -322,6 +322,18 @@ func runAgent(agentName, fullsendDir, outputBase, targetRepo, fullsendBinary str
 		printer.StepFail("Failed to copy project code")
 		return fmt.Errorf("copying project code: %w", err)
 	}
+
+	// openshell upload applies .gitignore filtering by default via
+	// git ls-files, which never lists .git/. Upload it separately so the
+	// agent has full git history, refs, and branch state. Uploading .git/
+	// directly bypasses the filter because .git/ itself is not a working
+	// tree, causing openshell to fall back to an unfiltered tar upload.
+	gitDir := filepath.Join(repoSrc, ".git")
+	if fi, statErr := os.Stat(gitDir); statErr == nil && fi.IsDir() {
+		if err := sandbox.Upload(sandboxName, gitDir, filepath.Join(repoDir, ".git")); err != nil {
+			printer.StepWarn("Could not upload .git directory: " + err.Error())
+		}
+	}
 	printer.StepDone(fmt.Sprintf("Project code copied to %s/ (%.1fs)", repoName, time.Since(copyStart).Seconds()))
 
 	// 8a. Inject org-level AGENTS.md if the target repo does not have one.
