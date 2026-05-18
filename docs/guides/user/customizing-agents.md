@@ -19,9 +19,8 @@ skills:                          # Skills loaded into agent
   - skills/git.md
   - skills/github-pr.md
 
-plugins:                         # MCP plugins (list of plugin names)
-  - github
-  - sourcebot
+plugins:                         # Claude Code plugins (list of plugin names)
+  - plugins/gopls-lsp
 
 providers:                       # Inference providers (list of provider names)
   - vertex
