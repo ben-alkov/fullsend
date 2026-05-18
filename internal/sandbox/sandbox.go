@@ -269,6 +269,24 @@ func Upload(sandboxName, localPath, remotePath string) error {
 	return nil
 }
 
+// RestoreSymlinks recreates git-tracked symlinks after a sandbox upload.
+// openshell sandbox upload dereferences symlinks into real directories;
+// this reads the git index for mode-120000 entries and recreates them.
+func RestoreSymlinks(sandboxName, repoDir string) error {
+	cmd := fmt.Sprintf(
+		`cd %s && git ls-files --stage | awk '$1=="120000"{print $2,$4}' | while IFS=' ' read sha path; do target=$(git cat-file blob "$sha"); rm -rf "$path"; mkdir -p "$(dirname "$path")"; ln -s "$target" "$path"; done`,
+		repoDir,
+	)
+	_, stderr, exitCode, err := Exec(sandboxName, cmd, 30*time.Second)
+	if err != nil {
+		return fmt.Errorf("restoring symlinks in sandbox %q: %w", sandboxName, err)
+	}
+	if exitCode != 0 {
+		return fmt.Errorf("restoring symlinks in sandbox %q: exit %d: %s", sandboxName, exitCode, stderr)
+	}
+	return nil
+}
+
 // Download copies a file or directory from a sandbox to the local machine.
 // The localPath is always treated as a directory by openshell — for single-file
 // downloads use DownloadFile instead.
