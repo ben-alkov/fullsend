@@ -14,27 +14,27 @@ on:
   workflow_call:
     inputs:
       event_action:
-        description: 'The event action (github.event.action) forwarded by the shim'
+        description: "The event action (github.event.action) forwarded by the shim"
         required: true
         type: string
       install_mode:
-        description: 'Installation mode: per-repo (default) or per-org'
+        description: "Installation mode: per-repo (default) or per-org"
         required: false
         type: string
-        default: 'per-repo'
+        default: "per-repo"
       mint_url:
-        description: 'Token mint URL for OIDC token exchange'
+        description: "Token mint URL for OIDC token exchange"
         required: true
         type: string
       gcp_region:
-        description: 'GCP region for Vertex AI'
+        description: "GCP region for Vertex AI"
         required: true
         type: string
       fullsend_version:
-        description: 'Fullsend CLI version to use'
+        description: "Fullsend CLI version to use"
         required: false
         type: string
-        default: 'latest'
+        default: "latest"
     secrets:
       FULLSEND_GCP_WIF_PROVIDER:
         required: false
@@ -262,7 +262,7 @@ jobs:
           fi
           STAGE_ROLE="$STAGE"
           case "$STAGE" in
-            code) STAGE_ROLE="coder" ;;
+            code|fix) STAGE_ROLE="coder" ;;
             retro|prioritize) STAGE_ROLE="fullsend" ;;
           esac
           ROLES=$(yq '.roles[]' .fullsend/config.yaml 2>/dev/null || echo "")
@@ -335,7 +335,6 @@ jobs:
     secrets:
       FULLSEND_GCP_WIF_PROVIDER: ${{ secrets.FULLSEND_GCP_WIF_PROVIDER }}
 
-
       FULLSEND_GCP_PROJECT_ID: ${{ secrets.FULLSEND_GCP_PROJECT_ID }}
 
   code:
@@ -355,7 +354,6 @@ jobs:
     secrets:
       FULLSEND_GCP_WIF_PROVIDER: ${{ secrets.FULLSEND_GCP_WIF_PROVIDER }}
 
-
       FULLSEND_GCP_PROJECT_ID: ${{ secrets.FULLSEND_GCP_PROJECT_ID }}
 
   review:
@@ -374,7 +372,6 @@ jobs:
       fullsend_version: ${{ inputs.fullsend_version }}
     secrets:
       FULLSEND_GCP_WIF_PROVIDER: ${{ secrets.FULLSEND_GCP_WIF_PROVIDER }}
-
 
       FULLSEND_GCP_PROJECT_ID: ${{ secrets.FULLSEND_GCP_PROJECT_ID }}
 
@@ -396,7 +393,6 @@ jobs:
     secrets:
       FULLSEND_GCP_WIF_PROVIDER: ${{ secrets.FULLSEND_GCP_WIF_PROVIDER }}
 
-
       FULLSEND_GCP_PROJECT_ID: ${{ secrets.FULLSEND_GCP_PROJECT_ID }}
 
   retro:
@@ -415,6 +411,5 @@ jobs:
       fullsend_version: ${{ inputs.fullsend_version }}
     secrets:
       FULLSEND_GCP_WIF_PROVIDER: ${{ secrets.FULLSEND_GCP_WIF_PROVIDER }}
-
 
       FULLSEND_GCP_PROJECT_ID: ${{ secrets.FULLSEND_GCP_PROJECT_ID }}
