@@ -1,12 +1,6 @@
 # Enabling fullsend on private repositories
 
-This guide covers what administrators need to configure when enabling fullsend on private repositories. It assumes you have already completed the [installation guide](installation.md) and have a working fullsend installation.
-
-## Prerequisites
-
-- A working fullsend installation (per-org or per-repo) — see [installation guide](installation.md)
-- Admin access to the target private repository
-- Familiarity with [AGENTS.md](../user/customizing-agents.md) and the [layered configuration model](../user/customizing-agents.md#layered-configuration-resolution)
+This guide covers what administrators need to configure when enabling fullsend on private repositories. Admin access to the target private repository is required.
 
 ## Supported scenarios
 
