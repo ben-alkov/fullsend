@@ -47,7 +47,19 @@ repos:
     rev: v1.7.11
     hooks:
       - id: actionlint
-        args: ["-ignore", "unexpected key \"queue\" for \"concurrency\""]
+        files: |
+          (?x)^(
+            \.github/workflows/
+            |internal/scaffold/fullsend-repo/\.github/workflows/
+            |internal/scaffold/fullsend-repo/templates/
+          )
+        args:
+          - -ignore
+          - unexpected key "queue" for "concurrency"
+          - -ignore
+          - property "workflow_repository" is not defined
+          - -ignore
+          - SC2016
 
   - repo: local
     hooks:
@@ -97,13 +109,6 @@ repos:
       - id: lint-workflow-size
         name: lint workflow file size
         entry: ./hack/lint-workflow-size
-        language: script
-        files: ^internal/scaffold/fullsend-repo/(\.github/workflows/|templates/)
-        pass_filenames: false
-
-      - id: lint-scaffold-workflows
-        name: actionlint scaffold workflow templates
-        entry: ./hack/lint-scaffold-workflows
         language: script
         files: ^internal/scaffold/fullsend-repo/(\.github/workflows/|templates/)
         pass_filenames: false
