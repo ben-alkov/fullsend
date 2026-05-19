@@ -1900,6 +1900,7 @@ func loadExistingEnabledRepos(ctx context.Context, client forge.Client, org stri
 	}
 	return cfg.EnabledRepos()
 }
+
 // filterSlugsByAppSet returns a new map containing only entries whose slug
 // matches the convention for the given app set (i.e., slug == appSet + "-" + role).
 // Slugs from a previous install with a different app set must not be carried
