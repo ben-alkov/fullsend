@@ -244,3 +244,11 @@ func TestSanitizeDownload_EmptyDir(t *testing.T) {
 	err := sanitizeDownload(dir)
 	assert.NoError(t, err)
 }
+
+func TestUploadDir_OpenshellNotInPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", "")
+
+	err := UploadDir("test-sandbox", dir, "/tmp/workspace/repo")
+	assert.Error(t, err)
+}

@@ -269,6 +269,39 @@ func Upload(sandboxName, localPath, remotePath string) error {
 	return nil
 }
 
+// UploadDir uploads a local directory into a sandbox, preserving symlinks.
+// openshell sandbox upload dereferences symlinks; this builds a local tarball
+// with --no-dereference, uploads it, and extracts it in the sandbox.
+func UploadDir(sandboxName, localPath, remotePath string) error {
+	tmp, err := os.CreateTemp("", "openshell-upload-*.tar.gz")
+	if err != nil {
+		return fmt.Errorf("creating temp tarball: %w", err)
+	}
+	tmpPath := tmp.Name()
+	tmp.Close()
+	defer os.Remove(tmpPath)
+
+	tarCmd := exec.Command("tar", "-czf", tmpPath, "-C", localPath, ".")
+	if out, tarErr := tarCmd.CombinedOutput(); tarErr != nil {
+		return fmt.Errorf("creating tarball of %q: %s: %w", localPath, string(out), tarErr)
+	}
+
+	remoteTar := fmt.Sprintf("/tmp/fs-upload-%s.tar.gz", sandboxName)
+	if err := Upload(sandboxName, tmpPath, remoteTar); err != nil {
+		return err
+	}
+
+	extractCmd := fmt.Sprintf("mkdir -p %s && tar -xzf %s -C %s && rm %s", remotePath, remoteTar, remotePath, remoteTar)
+	_, stderr, exitCode, err := Exec(sandboxName, extractCmd, transferTimeout)
+	if err != nil {
+		return fmt.Errorf("extracting tarball in sandbox %q: %w", sandboxName, err)
+	}
+	if exitCode != 0 {
+		return fmt.Errorf("extracting tarball in sandbox %q: exit %d: %s", sandboxName, exitCode, stderr)
+	}
+	return nil
+}
+
 // Download copies a file or directory from a sandbox to the local machine.
 // The localPath is always treated as a directory by openshell — for single-file
 // downloads use DownloadFile instead.

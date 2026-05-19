@@ -326,25 +326,9 @@ func runAgent(agentName, fullsendDir, outputBase, targetRepo, fullsendBinary str
 	// 8. Make project code available (copy repo root into a named subdirectory).
 	copyStart := time.Now()
 	printer.StepStart("Copying project code into sandbox")
-	mkRepoCmd := fmt.Sprintf("mkdir -p %s", repoDir)
-	if _, _, _, err := sandbox.Exec(sandboxName, mkRepoCmd, 10*time.Second); err != nil {
-		return fmt.Errorf("creating repo dir in sandbox: %w", err)
-	}
-	if err := sandbox.Upload(sandboxName, repoSrc+"/.", repoDir+"/"); err != nil {
+	if err := sandbox.UploadDir(sandboxName, repoSrc, repoDir); err != nil {
 		printer.StepFail("Failed to copy project code")
 		return fmt.Errorf("copying project code: %w", err)
-	}
-
-	// openshell upload applies .gitignore filtering by default via
-	// git ls-files, which never lists .git/. Upload it separately so the
-	// agent has full git history, refs, and branch state. Uploading .git/
-	// directly bypasses the filter because .git/ itself is not a working
-	// tree, causing openshell to fall back to an unfiltered tar upload.
-	gitDir := filepath.Join(repoSrc, ".git")
-	if fi, statErr := os.Stat(gitDir); statErr == nil && fi.IsDir() {
-		if err := sandbox.Upload(sandboxName, gitDir, filepath.Join(repoDir, ".git")); err != nil {
-			printer.StepWarn("Could not upload .git directory: " + err.Error())
-		}
 	}
 	printer.StepDone(fmt.Sprintf("Project code copied to %s/ (%.1fs)", repoName, time.Since(copyStart).Seconds()))
 
