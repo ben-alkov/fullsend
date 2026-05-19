@@ -31,6 +31,15 @@ import (
 	"github.com/fullsend-ai/fullsend/internal/ui"
 )
 
+const (
+	claudeDebugLog = "claude-debug.log"
+
+	// maxContextScanDepth is the maximum directory depth for scanning context
+	// files. Shared between host-side (scanRepoContextFiles) and sandbox-side
+	// (buildScanContextCommand) scans to ensure parity.
+	maxContextScanDepth = 5
+)
+
 func newRunCmd() *cobra.Command {
 	var fullsendDir string
 	var outputBase string
@@ -38,6 +47,7 @@ func newRunCmd() *cobra.Command {
 	var fullsendBinary string
 	var envFiles []string
 	var noPostScript bool
+	var debugFilter string
 
 	cmd := &cobra.Command{
 		Use:   "run <agent-name>",
@@ -47,7 +57,7 @@ func newRunCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			agentName := args[0]
 			printer := ui.New(os.Stdout)
-			return runAgent(agentName, fullsendDir, outputBase, targetRepo, fullsendBinary, envFiles, noPostScript, printer)
+			return runAgent(agentName, fullsendDir, outputBase, targetRepo, fullsendBinary, envFiles, noPostScript, debugFilter, printer)
 		},
 	}
 
@@ -57,13 +67,15 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&fullsendBinary, "fullsend-binary", "", "path to a Linux fullsend binary to copy into the sandbox (default: current executable)")
 	cmd.Flags().StringArrayVar(&envFiles, "env-file", nil, "load environment variables from a dotenv file (repeatable)")
 	cmd.Flags().BoolVar(&noPostScript, "no-post-script", false, "skip post-script execution (agent still runs full inference)")
+	cmd.Flags().StringVar(&debugFilter, "debug", "", `enable Claude Code debug logging with optional category filter (e.g. "api,hooks")`)
+	cmd.Flags().Lookup("debug").NoOptDefVal = "*"
 	_ = cmd.MarkFlagRequired("fullsend-dir")
 	_ = cmd.MarkFlagRequired("target-repo")
 
 	return cmd
 }
 
-func runAgent(agentName, fullsendDir, outputBase, targetRepo, fullsendBinary string, envFiles []string, noPostScript bool, printer *ui.Printer) (runErr error) {
+func runAgent(agentName, fullsendDir, outputBase, targetRepo, fullsendBinary string, envFiles []string, noPostScript bool, debug string, printer *ui.Printer) (runErr error) {
 	printer.Banner()
 	printer.Blank()
 	printer.Header("Running agent: " + agentName)
@@ -433,7 +445,7 @@ func runAgent(agentName, fullsendDir, outputBase, targetRepo, fullsendBinary str
 	for _, p := range h.Plugins {
 		pluginDirs = append(pluginDirs, fmt.Sprintf("%s/plugins/%s", sandbox.SandboxClaudeConfig, filepath.Base(p)))
 	}
-	claudeCmd := buildClaudeCommand(agentBaseName, h.Model, repoDir, pluginDirs)
+	claudeCmd := buildClaudeCommand(agentBaseName, h.Model, repoDir, pluginDirs, debug)
 
 	timeout := time.Duration(h.TimeoutMinutes) * time.Minute
 	if timeout == 0 {
@@ -546,6 +558,16 @@ func runAgent(agentName, fullsendDir, outputBase, targetRepo, fullsendBinary str
 			printer.StepWarn("Failed to extract transcripts: " + err.Error())
 		} else {
 			printer.StepDone(fmt.Sprintf("Transcripts extracted (%.1fs)", time.Since(transcriptStart).Seconds()))
+		}
+
+		// Extract debug log if --debug was enabled.
+		if debug != "" {
+			debugDst := filepath.Join(iterDir, claudeDebugLog)
+			if err := sandbox.DownloadFile(sandboxName, sandbox.SandboxWorkspace+"/"+claudeDebugLog, debugDst); err != nil {
+				printer.StepWarn("Failed to extract debug log: " + err.Error())
+			} else {
+				printer.StepInfo("Extracted claude-debug.log")
+			}
 		}
 
 		// 9d. Extract target repo back to host. SafeDownload removes symlinks
@@ -1085,7 +1107,7 @@ func refreshOIDCToken(ctx context.Context, sandboxName, oidcURL, oidcAuth string
 	return nil
 }
 
-func buildClaudeCommand(agentName, model, repoDir string, pluginDirs []string) string {
+func buildClaudeCommand(agentName, model, repoDir string, pluginDirs []string, debug string) string {
 	envFile := sandbox.SandboxWorkspace + "/.env"
 
 	// Defense-in-depth: escape single quotes even though Validate() rejects them.
@@ -1105,19 +1127,22 @@ func buildClaudeCommand(agentName, model, repoDir string, pluginDirs []string) s
 		pluginDirFlags = strings.Join(pluginDirParts, " ") + " "
 	}
 
+	debugFlags := ""
+	if debug != "" {
+		debugFlags = fmt.Sprintf("--debug-file '%s/%s' ", sandbox.SandboxWorkspace, claudeDebugLog)
+		if debug != "*" {
+			debugFlags += fmt.Sprintf("--debug '%s' ", strings.ReplaceAll(debug, "'", "'\\''"))
+		}
+	}
+
 	return fmt.Sprintf(
 		// --verbose increases log output in the job log. If artifact upload is
 		// added to this workflow, consider whether verbose output should be
 		// redacted or made conditional via an env var.
-		"cd %s && . %s && claude --print --verbose --output-format stream-json %s%s--agent '%s' --dangerously-skip-permissions 'Run the agent task'",
-		repoDir, envFile, modelFlag, pluginDirFlags, safe,
+		"cd %s && . %s && claude --print --verbose --output-format stream-json %s%s%s--agent '%s' --dangerously-skip-permissions 'Run the agent task'",
+		repoDir, envFile, debugFlags, modelFlag, pluginDirFlags, safe,
 	)
 }
-
-// maxContextScanDepth is the maximum directory depth for scanning context
-// files. Shared between host-side (scanRepoContextFiles) and sandbox-side
-// (buildScanContextCommand) scans to ensure parity.
-const maxContextScanDepth = 5
 
 // buildScanContextCommand builds the command to run `fullsend scan context`
 // inside the sandbox. It finds known context files (including SKILL.md in
