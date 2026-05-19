@@ -29,7 +29,10 @@ func sanitizeDownload(localDir string) error {
 	if err != nil {
 		return err
 	}
-	absLocal = filepath.Clean(absLocal)
+	absLocal, err = filepath.EvalSymlinks(absLocal)
+	if err != nil {
+		return err
+	}
 
 	return filepath.WalkDir(absLocal, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
