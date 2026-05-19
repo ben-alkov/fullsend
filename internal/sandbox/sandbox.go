@@ -269,27 +269,35 @@ func Upload(sandboxName, localPath, remotePath string) error {
 	return nil
 }
 
-// RestoreSymlinks recreates git-tracked symlinks after a sandbox upload.
-// openshell sandbox upload dereferences symlinks into real directories;
-// this reads the git index for mode-120000 entries and recreates them.
-// See https://github.com/NVIDIA/OpenShell/issues/1425
-func RestoreSymlinks(sandboxName, repoDir string) error {
-	// Shell-escape repoDir to prevent injection
-	escapedDir := strings.ReplaceAll(repoDir, "'", "'\\''")
-
-	// Use tab as field separator to handle paths with spaces correctly.
-	// git ls-files --stage format: <mode> <sha> <stage>\t<path>
-	// We split the first field on spaces to extract mode and sha, then use tab to get the full path.
-	cmd := fmt.Sprintf(
-		`set -euo pipefail; cd '%s' && git ls-files --stage | awk -F'\t' '/^120000 /{split($1,a," "); print a[2]"\t"$2}' | while IFS=$'\t' read -r sha path; do [ -n "$path" ] || continue; target=$(git cat-file blob "$sha"); rm -rf "$path"; mkdir -p "$(dirname "$path")"; ln -s "$target" "$path"; done`,
-		escapedDir,
-	)
-	_, stderr, exitCode, err := Exec(sandboxName, cmd, 60*time.Second)
+// UploadDir uploads a local directory into a sandbox, preserving symlinks.
+// openshell sandbox upload dereferences symlinks; this builds a local tarball
+// with --no-dereference, uploads it, and extracts it in the sandbox.
+func UploadDir(sandboxName, localPath, remotePath string) error {
+	tmp, err := os.CreateTemp("", "openshell-upload-*.tar.gz")
 	if err != nil {
-		return fmt.Errorf("restoring symlinks in sandbox %q: %w", sandboxName, err)
+		return fmt.Errorf("creating temp tarball: %w", err)
+	}
+	tmpPath := tmp.Name()
+	tmp.Close()
+	defer os.Remove(tmpPath)
+
+	tarCmd := exec.Command("tar", "-czf", tmpPath, "-C", localPath, ".")
+	if out, tarErr := tarCmd.CombinedOutput(); tarErr != nil {
+		return fmt.Errorf("creating tarball of %q: %s: %w", localPath, string(out), tarErr)
+	}
+
+	remoteTar := fmt.Sprintf("/tmp/fs-upload-%s.tar.gz", sandboxName)
+	if err := Upload(sandboxName, tmpPath, remoteTar); err != nil {
+		return err
+	}
+
+	extractCmd := fmt.Sprintf("mkdir -p %s && tar -xzf %s -C %s && rm %s", remotePath, remoteTar, remotePath, remoteTar)
+	_, stderr, exitCode, err := Exec(sandboxName, extractCmd, transferTimeout)
+	if err != nil {
+		return fmt.Errorf("extracting tarball in sandbox %q: %w", sandboxName, err)
 	}
 	if exitCode != 0 {
-		return fmt.Errorf("restoring symlinks in sandbox %q: exit %d: %s", sandboxName, exitCode, stderr)
+		return fmt.Errorf("extracting tarball in sandbox %q: exit %d: %s", sandboxName, exitCode, stderr)
 	}
 	return nil
 }
