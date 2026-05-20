@@ -785,23 +785,24 @@ func bootstrapSandbox(sandboxName, repoDir, fullsendBinary string, h *harness.Ha
 
 	// Copy the self-check script into the sandbox so agents can validate
 	// output JSON against their schema before finishing. See #1107.
-	if checkScript, err := scaffold.FullsendRepoFile("scripts/fullsend-check-output"); err == nil {
+	checkScript, err := scaffold.FullsendRepoFile("scripts/fullsend-check-output")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: could not load self-check script: %v\n", err)
+	} else {
 		tmpCheck, err := os.CreateTemp("", "fullsend-check-output-*")
 		if err != nil {
 			return fmt.Errorf("creating temp file for check script: %w", err)
 		}
+		defer os.Remove(tmpCheck.Name())
 		if _, err := tmpCheck.Write(checkScript); err != nil {
 			tmpCheck.Close()
-			os.Remove(tmpCheck.Name())
 			return fmt.Errorf("writing check script: %w", err)
 		}
 		tmpCheck.Close()
 		remoteBin := fmt.Sprintf("%s/bin/fullsend-check-output", sandbox.SandboxWorkspace)
 		if err := sandbox.Upload(sandboxName, tmpCheck.Name(), remoteBin); err != nil {
-			os.Remove(tmpCheck.Name())
 			return fmt.Errorf("copying check script to sandbox: %w", err)
 		}
-		os.Remove(tmpCheck.Name())
 		if _, _, _, err := sandbox.Exec(sandboxName, fmt.Sprintf("chmod +x %s", remoteBin), 10*time.Second); err != nil {
 			return fmt.Errorf("chmod check script: %w", err)
 		}
@@ -883,17 +884,21 @@ func bootstrapEnv(sandboxName, repoDir string, h *harness.Harness) error {
 	// agents can self-check output with fullsend-check-output. See #1107.
 	remoteSchemaPath := sandbox.SandboxWorkspace + "/.fullsend/output-schema.json"
 	if schemaHost, ok := h.RunnerEnv["FULLSEND_OUTPUT_SCHEMA"]; ok && schemaHost != "" {
-		if _, statErr := os.Stat(schemaHost); statErr == nil {
+		if _, statErr := os.Stat(schemaHost); statErr != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: schema file not found on host: %s\n", schemaHost)
+		} else {
 			mkdirCmd := fmt.Sprintf("mkdir -p %s/.fullsend", sandbox.SandboxWorkspace)
-			if _, _, _, execErr := sandbox.Exec(sandboxName, mkdirCmd, 10*time.Second); execErr == nil {
-				if uploadErr := sandbox.Upload(sandboxName, schemaHost, remoteSchemaPath); uploadErr == nil {
-					lines = append(lines, fmt.Sprintf("export FULLSEND_OUTPUT_SCHEMA=%s", remoteSchemaPath))
-				}
+			if _, _, _, execErr := sandbox.Exec(sandboxName, mkdirCmd, 10*time.Second); execErr != nil {
+				fmt.Fprintf(os.Stderr, "WARNING: could not create .fullsend dir for schema: %v\n", execErr)
+			} else if uploadErr := sandbox.Upload(sandboxName, schemaHost, remoteSchemaPath); uploadErr != nil {
+				fmt.Fprintf(os.Stderr, "WARNING: could not upload output schema: %v\n", uploadErr)
+			} else {
+				lines = append(lines, fmt.Sprintf("export FULLSEND_OUTPUT_SCHEMA=%s", remoteSchemaPath))
 			}
 		}
 	}
 	if outputFile, ok := h.RunnerEnv["FULLSEND_OUTPUT_FILE"]; ok && outputFile != "" {
-		lines = append(lines, fmt.Sprintf("export FULLSEND_OUTPUT_FILE=%s", outputFile))
+		lines = append(lines, fmt.Sprintf("export FULLSEND_OUTPUT_FILE='%s'", strings.ReplaceAll(outputFile, "'", "'\\''")))
 	}
 
 	// Source all env files from .env.d/ (populated by host_files with expand: true).

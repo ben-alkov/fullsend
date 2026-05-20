@@ -43,8 +43,14 @@ fi
 _expected="${FULLSEND_OUTPUT_FILE:-agent-result.json}"
 _actual="$(basename "${CANDIDATE}")"
 if [[ "${_actual}" != "${_expected}" ]]; then
-  echo "WARN: filename is '${_actual}' but harness expects '${_expected}'"
+  echo "FAIL: filename is '${_actual}' but harness expects '${_expected}'"
   echo "      Rename to: $(dirname "${CANDIDATE}")/${_expected}"
+  exit 1
+fi
+
+if ! python3 -c "import jsonschema" 2>/dev/null; then
+  echo "FAIL: python3 jsonschema package is not installed"
+  exit 1
 fi
 
 if ! python3 -m json.tool "${CANDIDATE}" > /dev/null 2>&1; then
