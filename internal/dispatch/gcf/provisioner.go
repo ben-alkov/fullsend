@@ -254,10 +254,11 @@ func (p *Provisioner) ensureSecretIAM(ctx context.Context, secretName string) er
 }
 
 // MintDiscovery holds the results of a single GetFunction call, providing
-// both the URL and existing role-to-app-ID mappings.
+// the URL, existing role-to-app-ID mappings, and per-repo WIF repos.
 type MintDiscovery struct {
-	URL        string
-	RoleAppIDs map[string]string
+	URL             string
+	RoleAppIDs      map[string]string
+	PerRepoWIFRepos []string
 }
 
 // DiscoverMint fetches the mint function once and returns its URL and
@@ -282,6 +283,15 @@ func (p *Provisioner) DiscoverMint(ctx context.Context) (*MintDiscovery, error) 
 			} else {
 				result.RoleAppIDs = m
 			}
+		}
+		if raw := fn.EnvVars["PER_REPO_WIF_REPOS"]; raw != "" {
+			for _, entry := range strings.Split(raw, ",") {
+				entry = strings.TrimSpace(entry)
+				if entry != "" {
+					result.PerRepoWIFRepos = append(result.PerRepoWIFRepos, entry)
+				}
+			}
+			sort.Strings(result.PerRepoWIFRepos)
 		}
 	}
 	return result, nil
@@ -371,12 +381,13 @@ func (p *Provisioner) EnsureOrgInMint(ctx context.Context, expectedURL string, o
 		updated[k] = v
 	}
 
-	// Build desired ALLOWED_ORGS including the new org.
+	// Build desired ALLOWED_ORGS including the new org, stripping the
+	// deploy-time placeholder (PlaceholderOrg) if present.
 	desired := map[string]string{
 		"ALLOWED_ORGS": org,
 	}
 	mergeAllowedOrgs(updated, desired)
-	updated["ALLOWED_ORGS"] = desired["ALLOWED_ORGS"]
+	updated["ALLOWED_ORGS"] = stripPlaceholderOrg(desired["ALLOWED_ORGS"])
 
 	// Build desired ROLE_APP_IDS including the new entries.
 	newRoleAppIDs, err := json.Marshal(roleAppIDs)
@@ -386,6 +397,9 @@ func (p *Provisioner) EnsureOrgInMint(ctx context.Context, expectedURL string, o
 	desired["ROLE_APP_IDS"] = string(newRoleAppIDs)
 	mergeRoleAppIDs(updated, desired)
 	updated["ROLE_APP_IDS"] = desired["ROLE_APP_IDS"]
+
+	// Strip deploy-time placeholder entries from ROLE_APP_IDS.
+	updated["ROLE_APP_IDS"] = stripPlaceholderRoleAppIDs(updated["ROLE_APP_IDS"])
 
 	// Recompute ALLOWED_ROLES from the merged ROLE_APP_IDS.
 	updated["ALLOWED_ROLES"] = deriveAllowedRoles(updated["ROLE_APP_IDS"])
@@ -539,6 +553,10 @@ func (p *Provisioner) provisionWithExistingMint(ctx context.Context) (map[string
 	}
 
 	for _, org := range p.cfg.GitHubOrgs {
+		if org == PlaceholderOrg {
+			continue
+		}
+
 		// Store new PEMs (per-org with fresh apps).
 		for _, role := range sortedByteMapKeys(p.cfg.AgentPEMs) {
 			if err := p.StoreAgentPEM(ctx, org, role, p.cfg.AgentPEMs[role]); err != nil {
@@ -674,14 +692,19 @@ func (p *Provisioner) provisionSelfManaged(ctx context.Context) (map[string]stri
 	// Step 3: Grant Vertex AI access to each installing org's .fullsend repo
 	// at the project level (direct WIF — no intermediate service account).
 	// IAM policy changes can take up to 7 minutes to propagate.
+	iamGrantCount := 0
 	for _, org := range installingOrgs {
+		if org == PlaceholderOrg {
+			continue
+		}
 		principal := fmt.Sprintf("principalSet://iam.googleapis.com/projects/%s/locations/global/workloadIdentityPools/%s/attribute.repository/%s/.fullsend",
 			projectNumber, p.cfg.WIFPoolName, org)
 		if err := p.gcpAPI.SetProjectIAMBinding(ctx, p.cfg.ProjectID, principal, "roles/aiplatform.user"); err != nil {
 			return nil, fmt.Errorf("granting Vertex AI access for org %s: %w", org, err)
 		}
+		iamGrantCount++
 	}
-	log.Printf("granted roles/aiplatform.user to %d org(s) (propagation may take several minutes)", len(installingOrgs))
+	log.Printf("granted roles/aiplatform.user to %d org(s) (propagation may take several minutes)", iamGrantCount)
 
 	// Determine if code deployment is needed. When the function already
 	// exists and is active with the same source hash, skip the code deploy
@@ -728,7 +751,11 @@ func (p *Provisioner) provisionSelfManaged(ctx context.Context) (map[string]stri
 	}
 
 	// Step 5a: Store new agent PEMs only for installing orgs.
+	// Skip for the deploy-time placeholder org which has no real PEMs.
 	for _, org := range installingOrgs {
+		if org == PlaceholderOrg {
+			continue
+		}
 		for _, role := range sortedByteMapKeys(p.cfg.AgentPEMs) {
 			if err := p.StoreAgentPEM(ctx, org, role, p.cfg.AgentPEMs[role]); err != nil {
 				return nil, fmt.Errorf("storing PEM for %s/%s: %w", org, role, err)
@@ -737,8 +764,12 @@ func (p *Provisioner) provisionSelfManaged(ctx context.Context) (map[string]stri
 	}
 
 	// Step 5b: Verify secrets exist for roles without PEMs (re-install,
-	// only for installing orgs).
+	// only for installing orgs). Skip for the deploy-time placeholder org
+	// which has no real PEMs.
 	for _, org := range installingOrgs {
+		if org == PlaceholderOrg {
+			continue
+		}
 		for _, role := range sortedStringMapKeys(p.cfg.AgentAppIDs) {
 			if _, hasPEM := p.cfg.AgentPEMs[role]; hasPEM {
 				continue
@@ -964,6 +995,42 @@ func mergeRoleAppIDs(existing, desired map[string]string) {
 	desired["ROLE_APP_IDS"] = string(merged)
 }
 
+// PlaceholderOrg is the deploy-time placeholder used in the WIF condition
+// and env vars before any real orgs are enrolled. Must pass githubOrgPattern
+// validation (used by Provision), but should not collide with any real
+// GitHub org. The CLI rejects this value at enrollment time.
+const PlaceholderOrg = "x0fullsend0placeholder"
+
+// stripPlaceholderOrg removes the deploy-time placeholder org from a
+// comma-separated ALLOWED_ORGS value. Called during enrollment so the
+// placeholder doesn't persist after real orgs are added.
+func stripPlaceholderOrg(orgs string) string {
+	var filtered []string
+	for _, o := range strings.Split(orgs, ",") {
+		o = strings.TrimSpace(o)
+		if o != "" && o != PlaceholderOrg {
+			filtered = append(filtered, o)
+		}
+	}
+	return strings.Join(filtered, ",")
+}
+
+// stripPlaceholderRoleAppIDs removes placeholder entries from ROLE_APP_IDS JSON.
+func stripPlaceholderRoleAppIDs(roleAppIDsJSON string) string {
+	var m map[string]string
+	if err := json.Unmarshal([]byte(roleAppIDsJSON), &m); err != nil {
+		return roleAppIDsJSON
+	}
+	prefix := PlaceholderOrg + "/"
+	for key := range m {
+		if strings.HasPrefix(key, prefix) {
+			delete(m, key)
+		}
+	}
+	out, _ := json.Marshal(m)
+	return string(out)
+}
+
 // deriveAllowedRoles extracts unique role names from org-scoped ROLE_APP_IDS
 // keys (format: "org/role") and returns them as a sorted comma-separated string.
 func deriveAllowedRoles(roleAppIDsJSON string) string {
@@ -1108,6 +1175,115 @@ func (p *Provisioner) ensureWIFPoolAndProvider(ctx context.Context, installingOr
 	}
 
 	return &wifMergeResult{projectNumber: projectNumber, allOrgs: allOrgs}, nil
+}
+
+// GrantOrgVertexAIAccess grants roles/aiplatform.user to an org's .fullsend
+// repo principal so that enrolled org workflows can call Vertex AI.
+func (p *Provisioner) GrantOrgVertexAIAccess(ctx context.Context, org string) error {
+	org = strings.ToLower(org)
+
+	projectNumber, err := p.gcpAPI.GetProjectNumber(ctx, p.cfg.ProjectID)
+	if err != nil {
+		return fmt.Errorf("getting project number: %w", err)
+	}
+
+	principal := fmt.Sprintf("principalSet://iam.googleapis.com/projects/%s/locations/global/workloadIdentityPools/%s/attribute.repository/%s/.fullsend",
+		projectNumber, p.cfg.WIFPoolName, org)
+	if err := p.gcpAPI.SetProjectIAMBinding(ctx, p.cfg.ProjectID, principal, "roles/aiplatform.user"); err != nil {
+		return fmt.Errorf("granting Vertex AI access for org %s: %w", org, err)
+	}
+	return nil
+}
+
+// EnsureOrgInWIFCondition adds an org to the org-level WIF provider's
+// attribute condition. Reads the existing condition, merges, and updates.
+// Strips the deploy-time placeholder (PlaceholderOrg) if present.
+// WARNING: read-modify-write without locking — concurrent calls may race.
+func (p *Provisioner) EnsureOrgInWIFCondition(ctx context.Context, org string) error {
+	org = strings.ToLower(org)
+
+	projectNumber, err := p.gcpAPI.GetProjectNumber(ctx, p.cfg.ProjectID)
+	if err != nil {
+		return fmt.Errorf("getting project number: %w", err)
+	}
+
+	existing, err := p.gcpAPI.GetWIFProvider(ctx, projectNumber, p.cfg.WIFPoolName, p.cfg.WIFProvider)
+	if err != nil {
+		return fmt.Errorf("reading WIF provider: %w", err)
+	}
+	if existing == nil {
+		return fmt.Errorf("WIF provider %s not found — run 'mint deploy' first", p.cfg.WIFProvider)
+	}
+
+	existingOrgs := parseConditionOrgs(existing.AttributeCondition)
+	merged := make(map[string]bool)
+	for _, o := range existingOrgs {
+		if o != PlaceholderOrg {
+			merged[o] = true
+		}
+	}
+	merged[org] = true
+
+	allOrgs := make([]string, 0, len(merged))
+	for o := range merged {
+		allOrgs = append(allOrgs, o)
+	}
+	sort.Strings(allOrgs)
+
+	newCondition := buildAttributeCondition(allOrgs)
+	if newCondition == existing.AttributeCondition {
+		return nil
+	}
+
+	audiences := []string{oidcAudience, iamAudience(projectNumber, p.cfg.WIFPoolName, p.cfg.WIFProvider)}
+	return p.gcpAPI.UpdateWIFProvider(ctx, projectNumber, p.cfg.WIFPoolName, p.cfg.WIFProvider, OIDCProviderConfig{
+		AttributeCondition: newCondition,
+		AllowedAudiences:   audiences,
+	})
+}
+
+// RemoveOrgFromWIFCondition removes an org from the org-level WIF provider's
+// attribute condition.
+// WARNING: read-modify-write without locking — concurrent calls may race.
+func (p *Provisioner) RemoveOrgFromWIFCondition(ctx context.Context, org string) error {
+	org = strings.ToLower(org)
+
+	projectNumber, err := p.gcpAPI.GetProjectNumber(ctx, p.cfg.ProjectID)
+	if err != nil {
+		return fmt.Errorf("getting project number: %w", err)
+	}
+
+	existing, err := p.gcpAPI.GetWIFProvider(ctx, projectNumber, p.cfg.WIFPoolName, p.cfg.WIFProvider)
+	if err != nil {
+		return fmt.Errorf("reading WIF provider: %w", err)
+	}
+	if existing == nil {
+		return nil
+	}
+
+	existingOrgs := parseConditionOrgs(existing.AttributeCondition)
+	var filtered []string
+	for _, o := range existingOrgs {
+		if o != org {
+			filtered = append(filtered, o)
+		}
+	}
+
+	if len(filtered) == len(existingOrgs) {
+		return nil
+	}
+
+	if len(filtered) == 0 {
+		filtered = []string{PlaceholderOrg}
+	}
+	sort.Strings(filtered)
+
+	newCondition := buildAttributeCondition(filtered)
+	audiences := []string{oidcAudience, iamAudience(projectNumber, p.cfg.WIFPoolName, p.cfg.WIFProvider)}
+	return p.gcpAPI.UpdateWIFProvider(ctx, projectNumber, p.cfg.WIFPoolName, p.cfg.WIFProvider, OIDCProviderConfig{
+		AttributeCondition: newCondition,
+		AllowedAudiences:   audiences,
+	})
 }
 
 // waitForReady polls the function until it responds with 200 OK, ensuring
@@ -1262,6 +1438,181 @@ func (p *Provisioner) ProvisionWIF(ctx context.Context) (wifProvider string, err
 		projectNumber, p.cfg.WIFPoolName, providerID)
 
 	return wifProvider, nil
+}
+
+// ValidateProjectID checks if a string is a valid GCP project ID.
+func ValidateProjectID(id string) bool {
+	return gcpProjectIDPattern.MatchString(id)
+}
+
+// ValidateRegion checks if a string is a valid GCP region.
+func ValidateRegion(region string) bool {
+	return gcpRegionPattern.MatchString(region)
+}
+
+// ValidateRepoSlug checks if a string is a valid GitHub repository name.
+func ValidateRepoSlug(slug string) bool {
+	if !githubRepoSlugPattern.MatchString(slug) {
+		return false
+	}
+	if strings.HasPrefix(slug, ".") {
+		return false
+	}
+	if strings.HasSuffix(slug, ".git") {
+		return false
+	}
+	return true
+}
+
+// RemoveOrgFromMint removes an org from ROLE_APP_IDS, ALLOWED_ORGS,
+// and re-derives ALLOWED_ROLES. Uses read-modify-write via
+// UpdateFunctionEnvVars (never --set-env-vars).
+func (p *Provisioner) RemoveOrgFromMint(ctx context.Context, org string) error {
+	org = strings.ToLower(org)
+
+	fn, err := p.gcpAPI.GetFunction(ctx, p.cfg.ProjectID, p.cfg.Region, functionName)
+	if err != nil {
+		return fmt.Errorf("getting mint function: %w", err)
+	}
+	if fn == nil {
+		return fmt.Errorf("mint function %q not found in project %s region %s", functionName, p.cfg.ProjectID, p.cfg.Region)
+	}
+
+	updated := make(map[string]string, len(fn.EnvVars))
+	for k, v := range fn.EnvVars {
+		updated[k] = v
+	}
+
+	// Remove org from ALLOWED_ORGS.
+	var filteredOrgs []string
+	for _, o := range strings.Split(fn.EnvVars["ALLOWED_ORGS"], ",") {
+		o = strings.TrimSpace(o)
+		if o != "" && !strings.EqualFold(o, org) {
+			filteredOrgs = append(filteredOrgs, o)
+		}
+	}
+	sort.Strings(filteredOrgs)
+	updated["ALLOWED_ORGS"] = strings.Join(filteredOrgs, ",")
+
+	// Remove org entries from ROLE_APP_IDS.
+	existingRoleAppIDs := make(map[string]string)
+	if raw := fn.EnvVars["ROLE_APP_IDS"]; raw != "" {
+		if err := json.Unmarshal([]byte(raw), &existingRoleAppIDs); err != nil {
+			return fmt.Errorf("parsing existing ROLE_APP_IDS: %w", err)
+		}
+	}
+
+	prefix := org + "/"
+	for key := range existingRoleAppIDs {
+		if strings.HasPrefix(strings.ToLower(key), prefix) {
+			delete(existingRoleAppIDs, key)
+		}
+	}
+
+	roleAppIDsJSON, err := json.Marshal(existingRoleAppIDs)
+	if err != nil {
+		return fmt.Errorf("marshaling updated ROLE_APP_IDS: %w", err)
+	}
+	updated["ROLE_APP_IDS"] = string(roleAppIDsJSON)
+
+	// Re-derive ALLOWED_ROLES.
+	updated["ALLOWED_ROLES"] = deriveAllowedRoles(updated["ROLE_APP_IDS"])
+
+	opName, err := p.gcpAPI.UpdateFunctionEnvVars(ctx, p.cfg.ProjectID, p.cfg.Region, functionName, updated)
+	if err != nil {
+		return fmt.Errorf("updating mint env vars: %w", err)
+	}
+	return p.gcpAPI.WaitForOperation(ctx, opName)
+}
+
+// RemoveRepoFromMint removes a repo from PER_REPO_WIF_REPOS.
+// Uses read-modify-write via UpdateFunctionEnvVars.
+func (p *Provisioner) RemoveRepoFromMint(ctx context.Context, repo string) error {
+	repo = strings.ToLower(repo)
+
+	fn, err := p.gcpAPI.GetFunction(ctx, p.cfg.ProjectID, p.cfg.Region, functionName)
+	if err != nil {
+		return fmt.Errorf("getting mint function: %w", err)
+	}
+	if fn == nil {
+		return fmt.Errorf("mint function not found")
+	}
+
+	existing := fn.EnvVars["PER_REPO_WIF_REPOS"]
+	var filtered []string
+	for _, entry := range strings.Split(existing, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry != "" && strings.ToLower(entry) != repo {
+			filtered = append(filtered, entry)
+		}
+	}
+
+	updated := make(map[string]string, len(fn.EnvVars))
+	for k, v := range fn.EnvVars {
+		updated[k] = v
+	}
+	updated["PER_REPO_WIF_REPOS"] = strings.Join(filtered, ",")
+
+	opName, err := p.gcpAPI.UpdateFunctionEnvVars(ctx, p.cfg.ProjectID, p.cfg.Region, functionName, updated)
+	if err != nil {
+		return fmt.Errorf("updating PER_REPO_WIF_REPOS: %w", err)
+	}
+	return p.gcpAPI.WaitForOperation(ctx, opName)
+}
+
+// DisablePEMSecrets disables the latest version of each PEM secret for an
+// org's roles. This is reversible — the secrets can be re-enabled.
+// Skips secrets that do not exist (already cleaned up).
+func (p *Provisioner) DisablePEMSecrets(ctx context.Context, org string, roles []string) error {
+	for _, role := range roles {
+		sid := secretID(org, role)
+		if err := p.gcpAPI.GetSecret(ctx, p.cfg.ProjectID, sid); err != nil {
+			if errors.Is(err, ErrSecretNotFound) {
+				continue // Already gone, skip.
+			}
+			return fmt.Errorf("checking secret %s: %w", sid, err)
+		}
+		if err := p.gcpAPI.DisableSecretVersion(ctx, p.cfg.ProjectID, sid); err != nil {
+			return fmt.Errorf("disabling secret %s: %w", sid, err)
+		}
+	}
+	return nil
+}
+
+// DeletePEMSecrets permanently deletes PEM secrets for an org's roles.
+// Skips secrets that do not exist.
+func (p *Provisioner) DeletePEMSecrets(ctx context.Context, org string, roles []string) error {
+	for _, role := range roles {
+		sid := secretID(org, role)
+		if err := p.gcpAPI.GetSecret(ctx, p.cfg.ProjectID, sid); err != nil {
+			if errors.Is(err, ErrSecretNotFound) {
+				continue // Already gone, skip.
+			}
+			return fmt.Errorf("checking secret %s: %w", sid, err)
+		}
+		if err := p.gcpAPI.DeleteSecret(ctx, p.cfg.ProjectID, sid); err != nil {
+			return fmt.Errorf("deleting secret %s: %w", sid, err)
+		}
+	}
+	return nil
+}
+
+// DisableWIFProvider sets a WIF provider's disabled field to true.
+func (p *Provisioner) DisableWIFProvider(ctx context.Context, providerID string) error {
+	projectNumber, err := p.gcpAPI.GetProjectNumber(ctx, p.cfg.ProjectID)
+	if err != nil {
+		return fmt.Errorf("getting project number: %w", err)
+	}
+	return p.gcpAPI.DisableWIFProvider(ctx, projectNumber, p.cfg.WIFPoolName, providerID)
+}
+
+// DeleteWIFProvider permanently deletes a WIF provider.
+func (p *Provisioner) DeleteWIFProvider(ctx context.Context, providerID string) error {
+	projectNumber, err := p.gcpAPI.GetProjectNumber(ctx, p.cfg.ProjectID)
+	if err != nil {
+		return fmt.Errorf("getting project number: %w", err)
+	}
+	return p.gcpAPI.DeleteWIFProvider(ctx, projectNumber, p.cfg.WIFPoolName, providerID)
 }
 
 func (p *Provisioner) zeroPEMs() {

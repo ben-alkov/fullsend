@@ -67,12 +67,16 @@ type GCFClient interface {
 	CreateWIFProvider(ctx context.Context, projectNumber, poolID, providerID string, cfg OIDCProviderConfig) error
 	GetWIFProvider(ctx context.Context, projectNumber, poolID, providerID string) (*WIFProviderInfo, error)
 	UpdateWIFProvider(ctx context.Context, projectNumber, poolID, providerID string, cfg OIDCProviderConfig) error
+	DisableWIFProvider(ctx context.Context, projectNumber, poolID, providerID string) error
+	DeleteWIFProvider(ctx context.Context, projectNumber, poolID, providerID string) error
 
 	// Secret Manager
 	GetSecret(ctx context.Context, projectID, secretID string) error
 	CreateSecret(ctx context.Context, projectID, secretID string) error
 	AddSecretVersion(ctx context.Context, projectID, secretID string, data []byte) error
 	AccessSecretVersion(ctx context.Context, projectID, secretID string) ([]byte, error)
+	DisableSecretVersion(ctx context.Context, projectID, secretID string) error
+	DeleteSecret(ctx context.Context, projectID, secretID string) error
 
 	// IAM bindings
 	SetSecretIAMBinding(ctx context.Context, resource, member, role string) error
@@ -207,10 +211,11 @@ func (c *LiveGCFClient) CreateWIFProvider(ctx context.Context, projectNumber, po
 
 	if resp.StatusCode == http.StatusConflict {
 		io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
-		if err := c.undeleteWIFProvider(ctx, projectNumber, poolID, providerID); err == nil {
-			return c.UpdateWIFProvider(ctx, projectNumber, poolID, providerID, cfg)
+		_ = c.undeleteWIFProvider(ctx, projectNumber, poolID, providerID)
+		if err := c.UpdateWIFProvider(ctx, projectNumber, poolID, providerID, cfg); err != nil {
+			return err
 		}
-		return c.UpdateWIFProvider(ctx, projectNumber, poolID, providerID, cfg)
+		return c.enableWIFProvider(ctx, projectNumber, poolID, providerID)
 	}
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -424,6 +429,125 @@ func (c *LiveGCFClient) AccessSecretVersion(ctx context.Context, projectID, secr
 		return nil, fmt.Errorf("decoding secret payload: %w", err)
 	}
 	return data, nil
+}
+
+// DisableSecretVersion disables the latest version of a Secret Manager secret.
+func (c *LiveGCFClient) DisableSecretVersion(ctx context.Context, projectID, secretID string) error {
+	reqURL := fmt.Sprintf("https://secretmanager.googleapis.com/v1/projects/%s/secrets/%s/versions/latest:disable",
+		url.PathEscape(projectID), url.PathEscape(secretID))
+
+	resp, err := c.Client.DoRequest(ctx, http.MethodPost, reqURL, "{}")
+	if err != nil {
+		return fmt.Errorf("disabling secret version: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil // No versions to disable.
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return fmt.Errorf("unexpected status %d disabling secret version: %s", resp.StatusCode, gcp.ExtractErrorMessage(body))
+	}
+	return nil
+}
+
+// DeleteSecret permanently deletes a Secret Manager secret and all its versions.
+func (c *LiveGCFClient) DeleteSecret(ctx context.Context, projectID, secretID string) error {
+	reqURL := fmt.Sprintf("https://secretmanager.googleapis.com/v1/projects/%s/secrets/%s",
+		url.PathEscape(projectID), url.PathEscape(secretID))
+
+	resp, err := c.Client.DoRequest(ctx, http.MethodDelete, reqURL, "")
+	if err != nil {
+		return fmt.Errorf("deleting secret: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil // Already deleted.
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return fmt.Errorf("unexpected status %d deleting secret: %s", resp.StatusCode, gcp.ExtractErrorMessage(body))
+	}
+	return nil
+}
+
+// DisableWIFProvider sets a WIF provider's disabled state to true.
+func (c *LiveGCFClient) DisableWIFProvider(ctx context.Context, projectNumber, poolID, providerID string) error {
+	patchURL := fmt.Sprintf("https://iam.googleapis.com/v1/projects/%s/locations/global/workloadIdentityPools/%s/providers/%s?updateMask=disabled",
+		url.PathEscape(projectNumber), url.PathEscape(poolID), url.PathEscape(providerID))
+
+	payloadBytes, err := json.Marshal(map[string]interface{}{
+		"disabled": true,
+	})
+	if err != nil {
+		return fmt.Errorf("marshaling disable payload: %w", err)
+	}
+
+	resp, err := c.Client.DoRequest(ctx, http.MethodPatch, patchURL, string(payloadBytes))
+	if err != nil {
+		return fmt.Errorf("disabling WIF provider: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil // Already deleted or never existed.
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return fmt.Errorf("unexpected status %d disabling WIF provider: %s", resp.StatusCode, gcp.ExtractErrorMessage(body))
+	}
+
+	return c.waitForIAMOperation(ctx, resp.Body)
+}
+
+// enableWIFProvider sets a WIF provider's disabled state to false.
+func (c *LiveGCFClient) enableWIFProvider(ctx context.Context, projectNumber, poolID, providerID string) error {
+	patchURL := fmt.Sprintf("https://iam.googleapis.com/v1/projects/%s/locations/global/workloadIdentityPools/%s/providers/%s?updateMask=disabled",
+		url.PathEscape(projectNumber), url.PathEscape(poolID), url.PathEscape(providerID))
+
+	payloadBytes, err := json.Marshal(map[string]interface{}{
+		"disabled": false,
+	})
+	if err != nil {
+		return fmt.Errorf("marshaling enable payload: %w", err)
+	}
+
+	resp, err := c.Client.DoRequest(ctx, http.MethodPatch, patchURL, string(payloadBytes))
+	if err != nil {
+		return fmt.Errorf("enabling WIF provider: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return fmt.Errorf("unexpected status %d enabling WIF provider: %s", resp.StatusCode, gcp.ExtractErrorMessage(body))
+	}
+
+	return c.waitForIAMOperation(ctx, resp.Body)
+}
+
+// DeleteWIFProvider permanently deletes a WIF provider.
+func (c *LiveGCFClient) DeleteWIFProvider(ctx context.Context, projectNumber, poolID, providerID string) error {
+	deleteURL := fmt.Sprintf("https://iam.googleapis.com/v1/projects/%s/locations/global/workloadIdentityPools/%s/providers/%s",
+		url.PathEscape(projectNumber), url.PathEscape(poolID), url.PathEscape(providerID))
+
+	resp, err := c.Client.DoRequest(ctx, http.MethodDelete, deleteURL, "")
+	if err != nil {
+		return fmt.Errorf("deleting WIF provider: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil // Already deleted.
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return fmt.Errorf("unexpected status %d deleting WIF provider: %s", resp.StatusCode, gcp.ExtractErrorMessage(body))
+	}
+
+	return c.waitForIAMOperation(ctx, resp.Body)
 }
 
 // SetSecretIAMBinding sets an IAM binding on a Secret Manager resource.

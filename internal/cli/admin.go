@@ -79,8 +79,14 @@ func validateOrgName(org string) error {
 	if org == "" {
 		return fmt.Errorf("organization name cannot be empty")
 	}
+	if len(org) > 39 {
+		return fmt.Errorf("organization name too long (max 39 characters)")
+	}
 	if strings.HasPrefix(org, "-") || strings.HasSuffix(org, "-") {
 		return fmt.Errorf("organization name cannot start or end with a hyphen")
+	}
+	if strings.Contains(org, "--") {
+		return fmt.Errorf("organization name cannot contain consecutive hyphens")
 	}
 	for _, c := range org {
 		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-') {

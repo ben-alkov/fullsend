@@ -159,6 +159,23 @@ func (f *fakeGCFClient) AccessSecretVersion(_ context.Context, _ string, sid str
 	}
 	return nil, fmt.Errorf("secret %s: %w", sid, ErrSecretNotFound)
 }
+func (f *fakeGCFClient) DisableSecretVersion(_ context.Context, _ string, sid string) error {
+	f.calls = append(f.calls, "DisableSecretVersion")
+	return f.errs["DisableSecretVersion"]
+}
+func (f *fakeGCFClient) DeleteSecret(_ context.Context, _ string, sid string) error {
+	f.calls = append(f.calls, "DeleteSecret")
+	if f.secrets != nil {
+		delete(f.secrets, sid)
+	}
+	return f.errs["DeleteSecret"]
+}
+func (f *fakeGCFClient) DisableWIFProvider(_ context.Context, _, _, _ string) error {
+	return f.record("DisableWIFProvider")
+}
+func (f *fakeGCFClient) DeleteWIFProvider(_ context.Context, _, _, _ string) error {
+	return f.record("DeleteWIFProvider")
+}
 func (f *fakeGCFClient) SetSecretIAMBinding(_ context.Context, _, _, _ string) error {
 	return f.record("SetSecretIAMBinding")
 }
@@ -2662,4 +2679,283 @@ func TestRegisterPerRepoWIF_GetFunctionError(t *testing.T) {
 	err := p.RegisterPerRepoWIF(context.Background(), "acme-corp/my-service")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "getting mint function")
+}
+
+// --- RemoveOrgFromMint tests ---
+
+func TestRemoveOrgFromMint_RemovesOrgAndRoles(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.functionInfo = &FunctionInfo{
+		URI: "https://mint.example.com",
+		EnvVars: map[string]string{
+			"ALLOWED_ORGS":  "acme,other-org",
+			"ROLE_APP_IDS":  `{"acme/coder":"111","acme/triage":"222","other-org/coder":"333"}`,
+			"ALLOWED_ROLES": "coder,triage",
+		},
+	}
+
+	p := NewProvisioner(Config{ProjectID: "proj1", Region: "us-central1"}, fake)
+	err := p.RemoveOrgFromMint(context.Background(), "acme")
+	require.NoError(t, err)
+
+	assert.Contains(t, fake.calls, "UpdateFunctionEnvVars")
+	assert.Contains(t, fake.calls, "WaitForOperation")
+
+	// acme should be removed from ALLOWED_ORGS.
+	assert.Equal(t, "other-org", fake.lastUpdateFunctionEnvVars["ALLOWED_ORGS"])
+
+	// acme entries should be removed from ROLE_APP_IDS.
+	var roleAppIDs map[string]string
+	require.NoError(t, json.Unmarshal([]byte(fake.lastUpdateFunctionEnvVars["ROLE_APP_IDS"]), &roleAppIDs))
+	assert.NotContains(t, roleAppIDs, "acme/coder")
+	assert.NotContains(t, roleAppIDs, "acme/triage")
+	assert.Equal(t, "333", roleAppIDs["other-org/coder"])
+
+	// ALLOWED_ROLES should be re-derived.
+	assert.Equal(t, "coder", fake.lastUpdateFunctionEnvVars["ALLOWED_ROLES"])
+}
+
+func TestRemoveOrgFromMint_FunctionNotFound(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.functionInfo = nil
+
+	p := NewProvisioner(Config{ProjectID: "proj1", Region: "us-central1"}, fake)
+	err := p.RemoveOrgFromMint(context.Background(), "acme")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestRemoveOrgFromMint_GetFunctionError(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.errs["GetFunction"] = fmt.Errorf("permission denied")
+
+	p := NewProvisioner(Config{ProjectID: "proj1", Region: "us-central1"}, fake)
+	err := p.RemoveOrgFromMint(context.Background(), "acme")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "getting mint function")
+}
+
+func TestRemoveOrgFromMint_LowercasesOrg(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.functionInfo = &FunctionInfo{
+		URI: "https://mint.example.com",
+		EnvVars: map[string]string{
+			"ALLOWED_ORGS": "acme",
+			"ROLE_APP_IDS": `{"acme/coder":"111"}`,
+		},
+	}
+
+	p := NewProvisioner(Config{ProjectID: "proj1", Region: "us-central1"}, fake)
+	err := p.RemoveOrgFromMint(context.Background(), "ACME")
+	require.NoError(t, err)
+
+	assert.Equal(t, "", fake.lastUpdateFunctionEnvVars["ALLOWED_ORGS"])
+}
+
+func TestRemoveOrgFromMint_UpdateFails(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.functionInfo = &FunctionInfo{
+		URI: "https://mint.example.com",
+		EnvVars: map[string]string{
+			"ALLOWED_ORGS": "acme",
+			"ROLE_APP_IDS": `{"acme/coder":"111"}`,
+		},
+	}
+	fake.errs["UpdateFunctionEnvVars"] = fmt.Errorf("permission denied")
+
+	p := NewProvisioner(Config{ProjectID: "proj1", Region: "us-central1"}, fake)
+	err := p.RemoveOrgFromMint(context.Background(), "acme")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "updating mint env vars")
+}
+
+// --- RemoveRepoFromMint tests ---
+
+func TestRemoveRepoFromMint_RemovesRepo(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.functionInfo = &FunctionInfo{
+		URI: "https://mint.example.com",
+		EnvVars: map[string]string{
+			"PER_REPO_WIF_REPOS": "acme/first,acme/second",
+		},
+	}
+
+	p := NewProvisioner(Config{ProjectID: "proj1", Region: "us-central1"}, fake)
+	err := p.RemoveRepoFromMint(context.Background(), "acme/first")
+	require.NoError(t, err)
+
+	assert.Contains(t, fake.calls, "UpdateFunctionEnvVars")
+	assert.Equal(t, "acme/second", fake.lastUpdateFunctionEnvVars["PER_REPO_WIF_REPOS"])
+}
+
+func TestRemoveRepoFromMint_LastRepo(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.functionInfo = &FunctionInfo{
+		URI: "https://mint.example.com",
+		EnvVars: map[string]string{
+			"PER_REPO_WIF_REPOS": "acme/only",
+		},
+	}
+
+	p := NewProvisioner(Config{ProjectID: "proj1", Region: "us-central1"}, fake)
+	err := p.RemoveRepoFromMint(context.Background(), "acme/only")
+	require.NoError(t, err)
+
+	assert.Equal(t, "", fake.lastUpdateFunctionEnvVars["PER_REPO_WIF_REPOS"])
+}
+
+func TestRemoveRepoFromMint_FunctionNotFound(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.functionInfo = nil
+
+	p := NewProvisioner(Config{ProjectID: "proj1", Region: "us-central1"}, fake)
+	err := p.RemoveRepoFromMint(context.Background(), "acme/repo")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mint function not found")
+}
+
+func TestRemoveRepoFromMint_LowercasesRepo(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.functionInfo = &FunctionInfo{
+		URI: "https://mint.example.com",
+		EnvVars: map[string]string{
+			"PER_REPO_WIF_REPOS": "acme/widget",
+		},
+	}
+
+	p := NewProvisioner(Config{ProjectID: "proj1", Region: "us-central1"}, fake)
+	err := p.RemoveRepoFromMint(context.Background(), "Acme/Widget")
+	require.NoError(t, err)
+
+	assert.Equal(t, "", fake.lastUpdateFunctionEnvVars["PER_REPO_WIF_REPOS"])
+}
+
+// --- DisablePEMSecrets tests ---
+
+func TestDisablePEMSecrets_DisablesExistingSecrets(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.secrets = map[string]bool{
+		"fullsend-acme--coder-app-pem":  true,
+		"fullsend-acme--triage-app-pem": true,
+	}
+
+	p := NewProvisioner(Config{ProjectID: "proj1"}, fake)
+	err := p.DisablePEMSecrets(context.Background(), "acme", []string{"coder", "triage"})
+	require.NoError(t, err)
+
+	disableCount := 0
+	for _, call := range fake.calls {
+		if call == "DisableSecretVersion" {
+			disableCount++
+		}
+	}
+	assert.Equal(t, 2, disableCount)
+}
+
+func TestDisablePEMSecrets_SkipsMissingSecrets(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.secrets = map[string]bool{} // All missing.
+
+	p := NewProvisioner(Config{ProjectID: "proj1"}, fake)
+	err := p.DisablePEMSecrets(context.Background(), "acme", []string{"coder"})
+	require.NoError(t, err)
+
+	assert.NotContains(t, fake.calls, "DisableSecretVersion")
+}
+
+func TestDisablePEMSecrets_GetSecretError(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.errs["GetSecret"] = fmt.Errorf("permission denied")
+
+	p := NewProvisioner(Config{ProjectID: "proj1"}, fake)
+	err := p.DisablePEMSecrets(context.Background(), "acme", []string{"coder"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "checking secret")
+}
+
+// --- DeletePEMSecrets tests ---
+
+func TestDeletePEMSecrets_DeletesExistingSecrets(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.secrets = map[string]bool{
+		"fullsend-acme--coder-app-pem": true,
+	}
+
+	p := NewProvisioner(Config{ProjectID: "proj1"}, fake)
+	err := p.DeletePEMSecrets(context.Background(), "acme", []string{"coder"})
+	require.NoError(t, err)
+
+	assert.Contains(t, fake.calls, "DeleteSecret")
+}
+
+func TestDeletePEMSecrets_SkipsMissingSecrets(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.secrets = map[string]bool{}
+
+	p := NewProvisioner(Config{ProjectID: "proj1"}, fake)
+	err := p.DeletePEMSecrets(context.Background(), "acme", []string{"coder"})
+	require.NoError(t, err)
+
+	assert.NotContains(t, fake.calls, "DeleteSecret")
+}
+
+// --- DisableWIFProvider tests ---
+
+func TestDisableWIFProvider_Success(t *testing.T) {
+	fake := newFakeGCFClient()
+	p := NewProvisioner(Config{ProjectID: "proj1"}, fake)
+	err := p.DisableWIFProvider(context.Background(), "gh-acme-widget")
+	require.NoError(t, err)
+
+	assert.Contains(t, fake.calls, "GetProjectNumber")
+	assert.Contains(t, fake.calls, "DisableWIFProvider")
+}
+
+func TestDisableWIFProvider_GetProjectNumberError(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.errs["GetProjectNumber"] = fmt.Errorf("permission denied")
+
+	p := NewProvisioner(Config{ProjectID: "proj1"}, fake)
+	err := p.DisableWIFProvider(context.Background(), "gh-acme-widget")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "getting project number")
+}
+
+// --- DeleteWIFProvider tests ---
+
+func TestDeleteWIFProvider_Success(t *testing.T) {
+	fake := newFakeGCFClient()
+	p := NewProvisioner(Config{ProjectID: "proj1"}, fake)
+	err := p.DeleteWIFProvider(context.Background(), "gh-acme-widget")
+	require.NoError(t, err)
+
+	assert.Contains(t, fake.calls, "GetProjectNumber")
+	assert.Contains(t, fake.calls, "DeleteWIFProvider")
+}
+
+func TestDeleteWIFProvider_GetProjectNumberError(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.errs["GetProjectNumber"] = fmt.Errorf("permission denied")
+
+	p := NewProvisioner(Config{ProjectID: "proj1"}, fake)
+	err := p.DeleteWIFProvider(context.Background(), "gh-acme-widget")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "getting project number")
+}
+
+// --- ValidateProjectID and ValidateRegion tests ---
+
+func TestValidateProjectID(t *testing.T) {
+	assert.True(t, ValidateProjectID("my-project-id"))
+	assert.True(t, ValidateProjectID("project-123456"))
+	assert.False(t, ValidateProjectID("BAD"))
+	assert.False(t, ValidateProjectID(""))
+	assert.False(t, ValidateProjectID("ab")) // too short
+}
+
+func TestValidateRegion(t *testing.T) {
+	assert.True(t, ValidateRegion("us-central1"))
+	assert.True(t, ValidateRegion("europe-west4"))
+	assert.False(t, ValidateRegion("invalid"))
+	assert.False(t, ValidateRegion(""))
 }
