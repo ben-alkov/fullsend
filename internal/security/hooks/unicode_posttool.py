@@ -138,9 +138,7 @@ def scan_text(text: str) -> tuple[str, list[dict]]:
             {
                 "name": "variation_selector",
                 "severity": "medium",
-                "detail": (
-                    f"{len(supp_vs)} supplementary variation selector character(s) removed"
-                ),
+                "detail": (f"{len(supp_vs)} supplementary variation selector character(s) removed"),
             }
         )
         result = "".join(c for c in result if not (0xE0100 <= ord(c) <= 0xE01EF))
