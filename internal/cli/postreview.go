@@ -384,99 +384,14 @@ type reviewFollowupIssue struct {
 	created bool
 }
 
-// postApprovedFollowUpIssues creates GitHub issues for actionable low/info
-// findings after an approval. Blocking and comment-only findings stay in the
-// review itself; this path only preserves non-blocking work that would
-// otherwise disappear after merge.
-func postApprovedFollowUpIssues(ctx context.Context, client forge.Client, owner, repo string, pr int, parsed ReviewResult, dryRun bool, maxFollowUpIssues int, printer *ui.Printer) error {
+// postApprovedFollowUpIssues is disabled pending #1137. Follow-up issues
+// should only be created after the PR merges, not while it is still open.
+func postApprovedFollowUpIssues(_ context.Context, _ forge.Client, _, _ string, _ int, parsed ReviewResult, _ bool, _ int, printer *ui.Printer) error {
 	if strings.ToLower(parsed.Action) != "approve" {
 		return nil
 	}
-	if err := validateMaxReviewFollowUpIssues(maxFollowUpIssues, "max follow-up issues"); err != nil {
-		return err
-	}
-
-	actionable := actionableApprovedFindings(parsed.Findings)
-	if len(actionable) == 0 {
-		return nil
-	}
-
-	if dryRun {
-		toCreate := min(len(actionable), maxFollowUpIssues)
-		skipped := len(actionable) - toCreate
-		if maxFollowUpIssues == 0 {
-			printer.StepInfo(fmt.Sprintf("Dry run — review follow-up issue creation disabled; would skip %d actionable finding(s)", len(actionable)))
-		} else if skipped > 0 {
-			printer.StepInfo(fmt.Sprintf("Dry run — would create up to %d review follow-up issue(s) and skip %d due to cap", toCreate, skipped))
-		} else {
-			printer.StepInfo(fmt.Sprintf("Dry run — would create %d review follow-up issue(s)", toCreate))
-		}
-		return nil
-	}
-
-	markers := make(map[string]ReviewFinding, len(actionable))
-	for _, finding := range actionable {
-		markers[reviewFollowupIssueMarker(owner, repo, finding)] = finding
-	}
-
-	printer.StepStart("Checking for existing review follow-up issues")
-	openIssues, err := client.ListOpenIssues(ctx, owner, repo, "type/chore")
-	if err != nil {
-		return fmt.Errorf("listing open issues for review follow-up duplicate detection: %w", err)
-	}
-	existingByMarker := map[string]forge.Issue{}
-	for _, issue := range openIssues {
-		for marker := range markers {
-			if strings.Contains(issue.Body, marker) {
-				if existing, ok := existingByMarker[marker]; ok {
-					printer.StepWarn(fmt.Sprintf("Duplicate review follow-up marker found in issues #%d and #%d; reusing #%d", existing.Number, issue.Number, existing.Number))
-					continue
-				}
-				existingByMarker[marker] = issue
-			}
-		}
-	}
-	printer.StepDone("Duplicate check complete")
-
-	results := make([]reviewFollowupIssue, 0, len(actionable))
-	createdCount := 0
-	skippedCount := 0
-	for _, finding := range actionable {
-		marker := reviewFollowupIssueMarker(owner, repo, finding)
-		if issue, ok := existingByMarker[marker]; ok {
-			issueCopy := issue
-			results = append(results, reviewFollowupIssue{
-				finding: finding,
-				issue:   &issueCopy,
-				created: false,
-			})
-			continue
-		}
-		if createdCount >= maxFollowUpIssues {
-			skippedCount++
-			continue
-		}
-
-		title := reviewFollowupIssueTitle(pr, finding)
-		body := reviewFollowupIssueBody(owner, repo, pr, finding, marker)
-		printer.StepStart("Creating review follow-up issue")
-		issue, err := client.CreateIssue(ctx, owner, repo, title, body, "type/chore")
-		if err != nil {
-			return fmt.Errorf("creating review follow-up issue for %s: %w", reviewFindingLocation(finding), err)
-		}
-		printer.StepDone(fmt.Sprintf("Created follow-up issue #%d", issue.Number))
-		results = append(results, reviewFollowupIssue{
-			finding: finding,
-			issue:   issue,
-			created: true,
-		})
-		createdCount++
-	}
-	if skippedCount > 0 {
-		printer.StepInfo(fmt.Sprintf("Review follow-up issue cap reached (%d); skipped %d actionable finding(s)", maxFollowUpIssues, skippedCount))
-	}
-
-	return postReviewFollowupSummary(ctx, client, owner, repo, pr, results, skippedCount, maxFollowUpIssues, printer)
+	printer.StepInfo("Review follow-up issue creation is temporarily disabled (#1137)")
+	return nil
 }
 
 func validateMaxReviewFollowUpIssues(value int, name string) error {

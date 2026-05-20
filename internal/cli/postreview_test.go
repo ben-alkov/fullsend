@@ -829,7 +829,9 @@ func TestFormatFindingComment(t *testing.T) {
 	})
 }
 
-func TestPostApprovedFollowUpIssues_CreatesIssuesAndSummary(t *testing.T) {
+func TestPostApprovedFollowUpIssues_DisabledIsNoop(t *testing.T) {
+	// Issue creation is disabled (#1137). Verify the function is a no-op for
+	// approve actions with actionable findings.
 	fc := forge.NewFakeClient()
 	fc.AuthenticatedUser = "fullsend-review[bot]"
 	printer := ui.New(io.Discard)
@@ -842,7 +844,6 @@ func TestPostApprovedFollowUpIssues_CreatesIssuesAndSummary(t *testing.T) {
 				File:        "internal/service.go",
 				Line:        42,
 				Description: "Add coverage for the empty response path.",
-				Remediation: "Add a unit test that exercises an empty upstream response.",
 				Actionable:  true,
 			},
 		},
@@ -850,21 +851,8 @@ func TestPostApprovedFollowUpIssues_CreatesIssuesAndSummary(t *testing.T) {
 
 	err := postApprovedFollowUpIssues(context.Background(), fc, "acme", "repo", 9, parsed, false, maxReviewFollowUpIssues, printer)
 	require.NoError(t, err)
-
-	require.Len(t, fc.CreatedIssues, 1)
-	created := fc.CreatedIssues[0]
-	assert.Equal(t, "acme", created.Owner)
-	assert.Equal(t, "repo", created.Repo)
-	assert.Contains(t, created.Title, "Follow-up from PR #9")
-	assert.Contains(t, created.Body, "https://github.com/acme/repo/pull/9")
-	assert.Contains(t, created.Body, "internal/service.go:42")
-	assert.Contains(t, created.Body, reviewFollowupIssueMarkerPrefix)
-	assert.Equal(t, []string{"type/chore"}, created.Labels)
-
-	comments := fc.IssueComments["acme/repo/9"]
-	require.Len(t, comments, 1)
-	assert.Contains(t, comments[0].Body, "Created follow-up issues")
-	assert.Contains(t, comments[0].Body, "#1")
+	assert.Empty(t, fc.CreatedIssues)
+	assert.Empty(t, fc.IssueComments)
 }
 
 func TestPostApprovedFollowUpIssues_SkipsNonActionableFindings(t *testing.T) {
@@ -911,122 +899,6 @@ func TestPostApprovedFollowUpIssues_SkipsMediumFindings(t *testing.T) {
 	assert.Empty(t, fc.IssueComments)
 }
 
-func TestPostApprovedFollowUpIssues_UsesExistingDuplicate(t *testing.T) {
-	finding := ReviewFinding{
-		Severity:    "info",
-		Category:    "docs",
-		File:        "README.md",
-		Line:        7,
-		Description: "Document the new flag.",
-		Actionable:  true,
-	}
-	marker := reviewFollowupIssueMarker("acme", "repo", finding)
-	fc := forge.NewFakeClient()
-	fc.AuthenticatedUser = "fullsend-review[bot]"
-	fc.OpenIssues = map[string][]forge.Issue{
-		"acme/repo": {
-			{
-				Number: 12,
-				Title:  "Existing follow-up",
-				Body:   marker + "\n\nAlready tracked.",
-				URL:    "https://github.com/acme/repo/issues/12",
-				Labels: []string{"type/chore"},
-			},
-		},
-	}
-	printer := ui.New(io.Discard)
-	parsed := ReviewResult{Action: "approve", Findings: []ReviewFinding{finding}}
-
-	err := postApprovedFollowUpIssues(context.Background(), fc, "acme", "repo", 9, parsed, false, maxReviewFollowUpIssues, printer)
-	require.NoError(t, err)
-
-	assert.Empty(t, fc.CreatedIssues)
-	comments := fc.IssueComments["acme/repo/9"]
-	require.Len(t, comments, 1)
-	assert.Contains(t, comments[0].Body, "Existing follow-up issues")
-	assert.Contains(t, comments[0].Body, "#12")
-}
-
-func TestPostApprovedFollowUpIssues_DedupesAcrossPRs(t *testing.T) {
-	finding := ReviewFinding{
-		Severity:    "low",
-		Category:    "docs",
-		File:        "README.md",
-		Line:        7,
-		Description: "Document the new flag.",
-		Actionable:  true,
-	}
-	marker := reviewFollowupIssueMarker("acme", "repo", finding)
-	fc := forge.NewFakeClient()
-	fc.AuthenticatedUser = "fullsend-review[bot]"
-	fc.OpenIssues = map[string][]forge.Issue{
-		"acme/repo": {
-			{
-				Number: 12,
-				Title:  "Existing follow-up from earlier PR",
-				Body:   marker + "\n\nOriginally filed from PR #9.",
-				URL:    "https://github.com/acme/repo/issues/12",
-				Labels: []string{"type/chore"},
-			},
-		},
-	}
-	printer := ui.New(io.Discard)
-	parsed := ReviewResult{Action: "approve", Findings: []ReviewFinding{finding}}
-
-	err := postApprovedFollowUpIssues(context.Background(), fc, "acme", "repo", 10, parsed, false, maxReviewFollowUpIssues, printer)
-	require.NoError(t, err)
-
-	assert.Empty(t, fc.CreatedIssues)
-	comments := fc.IssueComments["acme/repo/10"]
-	require.Len(t, comments, 1)
-	assert.Contains(t, comments[0].Body, "Existing follow-up issues")
-	assert.Contains(t, comments[0].Body, "#12")
-}
-
-func TestPostApprovedFollowUpIssues_WarnsOnDuplicateMarkers(t *testing.T) {
-	finding := ReviewFinding{
-		Severity:    "low",
-		Category:    "docs",
-		File:        "README.md",
-		Line:        7,
-		Description: "Document the new flag.",
-		Actionable:  true,
-	}
-	marker := reviewFollowupIssueMarker("acme", "repo", finding)
-	fc := forge.NewFakeClient()
-	fc.AuthenticatedUser = "fullsend-review[bot]"
-	fc.OpenIssues = map[string][]forge.Issue{
-		"acme/repo": {
-			{
-				Number: 12,
-				Title:  "Existing follow-up",
-				Body:   marker + "\n\nAlready tracked.",
-				URL:    "https://github.com/acme/repo/issues/12",
-				Labels: []string{"type/chore"},
-			},
-			{
-				Number: 13,
-				Title:  "Duplicate follow-up",
-				Body:   marker + "\n\nManually duplicated.",
-				URL:    "https://github.com/acme/repo/issues/13",
-				Labels: []string{"type/chore"},
-			},
-		},
-	}
-	var out bytes.Buffer
-	printer := ui.New(&out)
-	parsed := ReviewResult{Action: "approve", Findings: []ReviewFinding{finding}}
-
-	err := postApprovedFollowUpIssues(context.Background(), fc, "acme", "repo", 10, parsed, false, maxReviewFollowUpIssues, printer)
-	require.NoError(t, err)
-
-	assert.Empty(t, fc.CreatedIssues)
-	comments := fc.IssueComments["acme/repo/10"]
-	require.Len(t, comments, 1)
-	assert.Contains(t, comments[0].Body, "#12")
-	assert.NotContains(t, comments[0].Body, "#13")
-	assert.Contains(t, out.String(), "Duplicate review follow-up marker found in issues #12 and #13; reusing #12")
-}
 
 func TestPostApprovedFollowUpIssues_DryRun(t *testing.T) {
 	fc := forge.NewFakeClient()
@@ -1050,122 +922,6 @@ func TestPostApprovedFollowUpIssues_DryRun(t *testing.T) {
 	assert.Empty(t, fc.IssueComments)
 }
 
-func TestPostApprovedFollowUpIssues_RespectsCreateCap(t *testing.T) {
-	fc := forge.NewFakeClient()
-	fc.AuthenticatedUser = "fullsend-review[bot]"
-	printer := ui.New(io.Discard)
-
-	findings := make([]ReviewFinding, 0, 5)
-	for i := 0; i < 5; i++ {
-		findings = append(findings, ReviewFinding{
-			Severity:    "low",
-			Category:    "docs",
-			File:        "README.md",
-			Line:        i + 1,
-			Description: fmt.Sprintf("Document behavior %d.", i+1),
-			Actionable:  true,
-		})
-	}
-	parsed := ReviewResult{Action: "approve", Findings: findings}
-
-	err := postApprovedFollowUpIssues(context.Background(), fc, "acme", "repo", 9, parsed, false, 2, printer)
-	require.NoError(t, err)
-
-	require.Len(t, fc.CreatedIssues, 2)
-	assert.Contains(t, fc.CreatedIssues[0].Body, "Document behavior 1.")
-	assert.Contains(t, fc.CreatedIssues[1].Body, "Document behavior 2.")
-
-	comments := fc.IssueComments["acme/repo/9"]
-	require.Len(t, comments, 1)
-	assert.Contains(t, comments[0].Body, "capped at 2")
-	assert.Contains(t, comments[0].Body, "3 actionable non-blocking finding(s) were not filed")
-}
-
-func TestPostApprovedFollowUpIssues_ExistingIssuesDoNotConsumeCreateCap(t *testing.T) {
-	existingFinding := ReviewFinding{
-		Severity:    "info",
-		Category:    "docs",
-		File:        "README.md",
-		Line:        7,
-		Description: "Document the existing flag.",
-		Actionable:  true,
-	}
-	marker := reviewFollowupIssueMarker("acme", "repo", existingFinding)
-
-	fc := forge.NewFakeClient()
-	fc.AuthenticatedUser = "fullsend-review[bot]"
-	fc.OpenIssues = map[string][]forge.Issue{
-		"acme/repo": {
-			{
-				Number: 12,
-				Title:  "Existing follow-up",
-				Body:   marker + "\n\nAlready tracked.",
-				URL:    "https://github.com/acme/repo/issues/12",
-				Labels: []string{"type/chore"},
-			},
-		},
-	}
-	printer := ui.New(io.Discard)
-	parsed := ReviewResult{
-		Action: "approve",
-		Findings: []ReviewFinding{
-			existingFinding,
-			{
-				Severity:    "low",
-				Category:    "docs",
-				File:        "README.md",
-				Line:        8,
-				Description: "Document the new flag.",
-				Actionable:  true,
-			},
-			{
-				Severity:    "low",
-				Category:    "docs",
-				File:        "README.md",
-				Line:        9,
-				Description: "Document another new flag.",
-				Actionable:  true,
-			},
-		},
-	}
-
-	err := postApprovedFollowUpIssues(context.Background(), fc, "acme", "repo", 9, parsed, false, 1, printer)
-	require.NoError(t, err)
-
-	require.Len(t, fc.CreatedIssues, 1)
-	assert.Contains(t, fc.CreatedIssues[0].Body, "Document the new flag.")
-
-	comments := fc.IssueComments["acme/repo/9"]
-	require.Len(t, comments, 1)
-	assert.Contains(t, comments[0].Body, "Existing follow-up issues")
-	assert.Contains(t, comments[0].Body, "#12")
-	assert.Contains(t, comments[0].Body, "capped at 1")
-	assert.Contains(t, comments[0].Body, "1 actionable non-blocking finding(s) were not filed")
-}
-
-func TestPostApprovedFollowUpIssues_ListOpenIssuesError(t *testing.T) {
-	fc := forge.NewFakeClient()
-	fc.Errors["ListOpenIssues"] = fmt.Errorf("boom")
-	printer := ui.New(io.Discard)
-	parsed := ReviewResult{
-		Action: "approve",
-		Findings: []ReviewFinding{
-			{
-				Severity:    "low",
-				Category:    "docs",
-				File:        "README.md",
-				Description: "Document the behavior.",
-				Actionable:  true,
-			},
-		},
-	}
-
-	err := postApprovedFollowUpIssues(context.Background(), fc, "acme", "repo", 9, parsed, false, maxReviewFollowUpIssues, printer)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "duplicate detection")
-	assert.Empty(t, fc.CreatedIssues)
-	assert.Empty(t, fc.IssueComments)
-}
 
 func TestReviewFollowupIssueMarkerGolden(t *testing.T) {
 	finding := ReviewFinding{
