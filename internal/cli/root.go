@@ -21,6 +21,7 @@ func newRootCmd() *cobra.Command {
 		Version:       version,
 	}
 	cmd.AddCommand(newAdminCmd())
+	cmd.AddCommand(newInferenceCmd())
 	cmd.AddCommand(newRunCmd())
 	cmd.AddCommand(newScanCmd())
 	cmd.AddCommand(newPostReviewCmd())
