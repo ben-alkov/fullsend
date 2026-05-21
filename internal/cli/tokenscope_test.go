@@ -37,26 +37,40 @@ func TestFetchTokenScope_EmptyToken(t *testing.T) {
 	assert.Nil(t, repos)
 }
 
-func TestFetchTokenScope_APIError(t *testing.T) {
+func TestFetchTokenScope_NonInstallationToken_401(t *testing.T) {
+	// Non-installation tokens get 401. Treated as "not an installation
+	// token" — returns (nil, nil), not an error.
 	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	defer github.Close()
 
 	repos, err := fetchTokenScope("ghs_bad", github.URL)
-	assert.Error(t, err)
+	assert.NoError(t, err)
 	assert.Nil(t, repos)
 }
 
-func TestFetchTokenScope_NonInstallationToken(t *testing.T) {
-	// Personal access tokens and GITHUB_TOKENs return 403 on
-	// /installation/repositories. Treat as non-fatal.
+func TestFetchTokenScope_NonInstallationToken_403(t *testing.T) {
+	// PATs and GITHUB_TOKENs return 403 on /installation/repositories.
+	// Treated as "not an installation token" — silent, no error.
 	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 	}))
 	defer github.Close()
 
 	repos, err := fetchTokenScope("ghp_personal", github.URL)
+	assert.NoError(t, err)
+	assert.Nil(t, repos)
+}
+
+func TestFetchTokenScope_UnexpectedStatus(t *testing.T) {
+	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer github.Close()
+
+	repos, err := fetchTokenScope("ghs_token", github.URL)
 	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "status 500")
 	assert.Nil(t, repos)
 }

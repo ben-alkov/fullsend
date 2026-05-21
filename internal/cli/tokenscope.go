@@ -32,6 +32,12 @@ func fetchTokenScope(token, baseURL string) ([]string, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized {
+		// PATs and GITHUB_TOKENs can't call /installation/repositories.
+		// Not an error — just means this isn't an installation token.
+		io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		return nil, nil
+	}
 	if resp.StatusCode != http.StatusOK {
 		io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 		return nil, fmt.Errorf("token scope check returned status %d", resp.StatusCode)
