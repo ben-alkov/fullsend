@@ -950,11 +950,14 @@ func bootstrapEnv(sandboxName, repoDir string, h *harness.Harness) error {
 
 		if hf.Expand {
 			// Read file, expand ${VAR} in content, write expanded version.
+			// Uses shell-safe quoting so user-authored values (e.g.
+			// HUMAN_INSTRUCTION) containing shell metacharacters do not
+			// cause syntax errors when the file is sourced. (#408, #615)
 			raw, err := os.ReadFile(hostPath)
 			if err != nil {
 				return fmt.Errorf("reading host file %s for expansion: %w", hf.Src, err)
 			}
-			expanded := os.ExpandEnv(string(raw))
+			expanded := shellSafeExpandEnv(string(raw))
 
 			tmp, err := os.CreateTemp("", "fullsend-expand-*")
 			if err != nil {
@@ -992,6 +995,30 @@ func bootstrapEnv(sandboxName, repoDir string, h *harness.Harness) error {
 	}
 
 	return nil
+}
+
+// shellSafeExpandEnv expands ${VAR} references in text using the host
+// environment, escaping characters that are special inside double quotes
+// (", $, `, \) so the result is safe to source as a shell script.
+// Templates use the standard export FOO="${FOO}" pattern; this function
+// ensures substituted values cannot break out of the double-quote context.
+// Fixes #408, #615.
+func shellSafeExpandEnv(text string) string {
+	return os.Expand(text, func(key string) string {
+		return escapeForDoubleQuotes(os.Getenv(key))
+	})
+}
+
+// escapeForDoubleQuotes escapes the four characters that have special
+// meaning inside double-quoted shell strings: backslash, double quote,
+// dollar sign, and backtick. Order matters: backslash must be escaped
+// first to avoid double-escaping the others.
+func escapeForDoubleQuotes(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	s = strings.ReplaceAll(s, `$`, `\$`)
+	s = strings.ReplaceAll(s, "`", "\\`")
+	return s
 }
 
 // envToList converts a map of env vars to a sorted list of KEY=VALUE strings.
