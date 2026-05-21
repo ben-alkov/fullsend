@@ -37,6 +37,9 @@ This guide walks through installing fullsend in a GitHub organization and enroll
   An administrator with elevated access to the GCP project (for example, with the ability to set IAM policy) can grant all required roles with a single script:
 
   ```bash
+  export GCP_PROJECT="my-project-id"    # target GCP project
+  export USER_EMAIL="alice@example.com" # email of the user who will run the installer
+
   for ROLE in \
     roles/iam.workloadIdentityPoolAdmin \
     roles/iam.serviceAccountAdmin \
@@ -45,7 +48,7 @@ This guide walks through installing fullsend in a GitHub organization and enroll
     roles/cloudfunctions.developer \
     roles/run.admin; do
     gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
-      --member="user:$INSTALLER_EMAIL" \
+      --member="user:$USER_EMAIL" \
       --role="$ROLE"
   done
   ```
