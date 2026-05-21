@@ -761,6 +761,29 @@ func TestFindingsToReviewComments_FiltersByDiffHunks(t *testing.T) {
 	assert.Equal(t, 3, comments[1].Line)
 }
 
+func TestFindingsToReviewComments_EmptyPatchSkipsLineFiltering(t *testing.T) {
+	findings := []ReviewFinding{
+		{File: "binary.png", Line: 1, Severity: "high", Category: "bug", Description: "On binary file"},
+		{File: "large.go", Line: 999, Severity: "medium", Category: "style", Description: "On truncated-patch file"},
+		{File: "changed.go", Line: 10, Severity: "low", Category: "bug", Description: "In hunk"},
+		{File: "changed.go", Line: 50, Severity: "info", Category: "docs", Description: "Outside hunk"},
+	}
+	diffHunks := map[string][][2]int{
+		"binary.png": nil,
+		"large.go":   nil,
+		"changed.go": {{5, 15}},
+	}
+
+	comments, fileFiltered, lineFiltered := findingsToReviewComments(findings, diffHunks)
+	assert.Equal(t, 0, fileFiltered)
+	assert.Equal(t, 1, lineFiltered, "only the out-of-hunk finding on changed.go should be filtered")
+	require.Len(t, comments, 3)
+	assert.Equal(t, "binary.png", comments[0].Path)
+	assert.Equal(t, "large.go", comments[1].Path)
+	assert.Equal(t, "changed.go", comments[2].Path)
+	assert.Equal(t, 10, comments[2].Line)
+}
+
 func TestSubmitFormalReview_FiltersByPRFileDiffs(t *testing.T) {
 	fc := forge.NewFakeClient()
 	fc.AuthenticatedUser = "fullsend-bot"

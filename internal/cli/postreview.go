@@ -336,8 +336,10 @@ func submitFormalReview(ctx context.Context, client forge.Client, owner, repo st
 // or line number are omitted — they remain in the sticky comment body.
 // When diffHunks is non-nil, findings referencing files outside the PR
 // diff or lines outside any diff hunk are omitted to avoid GitHub 422
-// errors. Returns the comments and counts of findings dropped for each
-// reason (file not in diff, line not in any hunk).
+// errors. Files with empty hunk lists (binary files, truncated patches)
+// skip line-level filtering — the file is known to be in the diff but
+// hunk coverage is unavailable. Returns the comments and counts of
+// findings dropped for each reason (file not in diff, line not in hunk).
 func findingsToReviewComments(findings []ReviewFinding, diffHunks map[string][][2]int) ([]forge.ReviewComment, int, int) {
 	var comments []forge.ReviewComment
 	var fileFiltered, lineFiltered int
@@ -351,7 +353,7 @@ func findingsToReviewComments(findings []ReviewFinding, diffHunks map[string][][
 				fileFiltered++
 				continue
 			}
-			if !lineInHunks(f.Line, hunks) {
+			if len(hunks) > 0 && !lineInHunks(f.Line, hunks) {
 				lineFiltered++
 				continue
 			}
@@ -386,6 +388,9 @@ func formatFindingComment(f ReviewFinding) string {
 func parseDiffLineRanges(patch string) [][2]int {
 	var ranges [][2]int
 	for _, line := range strings.Split(patch, "\n") {
+		if !strings.HasPrefix(line, "@@") {
+			continue
+		}
 		m := hunkHeaderRe.FindStringSubmatch(line)
 		if m == nil {
 			continue

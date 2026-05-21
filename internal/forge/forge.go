@@ -91,7 +91,8 @@ type ReviewComment struct {
 }
 
 // PullRequestFileDiff represents a file changed in a pull request along
-// with its unified diff patch. The patch may be empty for binary files.
+// with its unified diff patch. The patch may be empty for binary files,
+// rename-only changes, or when GitHub truncates large diffs.
 type PullRequestFileDiff struct {
 	Path  string
 	Patch string
