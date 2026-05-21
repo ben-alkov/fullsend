@@ -407,6 +407,14 @@ func TestHandler_TooManyRepos(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
 	}
+	var resp map[string]string
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	want := fmt.Sprintf("max %d", maxRepos)
+	if !strings.Contains(resp["error"], want) {
+		t.Fatalf("expected error to contain %q, got: %s", want, resp["error"])
+	}
 }
 
 func TestHandler_OIDCPrevalidation_BadIssuer(t *testing.T) {
