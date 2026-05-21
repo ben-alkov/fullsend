@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"os/exec"
@@ -53,10 +54,16 @@ var orgPool = []string{
 // If all orgs are locked, it falls back to waiting on each org in sequence,
 // bounded by a single shared deadline (not per-org). Returns the org name.
 func acquireOrg(ctx context.Context, client forge.Client, token, runID string, timeout time.Duration, logf func(string, ...any)) (string, error) {
+	// Shuffle the pool so concurrent runners don't all compete for the
+	// same first org (thundering herd).
+	shuffled := make([]string, len(orgPool))
+	copy(shuffled, orgPool)
+	rand.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
+
 	// First pass: try each org without waiting. If a lock exists but is
 	// stale (older than timeout), force-acquire it so we don't waste pool
 	// capacity on crashed runs.
-	for _, org := range orgPool {
+	for _, org := range shuffled {
 		logf("[org-pool] Trying to acquire %s...", org)
 		acquired, err := tryCreateLock(ctx, client, org, runID, logf)
 		if err != nil {
@@ -82,7 +89,7 @@ func acquireOrg(ctx context.Context, client forge.Client, token, runID string, t
 	deadlineCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	var lastErr error
-	for _, org := range orgPool {
+	for _, org := range shuffled {
 		if deadlineCtx.Err() != nil {
 			break
 		}

@@ -205,13 +205,13 @@ func (f *FakeClient) CreateRepo(_ context.Context, org, name, description string
 	fullName := org + "/" + name
 	// Check for duplicates in pre-populated repos.
 	for _, r := range f.Repos {
-		if r.FullName == fullName || r.Name == name {
+		if r.FullName == fullName {
 			return nil, fmt.Errorf("repository already exists: %s", fullName)
 		}
 	}
 	// Check for duplicates in previously created repos.
 	for _, r := range f.CreatedRepos {
-		if r.FullName == fullName || r.Name == name {
+		if r.FullName == fullName {
 			return nil, fmt.Errorf("repository already exists: %s", fullName)
 		}
 	}

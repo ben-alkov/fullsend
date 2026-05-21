@@ -75,12 +75,33 @@ func TestAcquireOrg_FirstOrgAvailable(t *testing.T) {
 
 	org, err := acquireOrg(ctx, fake, "", "run-1", 5*time.Second, t.Logf)
 	require.NoError(t, err)
-	assert.Equal(t, "test-org-1", org)
+	assert.Contains(t, orgPool, org, "should acquire one of the pool orgs")
 
-	// Verify the lock is held.
-	content, err := fake.GetFileContent(ctx, "test-org-1", lockRepo, "README.md")
+	// Verify the lock is held on the acquired org.
+	content, err := fake.GetFileContent(ctx, org, lockRepo, "README.md")
 	require.NoError(t, err)
 	assert.Equal(t, "run-1", string(content))
+}
+
+func TestAcquireOrg_SkipsLockedOrg(t *testing.T) {
+	fake := forge.NewFakeClient()
+	ctx := context.Background()
+
+	origPool := orgPool
+	defer func() { orgPool = origPool }()
+	orgPool = []string{"test-org-1", "test-org-2", "test-org-3"}
+
+	// Lock the first org.
+	fake.CreatedRepos = append(fake.CreatedRepos, forge.Repository{
+		Name:     lockRepo,
+		FullName: "test-org-1/" + lockRepo,
+	})
+	fake.FileContents["test-org-1/"+lockRepo+"/README.md"] = []byte("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+
+	org, err := acquireOrg(ctx, fake, "", "run-2", 5*time.Second, t.Logf)
+	require.NoError(t, err)
+	assert.NotEqual(t, "test-org-1", org, "should skip locked test-org-1")
+	assert.Contains(t, []string{"test-org-2", "test-org-3"}, org, "should acquire an unlocked org")
 }
 
 func TestAcquireOrg_AllLockedTimesOut(t *testing.T) {
