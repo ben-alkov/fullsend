@@ -335,10 +335,10 @@ When a platform operator has pre-provisioned shared public GitHub Apps and a tok
 - **Platform mint details** — obtain from your platform operator:
   - Mint URL (for OIDC token exchange)
   - Mint GCP project ID and region (for app discovery and validation via GCP APIs)
-- **Platform operator coordination** — the platform operator must ensure before you run the installer:
+- **Platform operator coordination** — the following must be in place before installation (the assisted path handles these automatically if you have IAM access to the platform project; required manually for the `--skip-mint-check` path):
   - Your organization is registered in the mint's `ALLOWED_ORGS` configuration
   - The mint has the necessary GitHub App PEMs stored in Secret Manager
-  - Workload Identity Federation (WIF) is configured to accept tokens from your organization
+  - Mint-side Workload Identity Federation (WIF) is configured to route tokens for your organization
 
 **Recommended: Assisted installation**
 
@@ -352,7 +352,7 @@ fullsend admin install "$ORG_NAME/$REPO_NAME" \
   --mint-region "$PLATFORM_MINT_REGION"
 ```
 
-This requires read access (`roles/cloudfunctions.viewer`) to the platform mint project for app discovery, plus write access (`roles/cloudfunctions.developer`, `roles/secretmanager.admin`) for mint validation and org registration. The command:
+This requires `roles/cloudfunctions.developer` and `roles/secretmanager.admin` on the platform mint project for app discovery, validation, and org registration. WIF auto-provisioning in the inference project additionally requires `roles/iam.workloadIdentityPoolAdmin` and `roles/resourcemanager.projectIamAdmin` on the inference project; pass `--inference-wif-provider` to skip this if you have a pre-existing WIF provider. The command:
 - Discovers shared app IDs from the platform mint project via GCP Cloud Functions API
 - Checks if the shared apps are already installed on your repository
 - If apps are not installed, opens browser windows to install the pre-existing shared apps (requires org admin approval)
