@@ -1582,9 +1582,19 @@ func runUninstall(ctx context.Context, client forge.Client, printer *ui.Printer,
 		}
 	}
 	if len(agentSlugs) == 0 {
-		// Config unavailable — assume default app naming convention.
+		// Config unavailable — assume default app naming convention and
+		// also include any legacy app-set prefixes so that apps created
+		// under an older version are not silently skipped.
 		for _, role := range config.DefaultAgentRoles() {
 			agentSlugs = append(agentSlugs, appsetup.AppSlug(appSet, role))
+		}
+		for _, legacy := range appsetup.LegacyAppSets {
+			if legacy == appSet {
+				continue // already included above
+			}
+			for _, role := range config.DefaultAgentRoles() {
+				agentSlugs = append(agentSlugs, appsetup.AppSlug(legacy, role))
+			}
 		}
 		if err != nil {
 			printer.StepInfo("Config repo unavailable; using default app names")
@@ -1674,6 +1684,9 @@ func runUninstall(ctx context.Context, client forge.Client, printer *ui.Printer,
 				}
 			}
 			printer.Blank()
+		} else if listErr == nil {
+			printer.StepWarn("No fullsend apps found installed in this organization.")
+			printer.StepInfo("If apps were created under a custom --app-set prefix, re-run with that prefix.")
 		}
 	}
 

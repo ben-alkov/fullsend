@@ -874,6 +874,11 @@ func (s *Setup) ensureInstalled(ctx context.Context, org, slug string) error {
 // must pass --app-set explicitly.
 const DefaultAppSet = "fullsend-ai"
 
+// LegacyAppSets lists app-set prefixes used by previous fullsend versions.
+// During uninstall, these are checked in addition to the current default so
+// that apps created under an older naming convention are not silently skipped.
+var LegacyAppSets = []string{"fullsend"}
+
 // AppSlug returns the conventional app slug for a given app set and role.
 func AppSlug(appSet, role string) string {
 	return appSet + "-" + role

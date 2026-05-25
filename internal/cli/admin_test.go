@@ -1545,6 +1545,75 @@ func TestFilterSlugsByAppSet(t *testing.T) {
 	}
 }
 
+func TestRunUninstall_LegacySlugsIncludedWhenConfigUnavailable(t *testing.T) {
+	// When the config repo is unavailable, runUninstall should check
+	// both current (fullsend-ai-*) and legacy (fullsend-*) app naming
+	// so that apps created under an older version are not silently skipped.
+	client := forge.NewFakeClient()
+	client.TokenScopes = []string{"admin:org", "repo", "delete_repo"}
+	client.Errors["GetFileContent"] = errors.New("not found")
+
+	// Simulate a legacy app installed under the old naming convention.
+	client.Installations = []forge.Installation{
+		{ID: 1, AppSlug: "fullsend-coder"},
+	}
+
+	var buf strings.Builder
+	printer := ui.New(&buf)
+
+	err := runUninstall(context.Background(), client, printer, "test-org", "fullsend-ai")
+	require.NoError(t, err)
+
+	output := buf.String()
+	// The legacy slug "fullsend-coder" should NOT be reported as "not found".
+	assert.NotContains(t, output, "App fullsend-coder not found")
+	// It should appear in the app cleanup section.
+	assert.Contains(t, output, "fullsend-coder")
+}
+
+func TestRunUninstall_WarnsWhenNoAppsFound(t *testing.T) {
+	// When no apps are found under any naming convention, the uninstaller
+	// should warn the user instead of silently reporting success.
+	client := forge.NewFakeClient()
+	client.TokenScopes = []string{"admin:org", "repo", "delete_repo"}
+	client.Errors["GetFileContent"] = errors.New("not found")
+
+	// No installations at all.
+	client.Installations = []forge.Installation{}
+
+	var buf strings.Builder
+	printer := ui.New(&buf)
+
+	err := runUninstall(context.Background(), client, printer, "test-org", "fullsend-ai")
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, "No fullsend apps found installed in this organization")
+}
+
+func TestRunUninstall_LegacySlugsSkippedWhenAppSetMatchesLegacy(t *testing.T) {
+	// When --app-set is explicitly "fullsend" (matching legacy), the legacy
+	// slugs should not be duplicated.
+	client := forge.NewFakeClient()
+	client.TokenScopes = []string{"admin:org", "repo", "delete_repo"}
+	client.Errors["GetFileContent"] = errors.New("not found")
+
+	client.Installations = []forge.Installation{
+		{ID: 1, AppSlug: "fullsend-coder"},
+	}
+
+	var buf strings.Builder
+	printer := ui.New(&buf)
+
+	err := runUninstall(context.Background(), client, printer, "test-org", "fullsend")
+	require.NoError(t, err)
+
+	output := buf.String()
+	// Should find the legacy app and attempt cleanup.
+	assert.NotContains(t, output, "No fullsend apps found")
+	assert.Contains(t, output, "fullsend-coder")
+}
+
 func TestInstallCmd_SkipMintCheckStillValidatesWIFProvider(t *testing.T) {
 	t.Setenv("GH_TOKEN", "test-token")
 	cmd := newRootCmd()
