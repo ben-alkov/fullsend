@@ -107,6 +107,7 @@ lint-md-links:
 
 script-test:
 	bash internal/scaffold/fullsend-repo/scripts/post-triage-test.sh
+	bash internal/scaffold/fullsend-repo/scripts/post-prioritize-test.sh
 	bash internal/scaffold/fullsend-repo/scripts/post-code-test.sh
 	bash internal/scaffold/fullsend-repo/scripts/post-review-test.sh
 	bash internal/scaffold/fullsend-repo/scripts/reconcile-repos-test.sh

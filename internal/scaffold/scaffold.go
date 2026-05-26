@@ -27,6 +27,7 @@ var executableFiles = map[string]struct{}{
 	"scripts/post-review.sh":                 {},
 	"scripts/post-triage.sh":                 {},
 	"scripts/post-triage-test.sh":            {},
+	"scripts/post-prioritize-test.sh":        {},
 	"scripts/pre-code.sh":                    {},
 	"scripts/pre-prioritize.sh":              {},
 	"scripts/pre-review.sh":                  {},
