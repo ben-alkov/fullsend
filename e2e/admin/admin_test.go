@@ -566,46 +566,37 @@ func runUnenrollmentTest(t *testing.T, env *e2eEnv) {
 	t.Helper()
 	ctx := context.Background()
 
-	cfgData, err := env.client.GetFileContent(ctx, env.org, forge.ConfigRepoName, "config.yaml")
-	require.NoError(t, err, "reading config.yaml")
-	orgCfg, err := config.ParseOrgConfig(cfgData)
-	require.NoError(t, err, "parsing config.yaml")
-	orgCfg.Repos[testRepo] = config.RepoConfig{Enabled: false}
-	updatedCfg, err := orgCfg.Marshal()
-	require.NoError(t, err, "marshaling updated config")
-	err = env.client.CreateOrUpdateFile(ctx, env.org, forge.ConfigRepoName,
-		"config.yaml", "chore: disable test-repo for unenrollment test", updatedCfg)
-	require.NoError(t, err, "updating config.yaml")
-	t.Logf("Set %s to enabled: false in config.yaml", testRepo)
+	// Disable the test repo via CLI (updates config.yaml). The push to
+	// config.yaml on main triggers repo-maintenance, which creates the
+	// removal PR.
+	runCLI(t, env.binary, env.token,
+		"admin", "disable", "repos", env.org, testRepo, "--yolo")
 
-	time.Sleep(5 * time.Second)
-
-	reinstallArgs := []string{
-		"admin", "install", env.org,
-		"--skip-app-setup",
-		"--skip-mint-check",
-		"--mint-url", env.cfg.mintURL,
-		"--app-set", e2eAppSet,
-		"--enroll-none",
-	}
-	if env.cfg.gcpProjectID != "" {
-		reinstallArgs = append(reinstallArgs, "--inference-project", env.cfg.gcpProjectID)
-	}
-	runCLI(t, env.binary, env.token, reinstallArgs...)
-
-	prs, err := env.client.ListRepoPullRequests(ctx, env.org, testRepo)
-	require.NoError(t, err, "listing PRs for %s", testRepo)
+	// Wait for the removal PR to be created by repo-maintenance.
+	t.Log("Waiting for removal PR...")
 	var removalPR *forge.ChangeProposal
-	for _, pr := range prs {
-		if pr.Title == "chore: disconnect from fullsend agent pipeline" {
-			cp := pr
-			removalPR = &cp
+	for attempt := 0; attempt < 24; attempt++ {
+		time.Sleep(5 * time.Second)
+		prs, err := env.client.ListRepoPullRequests(ctx, env.org, testRepo)
+		if err != nil {
+			t.Logf("Attempt %d: error listing PRs: %v", attempt+1, err)
+			continue
+		}
+		for _, pr := range prs {
+			if pr.Title == "chore: disconnect from fullsend agent pipeline" {
+				cp := pr
+				removalPR = &cp
+				break
+			}
+		}
+		if removalPR != nil {
 			break
 		}
+		t.Logf("Attempt %d: removal PR not yet created", attempt+1)
 	}
 	require.NotNil(t, removalPR, "removal PR should exist for %s", testRepo)
 	t.Logf("Found removal PR #%d: %s", removalPR.Number, removalPR.URL)
-	err = env.client.MergeChangeProposal(ctx, env.org, testRepo, removalPR.Number)
+	err := env.client.MergeChangeProposal(ctx, env.org, testRepo, removalPR.Number)
 	require.NoError(t, err, "merging removal PR")
 	time.Sleep(5 * time.Second)
 	_, err = env.client.GetFileContent(ctx, env.org, testRepo, ".github/workflows/fullsend.yaml")
