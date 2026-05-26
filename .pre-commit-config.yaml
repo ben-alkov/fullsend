@@ -55,7 +55,19 @@ repos:
     rev: v1.7.11
     hooks:
       - id: actionlint
-        args: ["-ignore", "unexpected key \"queue\" for \"concurrency\""]
+        files: |
+          (?x)^(
+            \.github/workflows/
+            |internal/scaffold/fullsend-repo/\.github/workflows/
+            |internal/scaffold/fullsend-repo/templates/
+          )
+        args:
+          - -ignore
+          - unexpected key "queue" for "concurrency"
+          - -ignore
+          - property "workflow_repository" is not defined
+          - -ignore
+          - SC2016
 
   - repo: local
     hooks:
