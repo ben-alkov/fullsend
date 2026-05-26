@@ -1463,6 +1463,36 @@ func (c *LiveClient) ListPullRequestFiles(ctx context.Context, owner, repo strin
 	return files, nil
 }
 
+// ListPullRequestFileDiffs returns the files changed by a pull request
+// along with their unified diff patches. Same API endpoint as
+// ListPullRequestFiles but also extracts the patch field.
+func (c *LiveClient) ListPullRequestFileDiffs(ctx context.Context, owner, repo string, number int) ([]forge.PullRequestFileDiff, error) {
+	var files []forge.PullRequestFileDiff
+	for page := 1; page <= 100; page++ {
+		resp, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/pulls/%d/files?per_page=100&page=%d", owner, repo, number, page))
+		if err != nil {
+			return nil, fmt.Errorf("list pull request file diffs page %d: %w", page, err)
+		}
+		var raw []struct {
+			Filename string `json:"filename"`
+			Patch    string `json:"patch"`
+		}
+		if err := decodeJSON(resp, &raw); err != nil {
+			return nil, fmt.Errorf("decoding pull request file diffs page %d: %w", page, err)
+		}
+		for _, f := range raw {
+			files = append(files, forge.PullRequestFileDiff{
+				Path:  f.Filename,
+				Patch: f.Patch,
+			})
+		}
+		if len(raw) < 100 {
+			break
+		}
+	}
+	return files, nil
+}
+
 // CreatePullRequestReview submits a formal review on a pull request.
 // The event must be one of: APPROVE, REQUEST_CHANGES, COMMENT.
 // When commitSHA is non-empty it is sent as commit_id, pinning the
@@ -1688,6 +1718,11 @@ func (c *LiveClient) ListOrgInstallations(ctx context.Context, org string) ([]fo
 			AppID       int               `json:"app_id"`
 			AppSlug     string            `json:"app_slug"`
 			Permissions map[string]string `json:"permissions"`
+			App         struct {
+				Owner struct {
+					Login string `json:"login"`
+				} `json:"owner"`
+			} `json:"app"`
 		} `json:"installations"`
 	}
 	if err := decodeJSON(resp, &result); err != nil {
@@ -1697,10 +1732,11 @@ func (c *LiveClient) ListOrgInstallations(ctx context.Context, org string) ([]fo
 	installs := make([]forge.Installation, len(result.Installations))
 	for i, inst := range result.Installations {
 		installs[i] = forge.Installation{
-			ID:          inst.ID,
-			AppID:       inst.AppID,
-			AppSlug:     inst.AppSlug,
-			Permissions: inst.Permissions,
+			ID:            inst.ID,
+			AppID:         inst.AppID,
+			AppSlug:       inst.AppSlug,
+			AppOwnerLogin: inst.App.Owner.Login,
+			Permissions:   inst.Permissions,
 		}
 	}
 	return installs, nil

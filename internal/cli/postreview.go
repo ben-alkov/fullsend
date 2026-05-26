@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -20,6 +21,7 @@ const reviewMarker = "<!-- fullsend:review-agent -->"
 
 var hexSHARe = regexp.MustCompile(`^[0-9a-fA-F]{40}$|^[0-9a-fA-F]{64}$`)
 var reasonRe = regexp.MustCompile(`^[a-zA-Z0-9_-]*$`)
+var hunkHeaderRe = regexp.MustCompile(`^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@`)
 
 func newPostReviewCmd() *cobra.Command {
 	var (
@@ -289,22 +291,25 @@ func submitFormalReview(ctx context.Context, client forge.Client, owner, repo st
 		return nil
 	}
 
-	var diffFiles map[string]bool
-	if prFiles, err := client.ListPullRequestFiles(ctx, owner, repo, pr); err != nil {
+	var diffHunks map[string][][2]int
+	if fileDiffs, err := client.ListPullRequestFileDiffs(ctx, owner, repo, pr); err != nil {
 		printer.StepInfo(fmt.Sprintf("Could not list PR files (%v), inline comments may be rejected", err))
-	} else if len(prFiles) == 0 {
+	} else if len(fileDiffs) == 0 {
 		printer.StepInfo("PR file list is empty, inline comments disabled")
 	} else {
-		diffFiles = make(map[string]bool, len(prFiles))
-		for _, f := range prFiles {
-			diffFiles[f] = true
+		diffHunks = make(map[string][][2]int, len(fileDiffs))
+		for _, f := range fileDiffs {
+			diffHunks[f.Path] = parseDiffLineRanges(f.Patch)
 		}
 	}
 
-	inlineComments, diffFiltered := findingsToReviewComments(findings, diffFiles)
+	inlineComments, fileFiltered, lineFiltered := findingsToReviewComments(findings, diffHunks)
 
-	if diffFiltered > 0 {
-		printer.StepWarn(fmt.Sprintf("%d finding(s) omitted: file not in PR diff", diffFiltered))
+	if fileFiltered > 0 {
+		printer.StepWarn(fmt.Sprintf("%d finding(s) omitted: file not in PR diff", fileFiltered))
+	}
+	if lineFiltered > 0 {
+		printer.StepWarn(fmt.Sprintf("%d finding(s) omitted: line not in any diff hunk", lineFiltered))
 	}
 
 	var reviewBody string
@@ -329,20 +334,29 @@ func submitFormalReview(ctx context.Context, client forge.Client, owner, repo st
 // findingsToReviewComments converts review findings with file and line
 // locations into inline review comments. Findings without a file path
 // or line number are omitted — they remain in the sticky comment body.
-// When diffFiles is non-nil, findings referencing files outside the PR
-// diff are also omitted to avoid GitHub 422 errors.
-// Returns the comments and the count of findings dropped because their
-// file was not in the diff.
-func findingsToReviewComments(findings []ReviewFinding, diffFiles map[string]bool) ([]forge.ReviewComment, int) {
+// When diffHunks is non-nil, findings referencing files outside the PR
+// diff or lines outside any diff hunk are omitted to avoid GitHub 422
+// errors. Files with empty hunk lists (binary files, truncated patches)
+// skip line-level filtering — the file is known to be in the diff but
+// hunk coverage is unavailable. Returns the comments and counts of
+// findings dropped for each reason (file not in diff, line not in hunk).
+func findingsToReviewComments(findings []ReviewFinding, diffHunks map[string][][2]int) ([]forge.ReviewComment, int, int) {
 	var comments []forge.ReviewComment
-	var diffFiltered int
+	var fileFiltered, lineFiltered int
 	for _, f := range findings {
 		if f.File == "" || f.Line <= 0 {
 			continue
 		}
-		if diffFiles != nil && !diffFiles[f.File] {
-			diffFiltered++
-			continue
+		if diffHunks != nil {
+			hunks, fileInDiff := diffHunks[f.File]
+			if !fileInDiff {
+				fileFiltered++
+				continue
+			}
+			if len(hunks) > 0 && !lineInHunks(f.Line, hunks) {
+				lineFiltered++
+				continue
+			}
 		}
 		comments = append(comments, forge.ReviewComment{
 			Path: f.File,
@@ -350,7 +364,7 @@ func findingsToReviewComments(findings []ReviewFinding, diffFiles map[string]boo
 			Body: formatFindingComment(f),
 		})
 	}
-	return comments, diffFiltered
+	return comments, fileFiltered, lineFiltered
 }
 
 // formatFindingComment renders a single review finding as a Markdown
@@ -365,6 +379,43 @@ func formatFindingComment(f ReviewFinding) string {
 		b.WriteString(strings.TrimSpace(f.Remediation))
 	}
 	return b.String()
+}
+
+// parseDiffLineRanges extracts new-file line ranges from unified diff
+// hunk headers. Each returned [2]int is an inclusive [start, end] range
+// of lines on the right (new) side of the diff that can receive inline
+// comments.
+func parseDiffLineRanges(patch string) [][2]int {
+	var ranges [][2]int
+	for _, line := range strings.Split(patch, "\n") {
+		if !strings.HasPrefix(line, "@@") {
+			continue
+		}
+		m := hunkHeaderRe.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		start, _ := strconv.Atoi(m[1])
+		size := 1
+		if m[2] != "" {
+			size, _ = strconv.Atoi(m[2])
+		}
+		if size == 0 {
+			continue
+		}
+		ranges = append(ranges, [2]int{start, start + size - 1})
+	}
+	return ranges
+}
+
+// lineInHunks returns true if line falls within any of the given ranges.
+func lineInHunks(line int, hunks [][2]int) bool {
+	for _, h := range hunks {
+		if line >= h[0] && line <= h[1] {
+			return true
+		}
+	}
+	return false
 }
 
 // postApprovedFollowUpIssues is disabled pending #1137. Follow-up issues

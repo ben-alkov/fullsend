@@ -20,12 +20,14 @@ func FullsendRepoFile(path string) ([]byte, error) {
 // embed.FS does not preserve permission bits, so we track them here.
 // TestFileModeMatchesFilesystem verifies this set stays in sync.
 var executableFiles = map[string]struct{}{
+	"scripts/extract-transcript-error.sh":    {},
 	"scripts/post-code.sh":                   {},
 	"scripts/post-prioritize.sh":             {},
 	"scripts/post-retro.sh":                  {},
 	"scripts/post-review.sh":                 {},
 	"scripts/post-triage.sh":                 {},
 	"scripts/post-triage-test.sh":            {},
+	"scripts/post-prioritize-test.sh":        {},
 	"scripts/pre-code.sh":                    {},
 	"scripts/pre-prioritize.sh":              {},
 	"scripts/pre-review.sh":                  {},
@@ -37,7 +39,6 @@ var executableFiles = map[string]struct{}{
 	"scripts/pre-retro.sh":                   {},
 	"scripts/validate-output-schema.sh":      {},
 	"scripts/fullsend-check-output":          {},
-	"scripts/extract-transcript-error.sh":    {},
 	"scripts/validate-output-schema-test.sh": {},
 	"scripts/validate-source-repo.sh":        {},
 }
@@ -53,6 +54,10 @@ func FileMode(path string) string {
 // layeredDirs contain upstream defaults provided at runtime via reusable
 // workflow workspace preparation. The scaffold does not install these —
 // orgs add overrides in customized/<dir>/ instead. See ADR 0035.
+//
+// When adding or removing harness YAML files (default agents), update
+// docs/agents/README.md and add a corresponding docs/agents/<name>.md.
+// The lint-agent-docs pre-commit hook enforces this.
 var layeredDirs = []string{
 	"agents/",
 	"skills/",

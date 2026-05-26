@@ -82,6 +82,15 @@ The installer creates the `.fullsend` config repo as **public** by default. This
 
 If the installer fails partway through, run `fullsend admin uninstall "$ORG_NAME"` to clean up before retrying. The uninstall preflight will prompt you to add the `delete_repo` scope if it is missing.
 
+Set the variables for your environment:
+
+```bash
+export ORG_NAME="<your-github-org>"
+export GCP_PROJECT="<your-gcp-project>"
+```
+
+Then run the installer:
+
 ```bash
 fullsend admin install "$ORG_NAME" \
   --inference-project "$GCP_PROJECT" \
@@ -127,6 +136,13 @@ A single token mint can serve multiple GitHub organizations. The first org deplo
 
 **First org (deploys mint + creates public apps):**
 
+Set the variables for the first organization:
+
+```bash
+export FIRST_ORG="<first-github-org>"
+export GCP_PROJECT="<your-gcp-project>"
+```
+
 ```bash
 fullsend admin install "$FIRST_ORG" \
   --inference-project "$GCP_PROJECT" \
@@ -149,6 +165,14 @@ fullsend admin install "$FIRST_ORG" \
 This creates public apps named `{first-org}-fullsend`, `{first-org}-coder`, etc.
 
 **Additional orgs (install existing public apps):**
+
+Set the variables for the additional organization:
+
+```bash
+export ADDITIONAL_ORG="<additional-github-org>"
+```
+
+`GCP_PROJECT` and `FIRST_ORG` carry over from the first-org step above.
 
 ```bash
 fullsend admin install "$ADDITIONAL_ORG" \
@@ -183,7 +207,13 @@ After installation, you can enroll or unenroll repositories at any time using th
 
 ### Enable repositories
 
-To enroll specific repositories:
+Set the variables for your environment:
+
+```bash
+export ORG_NAME="<your-github-org>"
+```
+
+To enroll specific repositories (pass repo names as arguments):
 
 ```bash
 fullsend admin enable repos "$ORG_NAME" <repo-name> [repo-name...]
@@ -202,7 +232,13 @@ The enable command:
 
 ### Disable repositories
 
-To unenroll specific repositories:
+`ORG_NAME` carries over from the enable step above, or set it now:
+
+```bash
+export ORG_NAME="<your-github-org>"
+```
+
+To unenroll specific repositories (pass repo names as arguments):
 
 ```bash
 fullsend admin disable repos "$ORG_NAME" <repo-name> [repo-name...]
@@ -238,6 +274,10 @@ Once a repo is enrolled (enrollment PR merged):
 The `analyze` command checks the current state of a fullsend installation and reports what is installed, missing, or needs updating. It requires `repo` and `admin:org` scopes.
 
 ```bash
+export ORG_NAME="<your-github-org>"
+```
+
+```bash
 fullsend admin analyze "$ORG_NAME"
 ```
 
@@ -246,6 +286,10 @@ This is a read-only operation — it makes no changes.
 ## 6. Uninstall
 
 The `uninstall` command tears down the fullsend installation for a GitHub organization, removing the `.fullsend` config repo and associated resources. It prompts for confirmation by requiring you to type the exact organization name.
+
+```bash
+export ORG_NAME="<your-github-org>"
+```
 
 ```bash
 fullsend admin uninstall "$ORG_NAME"
@@ -278,7 +322,74 @@ Per-repo mode installs fullsend for a single repository without requiring an org
 > reference chain unidirectional: target repo → `.fullsend` → upstream
 > `fullsend-ai/fullsend`.
 
+### Using platform-provided infrastructure
+
+When a platform operator has pre-provisioned shared public GitHub Apps and a token mint, you only need to provide a GCP project for inference. This is the simplest installation path — no Apps to create, no mint to deploy, no PEM management.
+
+> This section documents the **SaaS installation profile** defined in [ADR 0033 §6](../../ADRs/0033-per-repo-installation-mode.md#6-credential-models). If you are reusing apps from your own prior per-org installation, see [Reusing existing infrastructure](#reusing-existing-infrastructure) instead.
+
+**Prerequisites:**
+
+- **Org admin approval** to install the shared GitHub Apps on your repository
+- **GCP project** with the [Agent Platform API](https://console.cloud.google.com/apis/library/aiplatform.googleapis.com) enabled for inference
+- **Mint URL** — obtain from your platform operator (for OIDC token exchange)
+- **Platform operator coordination** — the following must be in place before installation:
+  - Your organization is registered in the mint's `ALLOWED_ORGS` configuration
+  - The shared GitHub Apps are installed on your repository
+  - The mint has the necessary GitHub App PEMs stored in Secret Manager
+  - Mint-side Workload Identity Federation (WIF) is configured to accept OIDC tokens from your organization's repositories
+- **For assisted installation only** — mint GCP project ID and region, plus IAM access to the platform project (see the alternative path below)
+
+**Recommended: Use the mint URL directly**
+
+Most per-repo users will not have IAM access to the platform operator's GCP project. Ask your platform operator for the mint URL and confirm that the following are in place before running the installer:
+
+- The shared GitHub Apps are already installed on your repository
+- Your organization is registered in the mint's `ALLOWED_ORGS`
+- Mint-side WIF is configured to accept tokens from your organization
+- All PEMs are stored in Secret Manager
+
+Then run:
+
+```bash
+fullsend admin install "$ORG_NAME/$REPO_NAME" \
+  --inference-project "$GCP_PROJECT" \
+  --mint-url "$PLATFORM_MINT_URL" \
+  --skip-mint-check
+```
+
+The installer skips all app discovery, mint validation, and mint-related GCP provisioning — it only generates workflow files and sets repository variables and secrets. WIF infrastructure is still auto-provisioned in the inference project; pass `--inference-wif-provider` to skip this as well if the platform operator provides a pre-existing WIF provider.
+
+**Alternative: Assisted installation (requires platform project access)**
+
+If you have IAM access to the platform operator's GCP project, the installer can discover shared apps and handle validation automatically:
+
+```bash
+fullsend admin install "$ORG_NAME/$REPO_NAME" \
+  --inference-project "$GCP_PROJECT" \
+  --mint-url "$PLATFORM_MINT_URL" \
+  --mint-project "$PLATFORM_MINT_PROJECT" \
+  --mint-region "$PLATFORM_MINT_REGION"
+```
+
+This requires `roles/cloudfunctions.developer` and `roles/secretmanager.admin` on the platform mint project for app discovery, validation, and org registration. WIF auto-provisioning in the inference project additionally requires `roles/iam.workloadIdentityPoolAdmin` and `roles/resourcemanager.projectIamAdmin` on the inference project; pass `--inference-wif-provider` to skip this if you have a pre-existing WIF provider. The command:
+- Discovers shared app IDs from the platform mint project via GCP Cloud Functions API
+- Checks if the shared apps are already installed on your repository
+- If apps are not installed, opens browser windows to install the pre-existing shared apps (requires org admin approval)
+- Validates and updates the mint configuration if needed (registers your org, updates WIF, stores PEM references)
+- Auto-provisions Workload Identity Federation for your repo in the inference project
+- Generates workflow files and commits scaffold to your repository
+- Sets repository variables and secrets
+
 ### First-time install (no prior infrastructure)
+
+Set the variables for your environment:
+
+```bash
+export ORG_NAME="<your-github-org>"
+export REPO_NAME="<your-repo-name>"
+export GCP_PROJECT="<your-gcp-project>"
+```
 
 ```bash
 fullsend admin install "$ORG_NAME/$REPO_NAME" \
@@ -295,7 +406,7 @@ Creating apps requires `admin:org` OAuth scope (the installer prompts for it). R
 
 ### Reusing existing infrastructure
 
-When a per-org install already exists, per-repo reuses the apps and mint:
+When a per-org install already exists in **your own org**, per-repo reuses the apps and mint. If the infrastructure belongs to a separate platform operator (SaaS profile), see [Using platform-provided infrastructure](#using-platform-provided-infrastructure) instead.
 
 ```bash
 fullsend admin install "$ORG_NAME/$REPO_NAME" \
@@ -325,6 +436,13 @@ By default, the installer creates GitHub Apps with the `fullsend-ai` prefix (e.g
 
 ### Creating a custom app set
 
+Set the variables for your environment:
+
+```bash
+export ORG_NAME="<your-github-org>"
+export GCP_PROJECT="<your-gcp-project>"
+```
+
 ```bash
 fullsend admin install "$ORG_NAME" \
   --inference-project "$GCP_PROJECT" \
@@ -339,6 +457,12 @@ This creates apps named `{org}-fullsend`, `{org}-coder`, `{org}-review`, etc. Th
 When a mint already has public apps registered under a custom app set (e.g., `fullsend-ai-fullsend`, `fullsend-ai-coder`), additional orgs installing those apps must pass the same `--app-set` so the CLI resolves the correct slugs:
 
 ```bash
+export NEW_ORG="<new-github-org>"
+```
+
+`GCP_PROJECT` carries over from the custom app set creation step above.
+
+```bash
 fullsend admin install "$NEW_ORG" \
   --inference-project "$GCP_PROJECT" \
   --mint-project "$GCP_PROJECT" \
@@ -351,7 +475,11 @@ The installer detects that the public apps are already installed in the org (mat
 
 ### Uninstalling a custom app set
 
-When uninstalling an org that used a custom app set, pass the same `--app-set` value so the CLI generates the correct fallback slugs if the config repo is unavailable:
+When uninstalling an org that used a custom app set, pass the same `--app-set` value so the CLI generates the correct fallback slugs if the config repo is unavailable. `ORG_NAME` carries over from the custom app set creation step above, or set it now:
+
+```bash
+export ORG_NAME="<your-github-org>"
+```
 
 ```bash
 fullsend admin uninstall "$ORG_NAME" --app-set "$ORG_NAME"

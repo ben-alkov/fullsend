@@ -77,7 +77,7 @@ func newRunCmd() *cobra.Command {
 }
 
 func runAgent(agentName, fullsendDir, outputBase, targetRepo, fullsendBinary string, envFiles []string, noPostScript bool, debug string, printer *ui.Printer) (runErr error) {
-	printer.Banner()
+	printer.Banner(Version())
 	printer.Blank()
 	printer.Header("Running agent: " + agentName)
 	printer.Blank()
@@ -777,9 +777,9 @@ func bootstrapSandbox(sandboxName, repoDir, fullsendBinary string, h *harness.Ha
 					if h.FailModeClosed() {
 						return fmt.Errorf("skill %q blocked: critical injection findings in SKILL.md", skillPath)
 					}
-					fmt.Fprintf(os.Stderr, "WARNING: skill %q has critical injection findings (fail_mode: open)\n", skillPath)
+					fmt.Fprintf(os.Stderr, "WARNING: skill %q has critical injection findings (fail_mode: open) — uploading anyway\n", skillPath)
 				} else if len(result.Findings) > 0 {
-					fmt.Fprintf(os.Stderr, "WARNING: skill %q has %d injection finding(s)\n", skillPath, len(result.Findings))
+					fmt.Fprintf(os.Stderr, "WARNING: skill %q has %d non-critical injection finding(s) — not blocked (only critical findings block); uploading\n", skillPath, len(result.Findings))
 				}
 			}
 		}
@@ -788,6 +788,7 @@ func bootstrapSandbox(sandboxName, repoDir, fullsendBinary string, h *harness.Ha
 			fmt.Sprintf("%s/skills/", sandbox.SandboxClaudeConfig)); err != nil {
 			return fmt.Errorf("copying skill %q: %w", skillPath, err)
 		}
+		fmt.Fprintf(os.Stderr, "Skill %q: uploaded to sandbox\n", filepath.Base(skillPath))
 	}
 
 	// Copy the self-check script into the sandbox so agents can validate
@@ -951,11 +952,14 @@ func bootstrapEnv(sandboxName, repoDir string, h *harness.Harness) error {
 
 		if hf.Expand {
 			// Read file, expand ${VAR} in content, write expanded version.
+			// Uses shell-safe quoting so user-authored values (e.g.
+			// HUMAN_INSTRUCTION) containing shell metacharacters do not
+			// cause syntax errors when the file is sourced. (#408, #615)
 			raw, err := os.ReadFile(hostPath)
 			if err != nil {
 				return fmt.Errorf("reading host file %s for expansion: %w", hf.Src, err)
 			}
-			expanded := os.ExpandEnv(string(raw))
+			expanded := shellSafeExpandEnv(string(raw))
 
 			tmp, err := os.CreateTemp("", "fullsend-expand-*")
 			if err != nil {
@@ -993,6 +997,30 @@ func bootstrapEnv(sandboxName, repoDir string, h *harness.Harness) error {
 	}
 
 	return nil
+}
+
+// shellSafeExpandEnv expands ${VAR} references in text using the host
+// environment, escaping characters that are special inside double quotes
+// (", $, `, \) so the result is safe to source as a shell script.
+// Templates use the standard export FOO="${FOO}" pattern; this function
+// ensures substituted values cannot break out of the double-quote context.
+// Fixes #408, #615.
+func shellSafeExpandEnv(text string) string {
+	return os.Expand(text, func(key string) string {
+		return escapeForDoubleQuotes(os.Getenv(key))
+	})
+}
+
+// escapeForDoubleQuotes escapes the four characters that have special
+// meaning inside double-quoted shell strings: backslash, double quote,
+// dollar sign, and backtick. Order matters: backslash must be escaped
+// first to avoid double-escaping the others.
+func escapeForDoubleQuotes(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	s = strings.ReplaceAll(s, `$`, `\$`)
+	s = strings.ReplaceAll(s, "`", "\\`")
+	return s
 }
 
 // envToList converts a map of env vars to a sorted list of KEY=VALUE strings.
@@ -1156,35 +1184,40 @@ func buildClaudeCommand(agentName, model, repoDir string, pluginDirs []string, d
 	// Defense-in-depth: escape single quotes even though Validate() rejects them.
 	safe := strings.ReplaceAll(agentName, "'", "'\\''")
 
-	modelFlag := ""
-	if model != "" {
-		modelFlag = fmt.Sprintf("--model '%s' ", strings.ReplaceAll(model, "'", "'\\''"))
-	}
-
-	var pluginDirParts []string
-	for _, pd := range pluginDirs {
-		pluginDirParts = append(pluginDirParts, fmt.Sprintf("--plugin-dir '%s'", strings.ReplaceAll(pd, "'", "'\\''")))
-	}
-	pluginDirFlags := ""
-	if len(pluginDirParts) > 0 {
-		pluginDirFlags = strings.Join(pluginDirParts, " ") + " "
-	}
-
-	debugFlags := ""
-	if debug != "" {
-		debugFlags = fmt.Sprintf("--debug-file '%s/%s' ", sandbox.SandboxWorkspace, claudeDebugLog)
-		if debug != "*" {
-			debugFlags += fmt.Sprintf("--debug '%s' ", strings.ReplaceAll(debug, "'", "'\\''"))
-		}
-	}
-
-	return fmt.Sprintf(
+	// Collect all command parts into a slice and join with spaces so that
+	// individual flags don't need to embed trailing whitespace.
+	parts := []string{
+		fmt.Sprintf("cd %s && . %s && claude", repoDir, envFile),
+		"--print",
+		"--verbose",
 		// --verbose increases log output in the job log. If artifact upload is
 		// added to this workflow, consider whether verbose output should be
 		// redacted or made conditional via an env var.
-		"cd %s && . %s && claude --print --verbose --output-format stream-json %s%s%s--agent '%s' --dangerously-skip-permissions 'Run the agent task'",
-		repoDir, envFile, debugFlags, modelFlag, pluginDirFlags, safe,
+		"--output-format stream-json",
+	}
+
+	if debug != "" {
+		parts = append(parts, fmt.Sprintf("--debug-file '%s/%s'", sandbox.SandboxWorkspace, claudeDebugLog))
+		if debug != "*" {
+			parts = append(parts, fmt.Sprintf("--debug '%s'", strings.ReplaceAll(debug, "'", "'\\''")))
+		}
+	}
+
+	if model != "" {
+		parts = append(parts, fmt.Sprintf("--model '%s'", strings.ReplaceAll(model, "'", "'\\''")))
+	}
+
+	for _, pd := range pluginDirs {
+		parts = append(parts, fmt.Sprintf("--plugin-dir '%s'", strings.ReplaceAll(pd, "'", "'\\''")))
+	}
+
+	parts = append(parts,
+		fmt.Sprintf("--agent '%s'", safe),
+		"--dangerously-skip-permissions",
+		"'Run the agent task'",
 	)
+
+	return strings.Join(parts, " ")
 }
 
 // buildScanContextCommand builds the command to run `fullsend scan context`
@@ -1394,16 +1427,17 @@ func scanRepoContextFiles(repoDir string) []security.Finding {
 	return allFindings
 }
 
-// scanOutputFiles runs the secret redactor on extracted output files,
-// recursively walking all subdirectories (iteration-N/output/, etc.).
+// scanOutputFiles runs the output security pipeline (unicode normalization and
+// secret redaction) on extracted output files, recursively walking all
+// subdirectories (iteration-N/output/, etc.).
 func scanOutputFiles(outputDir, traceID string, printer *ui.Printer) error {
 	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
 		printer.StepInfo("No output files to scan")
 		return nil
 	}
 
-	redactor := security.NewSecretRedactor()
-	redacted := 0
+	pipeline := security.OutputPipeline()
+	findingCount := 0
 	findingsPath := filepath.Join(outputDir, "security", "findings.jsonl")
 
 	err := filepath.WalkDir(outputDir, func(path string, d os.DirEntry, err error) error {
@@ -1424,12 +1458,13 @@ func scanOutputFiles(outputDir, traceID string, printer *ui.Printer) error {
 			return nil
 		}
 
-		result := redactor.Scan(string(content))
+		text := string(content)
+		result := pipeline.Scan(text)
 		if len(result.Findings) > 0 {
-			redacted += len(result.Findings)
+			findingCount += len(result.Findings)
 			relPath, _ := filepath.Rel(outputDir, path)
 			for _, f := range result.Findings {
-				printer.StepWarn(fmt.Sprintf("Redacted [%s] in %s: %s", f.Name, relPath, f.Detail))
+				printer.StepWarn(fmt.Sprintf("Sanitized [%s] in %s: %s", f.Name, relPath, f.Detail))
 				security.AppendFinding(findingsPath,
 					security.TracedFinding{
 						TraceID:   traceID,
@@ -1438,8 +1473,10 @@ func scanOutputFiles(outputDir, traceID string, printer *ui.Printer) error {
 						Finding:   f,
 					})
 			}
-			if writeErr := os.WriteFile(path, []byte(result.Sanitized), 0o644); writeErr != nil {
-				printer.StepWarn(fmt.Sprintf("Could not write redacted %s: %v", relPath, writeErr))
+			// Sanitized may be empty when all content was invisible characters.
+			out := result.Sanitized
+			if writeErr := os.WriteFile(path, []byte(out), 0o644); writeErr != nil {
+				printer.StepWarn(fmt.Sprintf("Could not write sanitized %s: %v", relPath, writeErr))
 			}
 		}
 		return nil
@@ -1448,10 +1485,10 @@ func scanOutputFiles(outputDir, traceID string, printer *ui.Printer) error {
 		return err
 	}
 
-	if redacted > 0 {
-		printer.StepWarn(fmt.Sprintf("Redacted %d secret(s) from output files", redacted))
+	if findingCount > 0 {
+		printer.StepWarn(fmt.Sprintf("Sanitized %d finding(s) in output files", findingCount))
 	} else {
-		printer.StepDone("Output files clean — no secrets found")
+		printer.StepDone("Output files clean — no issues found")
 	}
 	return nil
 }

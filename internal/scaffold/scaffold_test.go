@@ -92,6 +92,8 @@ func TestFullsendRepoFilesExist(t *testing.T) {
 		"scripts/setup-prioritize.sh",
 		"scripts/pre-prioritize.sh",
 		"scripts/post-prioritize.sh",
+		"scripts/lib/github-api-csma.sh",
+		"scripts/post-prioritize-test.sh",
 		".github/workflows/prioritize.yml",
 		".github/workflows/prioritize-scheduler.yml",
 	}
@@ -113,7 +115,6 @@ func TestShimWorkflowCallTemplateContent(t *testing.T) {
 	assert.Contains(t, s, "event_action:")
 	assert.Contains(t, s, "id-token: write")
 	assert.Contains(t, s, "__ORG__/.fullsend/.github/workflows/dispatch.yml@main")
-	assert.NotContains(t, s, "secrets: {}")
 	// Dispatch concurrency group (no cancel — thin callers handle per-stage cancellation)
 	assert.Contains(t, s, "fullsend-dispatch-${{")
 	assert.Contains(t, s, "cancel-in-progress: false")

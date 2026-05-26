@@ -189,6 +189,7 @@ type ValidationLoop struct {
 // a sandbox and launch one agent. It follows the ADR-0017 schema.
 type Harness struct {
 	Agent          string            `yaml:"agent"`
+	Doc            string            `yaml:"doc,omitempty"` // source-repo-only; not resolved at runtime, used by lint-agent-docs
 	Description    string            `yaml:"description,omitempty"`
 	Image          string            `yaml:"image,omitempty"`
 	Policy         string            `yaml:"policy,omitempty"`

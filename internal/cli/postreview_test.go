@@ -664,6 +664,57 @@ func TestSubmitFormalReview_SkipsFindingsWithoutLocation(t *testing.T) {
 	assert.Equal(t, "internal/service.go", fc.CreatedReviews[0].Comments[0].Path)
 }
 
+func TestParseDiffLineRanges(t *testing.T) {
+	tests := []struct {
+		name   string
+		patch  string
+		expect [][2]int
+	}{
+		{
+			name:   "single hunk",
+			patch:  "@@ -10,5 +12,7 @@ func foo() {",
+			expect: [][2]int{{12, 18}},
+		},
+		{
+			name:   "multiple hunks",
+			patch:  "@@ -1,3 +1,4 @@ header\n context\n+added\n@@ -20,5 +21,3 @@ other",
+			expect: [][2]int{{1, 4}, {21, 23}},
+		},
+		{
+			name:   "new file single hunk",
+			patch:  "@@ -0,0 +1,50 @@",
+			expect: [][2]int{{1, 50}},
+		},
+		{
+			name:   "deletion only hunk size 0",
+			patch:  "@@ -5,3 +5,0 @@ removed",
+			expect: nil,
+		},
+		{
+			name:   "omitted size defaults to 1",
+			patch:  "@@ -1 +1 @@",
+			expect: [][2]int{{1, 1}},
+		},
+		{
+			name:   "empty patch",
+			patch:  "",
+			expect: nil,
+		},
+		{
+			name:   "mixed hunks with deletion",
+			patch:  "@@ -1,3 +1,5 @@ first\n context\n@@ -10,4 +12,0 @@ deleted\n@@ -20,2 +18,3 @@ third",
+			expect: [][2]int{{1, 5}, {18, 20}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseDiffLineRanges(tt.patch)
+			assert.Equal(t, tt.expect, got)
+		})
+	}
+}
+
 func TestFindingsToReviewComments(t *testing.T) {
 	findings := []ReviewFinding{
 		{File: "a.go", Line: 10, Severity: "high", Category: "bug", Description: "Desc A"},
@@ -672,8 +723,9 @@ func TestFindingsToReviewComments(t *testing.T) {
 		{File: "c.go", Line: 20, Severity: "critical", Category: "security", Description: "Desc C", Remediation: "Fix it"},
 	}
 
-	comments, filtered := findingsToReviewComments(findings, nil)
-	assert.Equal(t, 0, filtered)
+	comments, fileFiltered, lineFiltered := findingsToReviewComments(findings, nil)
+	assert.Equal(t, 0, fileFiltered)
+	assert.Equal(t, 0, lineFiltered)
 	require.Len(t, comments, 2)
 
 	assert.Equal(t, "a.go", comments[0].Path)
@@ -687,52 +739,84 @@ func TestFindingsToReviewComments(t *testing.T) {
 	assert.Contains(t, comments[1].Body, "Fix it")
 }
 
-func TestFindingsToReviewComments_FiltersByDiffFiles(t *testing.T) {
+func TestFindingsToReviewComments_FiltersByDiffHunks(t *testing.T) {
 	findings := []ReviewFinding{
-		{File: "changed.go", Line: 10, Severity: "high", Category: "bug", Description: "In diff"},
+		{File: "changed.go", Line: 10, Severity: "high", Category: "bug", Description: "In hunk"},
+		{File: "changed.go", Line: 50, Severity: "low", Category: "style", Description: "Outside hunk"},
 		{File: "not-changed.go", Line: 5, Severity: "low", Category: "docs", Description: "Not in diff"},
-		{File: "also-changed.go", Line: 20, Severity: "medium", Category: "style", Description: "Also in diff"},
+		{File: "also-changed.go", Line: 3, Severity: "medium", Category: "style", Description: "In hunk"},
 	}
-	diffFiles := map[string]bool{
-		"changed.go":      true,
-		"also-changed.go": true,
+	diffHunks := map[string][][2]int{
+		"changed.go":      {{5, 15}},
+		"also-changed.go": {{1, 10}},
 	}
 
-	comments, filtered := findingsToReviewComments(findings, diffFiles)
-	assert.Equal(t, 1, filtered)
+	comments, fileFiltered, lineFiltered := findingsToReviewComments(findings, diffHunks)
+	assert.Equal(t, 1, fileFiltered)
+	assert.Equal(t, 1, lineFiltered)
 	require.Len(t, comments, 2)
 	assert.Equal(t, "changed.go", comments[0].Path)
+	assert.Equal(t, 10, comments[0].Line)
 	assert.Equal(t, "also-changed.go", comments[1].Path)
+	assert.Equal(t, 3, comments[1].Line)
 }
 
-func TestSubmitFormalReview_FiltersByPRFiles(t *testing.T) {
+func TestFindingsToReviewComments_EmptyPatchSkipsLineFiltering(t *testing.T) {
+	findings := []ReviewFinding{
+		{File: "binary.png", Line: 1, Severity: "high", Category: "bug", Description: "On binary file"},
+		{File: "large.go", Line: 999, Severity: "medium", Category: "style", Description: "On truncated-patch file"},
+		{File: "changed.go", Line: 10, Severity: "low", Category: "bug", Description: "In hunk"},
+		{File: "changed.go", Line: 50, Severity: "info", Category: "docs", Description: "Outside hunk"},
+	}
+	diffHunks := map[string][][2]int{
+		"binary.png": nil,
+		"large.go":   nil,
+		"changed.go": {{5, 15}},
+	}
+
+	comments, fileFiltered, lineFiltered := findingsToReviewComments(findings, diffHunks)
+	assert.Equal(t, 0, fileFiltered)
+	assert.Equal(t, 1, lineFiltered, "only the out-of-hunk finding on changed.go should be filtered")
+	require.Len(t, comments, 3)
+	assert.Equal(t, "binary.png", comments[0].Path)
+	assert.Equal(t, "large.go", comments[1].Path)
+	assert.Equal(t, "changed.go", comments[2].Path)
+	assert.Equal(t, 10, comments[2].Line)
+}
+
+func TestSubmitFormalReview_FiltersByPRFileDiffs(t *testing.T) {
 	fc := forge.NewFakeClient()
 	fc.AuthenticatedUser = "fullsend-bot"
-	fc.PRFiles = map[string][]string{
-		"acme/repo/1": {"changed.go", "also-changed.go"},
+	fc.PRFileDiffs = map[string][]forge.PullRequestFileDiff{
+		"acme/repo/1": {
+			{Path: "changed.go", Patch: "@@ -5,10 +5,12 @@ func main() {"},
+			{Path: "also-changed.go", Patch: "@@ -1,5 +1,25 @@ package foo"},
+		},
 	}
 	var out bytes.Buffer
 	printer := ui.New(&out)
 
 	findings := []ReviewFinding{
-		{File: "changed.go", Line: 10, Severity: "high", Category: "bug", Description: "In diff"},
-		{File: "not-in-diff.go", Line: 5, Severity: "medium", Category: "style", Description: "Should be filtered"},
-		{File: "also-changed.go", Line: 20, Severity: "low", Category: "docs", Description: "Also in diff"},
+		{File: "changed.go", Line: 10, Severity: "high", Category: "bug", Description: "In hunk"},
+		{File: "changed.go", Line: 50, Severity: "low", Category: "style", Description: "Outside hunk"},
+		{File: "not-in-diff.go", Line: 5, Severity: "medium", Category: "style", Description: "File not in diff"},
+		{File: "also-changed.go", Line: 20, Severity: "low", Category: "docs", Description: "In hunk"},
 	}
 
 	err := submitFormalReview(context.Background(), fc, "acme", "repo", 1, "request-changes", "", "", findings, false, printer)
 	require.NoError(t, err)
 	require.Len(t, fc.CreatedReviews, 1)
-	require.Len(t, fc.CreatedReviews[0].Comments, 2, "finding on not-in-diff.go should be filtered out")
+	require.Len(t, fc.CreatedReviews[0].Comments, 2, "file-filtered and line-filtered findings should be omitted")
 	assert.Equal(t, "changed.go", fc.CreatedReviews[0].Comments[0].Path)
 	assert.Equal(t, "also-changed.go", fc.CreatedReviews[0].Comments[1].Path)
 	assert.Contains(t, out.String(), "1 finding(s) omitted: file not in PR diff")
+	assert.Contains(t, out.String(), "1 finding(s) omitted: line not in any diff hunk")
 }
 
-func TestSubmitFormalReview_ListPRFilesErrorFallsBack(t *testing.T) {
+func TestSubmitFormalReview_ListPRFileDiffsErrorFallsBack(t *testing.T) {
 	fc := forge.NewFakeClient()
 	fc.AuthenticatedUser = "fullsend-bot"
-	fc.Errors["ListPullRequestFiles"] = fmt.Errorf("API rate limited")
+	fc.Errors["ListPullRequestFileDiffs"] = fmt.Errorf("API rate limited")
 	printer := ui.New(io.Discard)
 
 	findings := []ReviewFinding{
@@ -742,14 +826,14 @@ func TestSubmitFormalReview_ListPRFilesErrorFallsBack(t *testing.T) {
 	err := submitFormalReview(context.Background(), fc, "acme", "repo", 1, "request-changes", "", "", findings, false, printer)
 	require.NoError(t, err)
 	require.Len(t, fc.CreatedReviews, 1)
-	require.Len(t, fc.CreatedReviews[0].Comments, 1, "all comments should pass through when ListPullRequestFiles fails")
+	require.Len(t, fc.CreatedReviews[0].Comments, 1, "all comments should pass through when ListPullRequestFileDiffs fails")
 	assert.Equal(t, "any-file.go", fc.CreatedReviews[0].Comments[0].Path)
 }
 
-func TestSubmitFormalReview_EmptyPRFileListFallsBack(t *testing.T) {
+func TestSubmitFormalReview_EmptyPRFileDiffListFallsBack(t *testing.T) {
 	fc := forge.NewFakeClient()
 	fc.AuthenticatedUser = "fullsend-bot"
-	fc.PRFiles = map[string][]string{
+	fc.PRFileDiffs = map[string][]forge.PullRequestFileDiff{
 		"acme/repo/1": {},
 	}
 	var out bytes.Buffer
@@ -762,7 +846,6 @@ func TestSubmitFormalReview_EmptyPRFileListFallsBack(t *testing.T) {
 	err := submitFormalReview(context.Background(), fc, "acme", "repo", 1, "request-changes", "", "", findings, false, printer)
 	require.NoError(t, err)
 	require.Len(t, fc.CreatedReviews, 1)
-	// When PR file list is empty, filtering is disabled — all comments pass through unfiltered.
 	require.Len(t, fc.CreatedReviews[0].Comments, 1, "comments pass through unfiltered when PR file list is empty")
 	assert.Contains(t, out.String(), "PR file list is empty")
 }

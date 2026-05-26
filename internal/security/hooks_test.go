@@ -2,6 +2,7 @@ package security
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -32,7 +33,7 @@ func TestGenerateClaudeSettings_AllDefaults(t *testing.T) {
 	matcher := postTools[0].(map[string]any)
 	assert.Equal(t, "Bash|WebFetch|Read", matcher["matcher"])
 	chainedHooks := matcher["hooks"].([]any)
-	assert.Len(t, chainedHooks, 3) // context_suppress → secret_redact → unicode
+	assert.Len(t, chainedHooks, 3) // context_suppress → unicode → secret_redact
 
 	// Verify canary hook has its own * matcher.
 	canaryMatcher := postTools[1].(map[string]any)
@@ -222,10 +223,46 @@ func TestGenerateClaudeSettings_ContextSuppressDisabled(t *testing.T) {
 	postTools := hooks["PostToolUse"].([]any)
 	assert.Len(t, postTools, 2) // chain matcher + canary matcher
 
-	// With context_suppress disabled: secret_redact + unicode in the chain.
+	// With context_suppress disabled: unicode + secret_redact in the chain.
 	matcher := postTools[0].(map[string]any)
 	chainedHooks := matcher["hooks"].([]any)
-	assert.Len(t, chainedHooks, 2) // secret_redact + unicode
+	assert.Len(t, chainedHooks, 2) // unicode + secret_redact
+}
+
+func TestGenerateClaudeSettings_PostToolSanitizeHookOrder(t *testing.T) {
+	h := &harness.Harness{Agent: "test.md"}
+	data, err := GenerateClaudeSettings(h)
+	require.NoError(t, err)
+
+	var settings map[string]any
+	require.NoError(t, json.Unmarshal(data, &settings))
+
+	postTools := settings["hooks"].(map[string]any)["PostToolUse"].([]any)
+	matcher := postTools[0].(map[string]any)
+	require.Equal(t, "Bash|WebFetch|Read", matcher["matcher"])
+
+	chainedHooks := matcher["hooks"].([]any)
+	commands := make([]string, len(chainedHooks))
+	for i, h := range chainedHooks {
+		commands[i] = h.(map[string]any)["command"].(string)
+	}
+
+	hookIndex := func(substr string) int {
+		for i, cmd := range commands {
+			if strings.Contains(cmd, substr) {
+				return i
+			}
+		}
+		t.Fatalf("hook containing %q not found in %v", substr, commands)
+		return -1
+	}
+
+	suppressIdx := hookIndex("context_suppress_posttool.py")
+	unicodeIdx := hookIndex("unicode_posttool.py")
+	redactIdx := hookIndex("secret_redact_posttool.py")
+
+	assert.Less(t, suppressIdx, unicodeIdx, "context_suppress must run before unicode")
+	assert.Less(t, unicodeIdx, redactIdx, "unicode must run before secret_redact")
 }
 
 func TestGenerateClaudeSettings_CanaryPostToolDisabled(t *testing.T) {
