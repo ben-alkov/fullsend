@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,13 +14,16 @@ var tokenScopeClient = &http.Client{Timeout: 10 * time.Second}
 // fetchTokenScope introspects a GitHub installation token by calling
 // GET /installation/repositories and returning the full_name of each
 // accessible repo. Returns (nil, nil) if the token is empty.
-func fetchTokenScope(token, baseURL string) ([]string, error) {
+func fetchTokenScope(ctx context.Context, token, baseURL string) ([]string, error) {
 	if token == "" {
 		return nil, nil
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
 	url := baseURL + "/installation/repositories?per_page=100"
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating scope request: %w", err)
 	}
@@ -44,6 +48,7 @@ func fetchTokenScope(token, baseURL string) ([]string, error) {
 	}
 
 	var result struct {
+		TotalCount   int `json:"total_count"`
 		Repositories []struct {
 			FullName string `json:"full_name"`
 		} `json:"repositories"`
@@ -55,6 +60,10 @@ func fetchTokenScope(token, baseURL string) ([]string, error) {
 	repos := make([]string, len(result.Repositories))
 	for i, r := range result.Repositories {
 		repos[i] = r.FullName
+	}
+	if result.TotalCount > len(result.Repositories) {
+		repos = append(repos, fmt.Sprintf("... and %d more (%d total)",
+			result.TotalCount-len(result.Repositories), result.TotalCount))
 	}
 	return repos, nil
 }
