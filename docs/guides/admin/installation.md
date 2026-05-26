@@ -338,7 +338,7 @@ When a platform operator has pre-provisioned shared public GitHub Apps and a tok
   - The shared GitHub Apps are installed on your repository
   - The mint has the necessary GitHub App PEMs stored in Secret Manager
   - Mint-side Workload Identity Federation (WIF) is configured to accept OIDC tokens from your organization's repositories
-- **For assisted installation only** — mint GCP project ID and region, plus IAM access to the platform project (see [Alternative: Assisted installation](#alternative-assisted-installation-requires-platform-project-access))
+- **For assisted installation only** — mint GCP project ID and region, plus IAM access to the platform project (see the alternative path below)
 
 **Recommended: Use the mint URL directly**
 
