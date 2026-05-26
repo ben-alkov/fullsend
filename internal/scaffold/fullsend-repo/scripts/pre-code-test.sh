@@ -212,6 +212,18 @@ run_test_stdout "no-gh-token-skips-check" \
   0 \
   "GH_TOKEN="
 
+# Coder bot PR only → gh --jq filters it out, so pr list returns empty → proceeds.
+run_test_stdout "coder-bot-pr-does-not-block" \
+  "" \
+  "No existing human PRs found" \
+  0
+
+# Coder bot PR + human PR → only the human PR blocks.
+run_test_stdout "coder-bot-pr-plus-human-pr-blocks" \
+  "99${TAB}human-dev${TAB}https://github.com/test-org/test-repo/pull/99" \
+  "Skipping code agent" \
+  0
+
 # Multiple human PRs → should block and apply label.
 run_test "multiple-human-prs-block" \
   "50${TAB}dev-a${TAB}https://github.com/test-org/test-repo/pull/50
