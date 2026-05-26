@@ -6,6 +6,7 @@ web/admin/dist
 .dev.vars
 .wrangler
 .worktrees/
+.fullsend-cache/
 __pycache__/
 *.pyc
 .venv/
