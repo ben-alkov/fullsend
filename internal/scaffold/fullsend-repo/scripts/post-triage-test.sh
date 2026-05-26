@@ -20,6 +20,13 @@ MOCK_BIN="${TMPDIR}/bin"
 mkdir -p "${MOCK_BIN}"
 cat > "${MOCK_BIN}/gh" <<MOCKEOF
 #!/usr/bin/env bash
+# When querying the repo labels list, return a set of known test labels so that
+# the label-existence guard in post-triage.sh allows them through.
+if [[ "\$1" == "api" ]] && [[ "\$2" == *"/labels" ]] && [[ "\$*" == *"--paginate"* ]] && [[ "\$*" != *"-f "* ]] && [[ "\$*" != *"-X "* ]]; then
+  # Return labels used by the test fixtures, one per line (--jq '.[].name').
+  printf '%s\n' "area/api" "area/cli" "priority/high" "component/parser"
+  exit 0
+fi
 echo "gh \$*" >> "${GH_LOG}"
 MOCKEOF
 chmod +x "${MOCK_BIN}/gh"
@@ -263,6 +270,10 @@ run_test "label-actions-multiple-add" \
 run_test "label-actions-multiple-second-label" \
   '{"action":"sufficient","reasoning":"all clear","clarity_scores":{"symptom":0.9,"cause":0.85,"reproduction":0.9,"impact":0.8,"overall":0.87},"triage_summary":{"title":"Fix crash","severity":"high","category":"bug","problem":"Crash","root_cause_hypothesis":"Buffer overflow","reproduction_steps":["step 1"],"environment":"Linux","impact":"All users","recommended_fix":"Fix buffer","proposed_test_case":"test_crash"},"comment":"## Triage Summary\n\nReady.","label_actions":{"reason":"Multiple labels apply.","actions":[{"action":"add","label":"area/api"},{"action":"add","label":"priority/high"}]}}' \
   "gh api repos/test-org/test-repo/issues/42/labels -f labels[]=priority/high --silent"
+
+run_test_stdout "label-actions-nonexistent-label-skipped" \
+  '{"action":"sufficient","reasoning":"all clear","clarity_scores":{"symptom":0.9,"cause":0.85,"reproduction":0.9,"impact":0.8,"overall":0.87},"triage_summary":{"title":"Fix crash","severity":"high","category":"bug","problem":"Crash","root_cause_hypothesis":"Buffer overflow","reproduction_steps":["step 1"],"environment":"Linux","impact":"All users","recommended_fix":"Fix buffer","proposed_test_case":"test_crash"},"comment":"## Triage Summary\n\nReady.","label_actions":{"reason":"Agent recommended a label that does not exist.","actions":[{"action":"add","label":"bug"}]}}' \
+  "::warning::Skipping label 'bug' -- does not exist in repo (will not auto-create)"
 
 run_test_stdout "label-actions-invalid-characters-refused" \
   '{"action":"sufficient","reasoning":"all clear","clarity_scores":{"symptom":0.9,"cause":0.85,"reproduction":0.9,"impact":0.8,"overall":0.87},"triage_summary":{"title":"Fix crash","severity":"high","category":"bug","problem":"Crash","root_cause_hypothesis":"Buffer overflow","reproduction_steps":["step 1"],"environment":"Linux","impact":"All users","recommended_fix":"Fix buffer","proposed_test_case":"test_crash"},"comment":"## Triage Summary\n\nReady.","label_actions":{"reason":"Injection attempt.","actions":[{"action":"add","label":"label;injection"}]}}' \

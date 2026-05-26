@@ -190,6 +190,17 @@ if [[ "${HAS_LABEL_ACTIONS}" == "true" ]]; then
 
   echo "Processing ${LABEL_COUNT} label action(s)..."
 
+  # Fetch existing repo labels once so we can reject labels that don't exist.
+  # This prevents the agent from accidentally creating labels the org removed.
+  EXISTING_LABELS=$(gh api "repos/${REPO}/labels" --paginate --jq '.[].name' 2>/dev/null || true)
+
+  label_exists() {
+    local label="$1"
+    # Use grep with fixed-string and line-match to avoid regex issues with
+    # label names that contain special characters (e.g., "c++").
+    echo "${EXISTING_LABELS}" | grep -qFx "${label}"
+  }
+
   LABELS_APPLIED=0
   for i in $(seq 0 $((LABEL_COUNT - 1))); do
     LA_ACTION=$(jq -r ".label_actions.actions[${i}].action" "${RESULT_FILE}")
@@ -208,6 +219,10 @@ if [[ "${HAS_LABEL_ACTIONS}" == "true" ]]; then
 
     case "${LA_ACTION}" in
       add)
+        if ! label_exists "${LA_LABEL}"; then
+          echo "::warning::Skipping label '${LA_LABEL}' -- does not exist in repo (will not auto-create)"
+          continue
+        fi
         echo "Adding label '${LA_LABEL}'..."
         add_label "${LA_LABEL}"
         LABELS_APPLIED=$((LABELS_APPLIED + 1))

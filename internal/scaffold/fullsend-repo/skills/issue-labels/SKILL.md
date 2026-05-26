@@ -32,7 +32,24 @@ gh label list --repo OWNER/REPO --json name,description --limit 100
 If the repo has no non-control labels, skip labeling entirely -- do not emit
 `label_actions`.
 
-## Step 2: Research labeling conventions
+## Step 2: Check for GitHub issue types
+
+GitHub issue types (Bug, Feature, Task, etc.) classify issues at a higher level
+than labels. If the repo uses issue types, do **not** recommend labels that
+duplicate the issue type — e.g., do not add `bug` or `type/bug` when the issue
+already has the Bug type.
+
+Query the current issue to check for an issue type:
+```
+gh issue view NUMBER --repo OWNER/REPO --json type
+```
+
+If the `.type` field is non-null, the repo uses issue types. In that case:
+- Do not recommend labels whose names match or overlap with the issue type
+  (e.g., `bug`, `type/bug`, `enhancement`, `feature`, `type/feature`).
+- Area, priority, component, and other non-type labels are still appropriate.
+
+## Step 3: Research labeling conventions
 
 Spawn a sub-agent to investigate how labels have been applied to recent issues.
 The sub-agent should:
@@ -49,7 +66,7 @@ The sub-agent should:
 Do not dump raw issue data into the parent context. Only use the sub-agent's
 summary to inform your recommendations.
 
-## Step 3: Recommend labels
+## Step 4: Recommend labels
 
 Based on the issue content, the available labels, and the observed conventions:
 
