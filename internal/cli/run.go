@@ -777,9 +777,9 @@ func bootstrapSandbox(sandboxName, repoDir, fullsendBinary string, h *harness.Ha
 					if h.FailModeClosed() {
 						return fmt.Errorf("skill %q blocked: critical injection findings in SKILL.md", skillPath)
 					}
-					fmt.Fprintf(os.Stderr, "WARNING: skill %q has critical injection findings (fail_mode: open)\n", skillPath)
+					fmt.Fprintf(os.Stderr, "WARNING: skill %q has critical injection findings (fail_mode: open) — uploading anyway\n", skillPath)
 				} else if len(result.Findings) > 0 {
-					fmt.Fprintf(os.Stderr, "WARNING: skill %q has %d injection finding(s)\n", skillPath, len(result.Findings))
+					fmt.Fprintf(os.Stderr, "WARNING: skill %q has %d non-critical injection finding(s) — not blocked (only critical findings block); uploading\n", skillPath, len(result.Findings))
 				}
 			}
 		}
@@ -788,6 +788,7 @@ func bootstrapSandbox(sandboxName, repoDir, fullsendBinary string, h *harness.Ha
 			fmt.Sprintf("%s/skills/", sandbox.SandboxClaudeConfig)); err != nil {
 			return fmt.Errorf("copying skill %q: %w", skillPath, err)
 		}
+		fmt.Fprintf(os.Stderr, "Skill %q: uploaded to sandbox\n", filepath.Base(skillPath))
 	}
 
 	// Copy the self-check script into the sandbox so agents can validate
