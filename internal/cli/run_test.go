@@ -517,10 +517,16 @@ func TestShellSafeExpandEnv(t *testing.T) {
 			want:     "export A=\"1\"\nexport B=\"two (2)\"",
 		},
 		{
-			name:     "unquoted template still safe",
+			name:     "unquoted template with simple value",
 			template: "export FOO=${FOO}",
 			env:      map[string]string{"FOO": "bar"},
 			want:     "export FOO=bar",
+		},
+		{
+			name:     "braceless $VAR expansion",
+			template: `export FOO="$FOO"`,
+			env:      map[string]string{"FOO": `say "hello"`},
+			want:     `export FOO="say \"hello\""`,
 		},
 		{
 			name:     "real-world HUMAN_INSTRUCTION from issue 615",
