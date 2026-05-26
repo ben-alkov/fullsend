@@ -38,21 +38,24 @@ through `halfsend-06`). Each e2e run acquires exclusive access to one org
 before proceeding, using a lightweight distributed lock implemented as a
 purpose-built repo (`e2e-lock`) within each org.
 
-**Acquisition:** The test runner scans the pool in order, attempting to create
-the `e2e-lock` repo in each org. Repo creation is atomic on GitHub — if it
-succeeds, the caller holds the lock. A `README.md` in the lock repo contains
-the run's UUID for ownership verification. If all orgs are locked, the runner
-falls back to polling with a configurable timeout (`E2E_LOCK_TIMEOUT`,
-default 2 minutes).
+**Acquisition:** The test runner shuffles the pool (to avoid thundering herd)
+and scans each org, attempting to create the `e2e-lock` repo. Repo creation
+is atomic on GitHub — if it succeeds, the caller holds the lock. A
+`README.md` in the lock repo contains the run's UUID for ownership
+verification. During the first pass, stale locks from crashed runs are
+detected and force-acquired (see Staleness below). If all orgs are locked,
+the runner falls back to round-robin polling every 30 seconds with a
+configurable timeout (`E2E_LOCK_TIMEOUT`, default 10 minutes). Each poll
+iteration also checks for stale locks.
 
 **Release:** On test completion (pass or fail), the runner deletes the
 `e2e-lock` repo, but only after verifying the UUID matches — preventing a
 run from releasing another run's lock.
 
 **Staleness:** If a runner crashes without releasing its lock, the lock repo's
-`created_at` timestamp provides an age signal. A fresh lock (under 1 minute
-old) resets the wait timer; an old lock is assumed stale and can be
-force-acquired by a subsequent run.
+`created_at` timestamp provides an age signal. A lock older than
+`staleLockTimeout` (15 minutes) is considered stale and force-acquired. A
+fresh lock (under 1 minute old) resets the wait timer.
 
 Adding new orgs to the pool requires only provisioning the GitHub org (with
 the shared test account as owner) and appending its name to the `orgPool`

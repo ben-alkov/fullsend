@@ -114,6 +114,13 @@ func acquireOrg(ctx context.Context, client forge.Client, token, runID string, p
 				logf("[org-pool] Acquired %s", org)
 				return org, nil
 			}
+			// Also try stale reclaim during polling — a lock may
+			// have aged past staleLockTimeout since the first pass.
+			if token != "" {
+				if reclaimed := tryReclaimStaleLock(ctx, client, token, org, runID, logf); reclaimed {
+					return org, nil
+				}
+			}
 		}
 	}
 

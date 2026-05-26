@@ -237,14 +237,15 @@ func (f *FakeClient) GetRepo(_ context.Context, owner, repo string) (*Repository
 		return nil, e
 	}
 
+	fullName := owner + "/" + repo
 	for i := range f.Repos {
-		if f.Repos[i].FullName == owner+"/"+repo || f.Repos[i].Name == repo {
+		if f.Repos[i].FullName == fullName {
 			return &f.Repos[i], nil
 		}
 	}
 	// Also check created repos.
 	for i := range f.CreatedRepos {
-		if f.CreatedRepos[i].FullName == owner+"/"+repo || f.CreatedRepos[i].Name == repo {
+		if f.CreatedRepos[i].FullName == fullName {
 			return &f.CreatedRepos[i], nil
 		}
 	}
@@ -265,7 +266,7 @@ func (f *FakeClient) DeleteRepo(_ context.Context, owner, repo string) error {
 	fullName := owner + "/" + repo
 	filtered := f.Repos[:0]
 	for _, r := range f.Repos {
-		if r.FullName != fullName && r.Name != repo {
+		if r.FullName != fullName {
 			filtered = append(filtered, r)
 		}
 	}
@@ -274,7 +275,7 @@ func (f *FakeClient) DeleteRepo(_ context.Context, owner, repo string) error {
 	// Remove from CreatedRepos.
 	filteredCreated := f.CreatedRepos[:0]
 	for _, r := range f.CreatedRepos {
-		if r.FullName != fullName && r.Name != repo {
+		if r.FullName != fullName {
 			filteredCreated = append(filteredCreated, r)
 		}
 	}
