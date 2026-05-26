@@ -82,6 +82,15 @@ The installer creates the `.fullsend` config repo as **public** by default. This
 
 If the installer fails partway through, run `fullsend admin uninstall "$ORG_NAME"` to clean up before retrying. The uninstall preflight will prompt you to add the `delete_repo` scope if it is missing.
 
+Set the variables for your environment:
+
+```bash
+export ORG_NAME="<your-github-org>"
+export GCP_PROJECT="<your-gcp-project>"
+```
+
+Then run the installer:
+
 ```bash
 fullsend admin install "$ORG_NAME" \
   --inference-project "$GCP_PROJECT" \
@@ -127,6 +136,13 @@ A single token mint can serve multiple GitHub organizations. The first org deplo
 
 **First org (deploys mint + creates public apps):**
 
+Set the variables for the first organization:
+
+```bash
+export FIRST_ORG="<first-github-org>"
+export GCP_PROJECT="<your-gcp-project>"
+```
+
 ```bash
 fullsend admin install "$FIRST_ORG" \
   --inference-project "$GCP_PROJECT" \
@@ -149,6 +165,14 @@ fullsend admin install "$FIRST_ORG" \
 This creates public apps named `{first-org}-fullsend`, `{first-org}-coder`, etc.
 
 **Additional orgs (install existing public apps):**
+
+Set the variables for the additional organization:
+
+```bash
+export ADDITIONAL_ORG="<additional-github-org>"
+```
+
+`GCP_PROJECT` and `FIRST_ORG` carry over from the first-org step above.
 
 ```bash
 fullsend admin install "$ADDITIONAL_ORG" \
@@ -183,7 +207,13 @@ After installation, you can enroll or unenroll repositories at any time using th
 
 ### Enable repositories
 
-To enroll specific repositories:
+Set the variables for your environment:
+
+```bash
+export ORG_NAME="<your-github-org>"
+```
+
+To enroll specific repositories (pass repo names as arguments):
 
 ```bash
 fullsend admin enable repos "$ORG_NAME" <repo-name> [repo-name...]
@@ -202,7 +232,13 @@ The enable command:
 
 ### Disable repositories
 
-To unenroll specific repositories:
+`ORG_NAME` carries over from the enable step above, or set it now:
+
+```bash
+export ORG_NAME="<your-github-org>"
+```
+
+To unenroll specific repositories (pass repo names as arguments):
 
 ```bash
 fullsend admin disable repos "$ORG_NAME" <repo-name> [repo-name...]
@@ -238,6 +274,10 @@ Once a repo is enrolled (enrollment PR merged):
 The `analyze` command checks the current state of a fullsend installation and reports what is installed, missing, or needs updating. It requires `repo` and `admin:org` scopes.
 
 ```bash
+export ORG_NAME="<your-github-org>"
+```
+
+```bash
 fullsend admin analyze "$ORG_NAME"
 ```
 
@@ -246,6 +286,10 @@ This is a read-only operation — it makes no changes.
 ## 6. Uninstall
 
 The `uninstall` command tears down the fullsend installation for a GitHub organization, removing the `.fullsend` config repo and associated resources. It prompts for confirmation by requiring you to type the exact organization name.
+
+```bash
+export ORG_NAME="<your-github-org>"
+```
 
 ```bash
 fullsend admin uninstall "$ORG_NAME"
@@ -280,6 +324,14 @@ Per-repo mode installs fullsend for a single repository without requiring an org
 
 ### First-time install (no prior infrastructure)
 
+Set the variables for your environment:
+
+```bash
+export ORG_NAME="<your-github-org>"
+export REPO_NAME="<your-repo-name>"
+export GCP_PROJECT="<your-gcp-project>"
+```
+
 ```bash
 fullsend admin install "$ORG_NAME/$REPO_NAME" \
   --inference-project "$GCP_PROJECT" \
@@ -295,7 +347,11 @@ Creating apps requires `admin:org` OAuth scope (the installer prompts for it). R
 
 ### Reusing existing infrastructure
 
-When a per-org install already exists, per-repo reuses the apps and mint:
+When a per-org install already exists, per-repo reuses the apps and mint. `ORG_NAME`, `REPO_NAME`, and `GCP_PROJECT` carry over from the first-time install step, or set them now. If you have an existing mint URL, set it too:
+
+```bash
+export MINT_URL="<your-mint-url>"
+```
 
 ```bash
 fullsend admin install "$ORG_NAME/$REPO_NAME" \
@@ -325,6 +381,13 @@ By default, the installer creates GitHub Apps with the `fullsend-ai` prefix (e.g
 
 ### Creating a custom app set
 
+Set the variables for your environment:
+
+```bash
+export ORG_NAME="<your-github-org>"
+export GCP_PROJECT="<your-gcp-project>"
+```
+
 ```bash
 fullsend admin install "$ORG_NAME" \
   --inference-project "$GCP_PROJECT" \
@@ -339,6 +402,12 @@ This creates apps named `{org}-fullsend`, `{org}-coder`, `{org}-review`, etc. Th
 When a mint already has public apps registered under a custom app set (e.g., `fullsend-ai-fullsend`, `fullsend-ai-coder`), additional orgs installing those apps must pass the same `--app-set` so the CLI resolves the correct slugs:
 
 ```bash
+export NEW_ORG="<new-github-org>"
+```
+
+`GCP_PROJECT` carries over from the custom app set creation step above.
+
+```bash
 fullsend admin install "$NEW_ORG" \
   --inference-project "$GCP_PROJECT" \
   --mint-project "$GCP_PROJECT" \
@@ -351,7 +420,11 @@ The installer detects that the public apps are already installed in the org (mat
 
 ### Uninstalling a custom app set
 
-When uninstalling an org that used a custom app set, pass the same `--app-set` value so the CLI generates the correct fallback slugs if the config repo is unavailable:
+When uninstalling an org that used a custom app set, pass the same `--app-set` value so the CLI generates the correct fallback slugs if the config repo is unavailable. `ORG_NAME` carries over from the custom app set creation step above, or set it now:
+
+```bash
+export ORG_NAME="<your-github-org>"
+```
 
 ```bash
 fullsend admin uninstall "$ORG_NAME" --app-set "$ORG_NAME"
