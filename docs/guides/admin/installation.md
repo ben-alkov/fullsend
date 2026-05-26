@@ -332,17 +332,37 @@ When a platform operator has pre-provisioned shared public GitHub Apps and a tok
 
 - **Org admin approval** to install the shared GitHub Apps on your repository
 - **GCP project** with the [Agent Platform API](https://console.cloud.google.com/apis/library/aiplatform.googleapis.com) enabled for inference
-- **Platform mint details** — obtain from your platform operator:
-  - Mint URL (for OIDC token exchange; the assisted path discovers this automatically, but providing it explicitly is recommended)
-  - Mint GCP project ID and region (for app discovery and validation via GCP APIs)
-- **Platform operator coordination** — the following must be in place before installation (the assisted path handles these automatically if you have IAM access to the platform project; required manually for the `--skip-mint-check` path):
+- **Mint URL** — obtain from your platform operator (for OIDC token exchange)
+- **Platform operator coordination** — the following must be in place before installation:
   - Your organization is registered in the mint's `ALLOWED_ORGS` configuration
+  - The shared GitHub Apps are installed on your repository
   - The mint has the necessary GitHub App PEMs stored in Secret Manager
   - Mint-side Workload Identity Federation (WIF) is configured to accept OIDC tokens from your organization's repositories
+- **For assisted installation only** — mint GCP project ID and region, plus IAM access to the platform project (see [Alternative: Assisted installation](#alternative-assisted-installation-requires-platform-project-access))
 
-**Recommended: Assisted installation**
+**Recommended: Use the mint URL directly**
 
-The installer discovers shared apps from the platform mint project and helps you install them:
+Most per-repo users will not have IAM access to the platform operator's GCP project. Ask your platform operator for the mint URL and confirm that the following are in place before running the installer:
+
+- The shared GitHub Apps are already installed on your repository
+- Your organization is registered in the mint's `ALLOWED_ORGS`
+- Mint-side WIF is configured to accept tokens from your organization
+- All PEMs are stored in Secret Manager
+
+Then run:
+
+```bash
+fullsend admin install "$ORG_NAME/$REPO_NAME" \
+  --inference-project "$GCP_PROJECT" \
+  --mint-url "$PLATFORM_MINT_URL" \
+  --skip-mint-check
+```
+
+The installer skips all app discovery, mint validation, and mint-related GCP provisioning — it only generates workflow files and sets repository variables and secrets. WIF infrastructure is still auto-provisioned in the inference project; pass `--inference-wif-provider` to skip this as well if the platform operator provides a pre-existing WIF provider.
+
+**Alternative: Assisted installation (requires platform project access)**
+
+If you have IAM access to the platform operator's GCP project, the installer can discover shared apps and handle validation automatically:
 
 ```bash
 fullsend admin install "$ORG_NAME/$REPO_NAME" \
@@ -360,28 +380,6 @@ This requires `roles/cloudfunctions.developer` and `roles/secretmanager.admin` o
 - Auto-provisions Workload Identity Federation for your repo in the inference project
 - Generates workflow files and commits scaffold to your repository
 - Sets repository variables and secrets
-
-> [!NOTE]
-> Most per-repo users will not have IAM access to the platform project. If you do not have access, ask your platform operator to pre-register your org and use the manual path below.
-
-**Alternative: Manual installation (no platform project access)**
-
-If the platform operator has pre-registered your org and you only have the mint URL, use `--skip-mint-check` to bypass all GCP-based discovery and validation:
-
-```bash
-fullsend admin install "$ORG_NAME/$REPO_NAME" \
-  --inference-project "$GCP_PROJECT" \
-  --mint-url "$PLATFORM_MINT_URL" \
-  --skip-mint-check
-```
-
-This requires the platform operator to have completed the following before you run the installer:
-- The shared GitHub Apps are already installed on your repository
-- Your organization is registered in the mint's `ALLOWED_ORGS`
-- Mint-side WIF is configured to accept tokens from your organization
-- All PEMs are stored in Secret Manager
-
-The installer skips all app discovery, mint validation, and mint-related GCP provisioning — it only generates workflow files and sets repository variables and secrets. WIF infrastructure is still auto-provisioned in the inference project; pass `--inference-wif-provider` to skip this as well if the platform operator provides a pre-existing WIF provider.
 
 ### First-time install (no prior infrastructure)
 
