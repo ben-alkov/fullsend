@@ -107,7 +107,7 @@ The triage agent:
 4. **Produces a test artifact.** When possible, writes a failing test case aligned with the repo's test framework.
 5. **Hands off.** Labels `ready-to-code` with a summary comment.
 
-**If triage gets it wrong:** Add a comment with the missing information, or edit the issue body. Edits to the title or body trigger triage automatically. You can also use `/fs-triage` to force a fresh run — this clears all previous labels and starts from scratch.
+**If triage gets it wrong:** Add a comment with the missing information, or edit the issue body. Edits to the title or body trigger triage automatically. You can also use `/fs-triage` to force a fresh run — this clears previous triage labels and re-evaluates, building on any prior triage analysis rather than discarding it.
 
 ### Stage 2: Code
 
