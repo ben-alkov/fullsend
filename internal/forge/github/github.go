@@ -131,11 +131,17 @@ func (c *LiveClient) do(ctx context.Context, method, path string, body any) (*ht
 		// Body already read or drained by isRetryable.
 		resp.Body.Close()
 
-		if attempt == maxRetries-1 {
-			return nil, &APIError{StatusCode: resp.StatusCode, Message: "rate limited after retries"}
-		}
-
 		delay := retryDelay(resp, attempt)
+		retryAfter := resp.Header.Get("Retry-After")
+
+		if attempt == maxRetries-1 {
+			msg := fmt.Sprintf("rate limited after %d retries on %s %s (last delay: %s", maxRetries, method, path, delay)
+			if retryAfter != "" {
+				msg += fmt.Sprintf(", Retry-After: %s", retryAfter)
+			}
+			msg += ")"
+			return nil, &APIError{StatusCode: resp.StatusCode, Message: msg}
+		}
 		select {
 		case <-time.After(delay):
 		case <-ctx.Done():
