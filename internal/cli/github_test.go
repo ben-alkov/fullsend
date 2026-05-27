@@ -107,7 +107,6 @@ func TestGitHubSetupCmd_PerRepoRejectsPerOrgFlags(t *testing.T) {
 		flag  string
 		value string
 	}{
-		{"vendor-fullsend-binary", ""},
 		{"enroll-all", ""},
 		{"enroll-none", ""},
 	}

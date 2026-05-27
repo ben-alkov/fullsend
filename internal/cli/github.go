@@ -169,7 +169,7 @@ func runGitHubSetupPerRepo(ctx context.Context, client forge.Client, printer *ui
 		return err
 	}
 
-	printer.Banner()
+	printer.Banner(Version())
 	printer.Blank()
 	printer.Header("Setting up per-repo fullsend for " + cfg.target)
 	printer.Blank()
@@ -305,7 +305,7 @@ func runGitHubSetupPerOrg(ctx context.Context, client forge.Client, printer *ui.
 		return fmt.Errorf("--enroll-all and --enroll-none are mutually exclusive")
 	}
 
-	printer.Banner()
+	printer.Banner(Version())
 	printer.Blank()
 	printer.Header("Setting up fullsend for " + org)
 	printer.Blank()
@@ -662,7 +662,7 @@ func newGitHubStatusCmd() *cobra.Command {
 
 // runGitHubStatus checks GitHub-side layers only.
 func runGitHubStatus(ctx context.Context, client forge.Client, printer *ui.Printer, org string) error {
-	printer.Banner()
+	printer.Banner(Version())
 	printer.Blank()
 	printer.Header("GitHub status for " + org)
 	printer.Blank()
@@ -788,7 +788,7 @@ func newGitHubUninstallCmd() *cobra.Command {
 
 // runGitHubUninstall tears down the GitHub-side installation.
 func runGitHubUninstall(ctx context.Context, client forge.Client, printer *ui.Printer, org, appSet string) error {
-	printer.Banner()
+	printer.Banner(Version())
 	printer.Blank()
 	printer.Header("Uninstalling fullsend from " + org)
 	printer.Blank()
@@ -875,25 +875,29 @@ func runGitHubUninstall(ctx context.Context, client forge.Client, printer *ui.Pr
 	}
 
 	installations, listErr := client.ListOrgInstallations(ctx, org)
+	var existingSlugs []string
 	if listErr == nil {
 		installedSet := make(map[string]bool, len(installations))
 		for _, inst := range installations {
 			installedSet[inst.AppSlug] = true
 		}
-		var existingSlugs []string
 		for _, slug := range agentSlugs {
 			if installedSet[slug] {
 				existingSlugs = append(existingSlugs, slug)
 			}
 		}
-		if len(existingSlugs) > 0 {
-			printer.Blank()
-			printer.Header("App cleanup")
-			printer.StepInfo("The following GitHub Apps should be deleted manually:")
-			for _, slug := range existingSlugs {
-				deleteURL := fmt.Sprintf("https://github.com/organizations/%s/settings/apps/%s/advanced", org, slug)
-				printer.StepInfo(fmt.Sprintf("  %s: %s", slug, deleteURL))
-			}
+	} else {
+		// Can't check — fall back to showing all of them.
+		printer.StepWarn("Could not verify which apps exist; showing all")
+		existingSlugs = agentSlugs
+	}
+	if len(existingSlugs) > 0 {
+		printer.Blank()
+		printer.Header("App cleanup")
+		printer.StepInfo("The following GitHub Apps should be deleted manually:")
+		for _, slug := range existingSlugs {
+			deleteURL := fmt.Sprintf("https://github.com/organizations/%s/settings/apps/%s/advanced", org, slug)
+			printer.StepInfo(fmt.Sprintf("  %s: %s", slug, deleteURL))
 		}
 	}
 
@@ -938,7 +942,7 @@ func newGitHubSyncScaffoldCmd() *cobra.Command {
 
 // runGitHubSyncScaffold runs only the WorkflowsLayer.
 func runGitHubSyncScaffold(ctx context.Context, client forge.Client, printer *ui.Printer, org string) error {
-	printer.Banner()
+	printer.Banner(Version())
 	printer.Blank()
 	printer.Header("Syncing scaffold for " + org)
 	printer.Blank()
