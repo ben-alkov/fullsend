@@ -146,6 +146,9 @@ type FakeClient struct {
 	// Pull request reviews for ListPullRequestReviews.
 	PRReviews map[string][]PullRequestReview // key: "owner/repo/number"
 
+	// Annotations for GetWorkflowRunAnnotations.
+	Annotations []Annotation
+
 	// Call recorders
 	CreatedRepos        []Repository
 	CreatedFiles        []FileRecord
@@ -935,6 +938,15 @@ func (f *FakeClient) GetWorkflowRunLogs(_ context.Context, _, _ string, _ int) (
 		return "", e
 	}
 	return "[fake workflow logs]", nil
+}
+
+func (f *FakeClient) GetWorkflowRunAnnotations(_ context.Context, _, _ string, _ int) ([]Annotation, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if e := f.err("GetWorkflowRunAnnotations"); e != nil {
+		return nil, e
+	}
+	return f.Annotations, nil
 }
 
 func (f *FakeClient) ListOrgInstallations(_ context.Context, _ string) ([]Installation, error) {

@@ -225,25 +225,36 @@ func TestAdminInstallUninstall(t *testing.T) {
 
 // mergeEnrollmentPR finds and merges the enrollment PR for test-repo so the
 // shim workflow is active on the default branch.
+// The install CLI waits for repo-maintenance to complete, so the PR should
+// already exist. A few retries handle GitHub eventual consistency.
 func mergeEnrollmentPR(t *testing.T, env *e2eEnv) {
 	t.Helper()
 	ctx := context.Background()
 
-	prs, err := env.client.ListRepoPullRequests(ctx, env.org, testRepo)
-	require.NoError(t, err, "listing PRs for %s", testRepo)
-
 	var enrollmentPR *forge.ChangeProposal
-	for _, pr := range prs {
-		if strings.Contains(pr.Title, "fullsend") {
-			cp := pr
-			enrollmentPR = &cp
+	for attempt := range 5 {
+		if attempt > 0 {
+			time.Sleep(3 * time.Second)
+		}
+		prs, err := env.client.ListRepoPullRequests(ctx, env.org, testRepo)
+		require.NoError(t, err, "listing PRs for %s", testRepo)
+
+		for _, pr := range prs {
+			if strings.Contains(pr.Title, "fullsend") {
+				cp := pr
+				enrollmentPR = &cp
+				break
+			}
+		}
+		if enrollmentPR != nil {
 			break
 		}
+		t.Logf("Attempt %d: enrollment PR not yet visible", attempt+1)
 	}
 	require.NotNil(t, enrollmentPR, "enrollment PR should exist for %s", testRepo)
 
 	t.Logf("Merging enrollment PR #%d: %s", enrollmentPR.Number, enrollmentPR.URL)
-	err = env.client.MergeChangeProposal(ctx, env.org, testRepo, enrollmentPR.Number)
+	err := env.client.MergeChangeProposal(ctx, env.org, testRepo, enrollmentPR.Number)
 	require.NoError(t, err, "merging enrollment PR")
 
 	time.Sleep(5 * time.Second)
@@ -566,17 +577,20 @@ func runUnenrollmentTest(t *testing.T, env *e2eEnv) {
 	t.Helper()
 	ctx := context.Background()
 
-	// Disable the test repo via CLI (updates config.yaml). The push to
-	// config.yaml on main triggers repo-maintenance, which creates the
-	// removal PR.
-	runCLI(t, env.binary, env.token,
+	// Disable the test repo via CLI (updates config.yaml). The CLI now
+	// watches the repo-maintenance workflow to completion before returning,
+	// so the removal PR should already exist when this returns.
+	output := runCLI(t, env.binary, env.token,
 		"admin", "disable", "repos", env.org, testRepo, "--yolo")
+	t.Logf("Disable repos output:\n%s", output)
 
-	// Wait for the removal PR to be created by repo-maintenance.
-	t.Log("Waiting for removal PR...")
+	// The CLI waited for repo-maintenance, so the removal PR should exist.
+	// A few retries handle GitHub eventual consistency.
 	var removalPR *forge.ChangeProposal
-	for attempt := 0; attempt < 24; attempt++ {
-		time.Sleep(5 * time.Second)
+	for attempt := range 5 {
+		if attempt > 0 {
+			time.Sleep(3 * time.Second)
+		}
 		prs, err := env.client.ListRepoPullRequests(ctx, env.org, testRepo)
 		if err != nil {
 			t.Logf("Attempt %d: error listing PRs: %v", attempt+1, err)
@@ -592,7 +606,7 @@ func runUnenrollmentTest(t *testing.T, env *e2eEnv) {
 		if removalPR != nil {
 			break
 		}
-		t.Logf("Attempt %d: removal PR not yet created", attempt+1)
+		t.Logf("Attempt %d: removal PR not yet visible", attempt+1)
 	}
 	require.NotNil(t, removalPR, "removal PR should exist for %s", testRepo)
 	t.Logf("Found removal PR #%d: %s", removalPR.Number, removalPR.URL)

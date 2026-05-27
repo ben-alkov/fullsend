@@ -1747,6 +1747,47 @@ func (c *LiveClient) GetWorkflowRunLogs(ctx context.Context, owner, repo string,
 	return buf.String(), nil
 }
 
+// GetWorkflowRunAnnotations returns annotations from all jobs in a workflow run.
+// GitHub workflow commands (::notice::, ::warning::) produce check-run
+// annotations that are accessible via the check-runs API.
+func (c *LiveClient) GetWorkflowRunAnnotations(ctx context.Context, owner, repo string, runID int) ([]forge.Annotation, error) {
+	// List jobs for this run.
+	resp, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/actions/runs/%d/jobs", owner, repo, runID))
+	if err != nil {
+		return nil, fmt.Errorf("list jobs for run %d: %w", runID, err)
+	}
+	var jobsResult struct {
+		Jobs []struct {
+			ID int `json:"id"`
+		} `json:"jobs"`
+	}
+	if err := decodeJSON(resp, &jobsResult); err != nil {
+		return nil, fmt.Errorf("decode jobs: %w", err)
+	}
+
+	var annotations []forge.Annotation
+	for _, job := range jobsResult.Jobs {
+		resp, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/check-runs/%d/annotations", owner, repo, job.ID))
+		if err != nil {
+			continue // best-effort
+		}
+		var anns []struct {
+			Level   string `json:"annotation_level"`
+			Message string `json:"message"`
+		}
+		if err := decodeJSON(resp, &anns); err != nil {
+			continue
+		}
+		for _, a := range anns {
+			annotations = append(annotations, forge.Annotation{
+				Level:   a.Level,
+				Message: a.Message,
+			})
+		}
+	}
+	return annotations, nil
+}
+
 // ListOrgInstallations lists app installations for an organization.
 func (c *LiveClient) ListOrgInstallations(ctx context.Context, org string) ([]forge.Installation, error) {
 	resp, err := c.get(ctx, fmt.Sprintf("/orgs/%s/installations?per_page=100", org))

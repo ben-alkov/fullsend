@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -584,6 +586,9 @@ func setupTestClient(org string, cfg *config.OrgConfig, orgRepos []string) *forg
 		cfgData, _ := cfg.Marshal()
 		client.FileContents[org+"/.fullsend/config.yaml"] = cfgData
 	}
+	// Fail the workflow dispatch so unit tests skip awaitRepoMaintenance
+	// (which would poll for 3 minutes against an empty fake).
+	client.Errors["DispatchWorkflow"] = fmt.Errorf("fake: dispatch not configured")
 	return client
 }
 
@@ -800,9 +805,7 @@ func TestRunEnableRepos_VariableSyncErrorDoesNotBlockEnable(t *testing.T) {
 		}
 	}
 	client.OrgVariables = map[string]bool{"testorg/FULLSEND_MINT_URL": true}
-	client.Errors = map[string]error{
-		"SetOrgVariableRepos": fmt.Errorf("API rate limit exceeded"),
-	}
+	client.Errors["SetOrgVariableRepos"] = fmt.Errorf("API rate limit exceeded")
 
 	printer := ui.New(&discardWriter{})
 
@@ -1768,6 +1771,86 @@ func TestRunUninstall_NopBrowserSkipsBrowserOpen(t *testing.T) {
 	assert.Contains(t, output, "Opened fullsend-ai-coder")
 	assert.Contains(t, output, "fullsend-ai-coder/advanced")
 	assert.NotContains(t, output, "Could not open browser")
+}
+
+func TestAwaitRepoMaintenance_Success(t *testing.T) {
+	client := forge.NewFakeClient()
+	dispatchTime := time.Now().UTC().Add(-10 * time.Second)
+	client.WorkflowRuns["testorg/.fullsend/repo-maintenance.yml"] = &forge.WorkflowRun{
+		ID:         42,
+		Status:     "completed",
+		Conclusion: "success",
+		HTMLURL:    "https://github.com/testorg/.fullsend/actions/runs/42",
+		CreatedAt:  time.Now().UTC().Format(time.RFC3339),
+	}
+	client.Annotations = []forge.Annotation{
+		{Level: "notice", Message: "Enrollment PR: https://github.com/testorg/web-app/pull/1"},
+		{Level: "warning", Message: "some warning"},
+		{Level: "notice", Message: "Enrollment PR: https://github.com/testorg/api/pull/2"},
+	}
+
+	var buf bytes.Buffer
+	printer := ui.New(&buf)
+
+	awaitRepoMaintenanceWithInterval(context.Background(), client, printer, "testorg", dispatchTime, 1*time.Millisecond, 2)
+
+	output := buf.String()
+	assert.Contains(t, output, "repo-maintenance completed successfully")
+	assert.Contains(t, output, "https://github.com/testorg/.fullsend/actions/runs/42")
+	assert.Contains(t, output, "Enrollment PR: https://github.com/testorg/web-app/pull/1")
+	assert.Contains(t, output, "Enrollment PR: https://github.com/testorg/api/pull/2")
+	// Warnings from annotations should not be printed (only notices).
+	assert.NotContains(t, output, "some warning")
+}
+
+func TestAwaitRepoMaintenance_Timeout(t *testing.T) {
+	client := forge.NewFakeClient()
+	dispatchTime := time.Now().UTC().Add(-10 * time.Second)
+	// No workflow runs configured — will timeout.
+
+	var buf bytes.Buffer
+	printer := ui.New(&buf)
+
+	awaitRepoMaintenanceWithInterval(context.Background(), client, printer, "testorg", dispatchTime, 1*time.Millisecond, 2)
+
+	output := buf.String()
+	assert.Contains(t, output, "timed out waiting for repo-maintenance workflow")
+}
+
+func TestAwaitRepoMaintenance_Failure(t *testing.T) {
+	client := forge.NewFakeClient()
+	dispatchTime := time.Now().UTC().Add(-10 * time.Second)
+	client.WorkflowRuns["testorg/.fullsend/repo-maintenance.yml"] = &forge.WorkflowRun{
+		ID:         43,
+		Status:     "completed",
+		Conclusion: "failure",
+		HTMLURL:    "https://github.com/testorg/.fullsend/actions/runs/43",
+		CreatedAt:  time.Now().UTC().Format(time.RFC3339),
+	}
+
+	var buf bytes.Buffer
+	printer := ui.New(&buf)
+
+	awaitRepoMaintenanceWithInterval(context.Background(), client, printer, "testorg", dispatchTime, 1*time.Millisecond, 2)
+
+	output := buf.String()
+	assert.Contains(t, output, "repo-maintenance completed with conclusion: failure")
+}
+
+func TestAwaitRepoMaintenance_ContextCancelled(t *testing.T) {
+	client := forge.NewFakeClient()
+	dispatchTime := time.Now().UTC().Add(-10 * time.Second)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	var buf bytes.Buffer
+	printer := ui.New(&buf)
+
+	awaitRepoMaintenanceWithInterval(ctx, client, printer, "testorg", dispatchTime, 1*time.Millisecond, 36)
+
+	output := buf.String()
+	assert.Contains(t, output, "context cancelled while waiting for workflow")
 }
 
 func TestInstallCmd_SkipMintCheckStillValidatesWIFProvider(t *testing.T) {

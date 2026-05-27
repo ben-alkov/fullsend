@@ -52,6 +52,13 @@ type WorkflowRun struct {
 	CreatedAt  string
 }
 
+// Annotation represents a check-run annotation (e.g. from ::notice:: or
+// ::warning:: workflow commands).
+type Annotation struct {
+	Level   string // "notice", "warning", "failure"
+	Message string
+}
+
 // Issue represents a forge issue.
 type Issue struct {
 	Number int
@@ -249,6 +256,10 @@ type Client interface {
 	// GetWorkflowRunLogs downloads the logs for a workflow run as plain text.
 	// On GitHub, this fetches job logs for each job in the run.
 	GetWorkflowRunLogs(ctx context.Context, owner, repo string, runID int) (string, error)
+
+	// GetWorkflowRunAnnotations returns annotations (::notice::, ::warning::,
+	// etc.) from all jobs in a workflow run.
+	GetWorkflowRunAnnotations(ctx context.Context, owner, repo string, runID int) ([]Annotation, error)
 
 	// App installation operations
 	ListOrgInstallations(ctx context.Context, org string) ([]Installation, error)

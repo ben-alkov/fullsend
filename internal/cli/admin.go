@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -2244,6 +2245,8 @@ func runEnableRepos(ctx context.Context, client forge.Client, printer *ui.Printe
 		}
 	}
 
+	var dispatchTime time.Time
+
 	if changed == 0 {
 		printer.StepInfo("All specified repositories are already enabled")
 	} else {
@@ -2251,7 +2254,9 @@ func runEnableRepos(ctx context.Context, client forge.Client, printer *ui.Printe
 
 		// Save updated config.
 		commitMsg := fmt.Sprintf("chore: enable %d repositories for fullsend enrollment", changed)
-		if err := saveRepoConfig(ctx, client, printer, org, cfg, commitMsg); err != nil {
+		var err error
+		dispatchTime, err = saveRepoConfig(ctx, client, printer, org, cfg, commitMsg)
+		if err != nil {
 			return err
 		}
 	}
@@ -2271,8 +2276,11 @@ func runEnableRepos(ctx context.Context, client forge.Client, printer *ui.Printe
 	printer.Summary("Repositories enabled", []string{
 		fmt.Sprintf("Organization: %s", org),
 		fmt.Sprintf("Enabled: %d repositories", changed),
-		"The repo-maintenance workflow will create enrollment PRs",
 	})
+
+	if !dispatchTime.IsZero() {
+		awaitRepoMaintenance(ctx, client, printer, org, dispatchTime)
+	}
 
 	return nil
 }
@@ -2412,7 +2420,8 @@ func runDisableRepos(ctx context.Context, client forge.Client, printer *ui.Print
 
 	// Save updated config.
 	commitMsg := fmt.Sprintf("chore: disable %d repositories from fullsend enrollment", changed)
-	if err := saveRepoConfig(ctx, client, printer, org, cfg, commitMsg); err != nil {
+	dispatchTime, err := saveRepoConfig(ctx, client, printer, org, cfg, commitMsg)
+	if err != nil {
 		return err
 	}
 
@@ -2430,8 +2439,11 @@ func runDisableRepos(ctx context.Context, client forge.Client, printer *ui.Print
 	printer.Summary("Repositories disabled", []string{
 		fmt.Sprintf("Organization: %s", org),
 		fmt.Sprintf("Disabled: %d repositories", changed),
-		"The repo-maintenance workflow will create unenrollment PRs",
 	})
+
+	if !dispatchTime.IsZero() {
+		awaitRepoMaintenance(ctx, client, printer, org, dispatchTime)
+	}
 
 	return nil
 }
@@ -2479,12 +2491,15 @@ func loadRepoConfig(ctx context.Context, client forge.Client, printer *ui.Printe
 }
 
 // saveRepoConfig marshals and commits the updated config, then triggers the repo-maintenance workflow.
-func saveRepoConfig(ctx context.Context, client forge.Client, printer *ui.Printer, org string, cfg *config.OrgConfig, commitMsg string) error {
+// saveRepoConfig marshals the config, commits it, and dispatches the
+// repo-maintenance workflow. It returns the dispatch time so callers can
+// watch the resulting workflow run. A zero time means the dispatch failed.
+func saveRepoConfig(ctx context.Context, client forge.Client, printer *ui.Printer, org string, cfg *config.OrgConfig, commitMsg string) (time.Time, error) {
 	// Marshal updated config.
 	updatedConfigData, err := cfg.Marshal()
 	if err != nil {
 		printer.StepFail("Failed to marshal config.yaml")
-		return fmt.Errorf("marshaling config.yaml: %w", err)
+		return time.Time{}, fmt.Errorf("marshaling config.yaml: %w", err)
 	}
 
 	// Commit and push changes.
@@ -2492,21 +2507,95 @@ func saveRepoConfig(ctx context.Context, client forge.Client, printer *ui.Printe
 	if err := client.CreateOrUpdateFile(ctx, org, forge.ConfigRepoName, "config.yaml", commitMsg, updatedConfigData); err != nil {
 		printer.StepFail("Failed to commit changes")
 		printer.StepInfo("Hint: verify your token has 'repo' scope with: gh auth refresh -s repo")
-		return fmt.Errorf("committing config.yaml: %w", err)
+		return time.Time{}, fmt.Errorf("committing config.yaml: %w", err)
 	}
 	printer.StepDone("Changes committed to .fullsend")
 
 	// Trigger repo-maintenance workflow.
+	dispatchTime := time.Now().UTC().Add(-30 * time.Second)
 	printer.StepStart("Triggering repo-maintenance workflow")
 	if err := client.DispatchWorkflow(ctx, org, forge.ConfigRepoName, "repo-maintenance.yml", "main", nil); err != nil {
 		printer.StepWarn(fmt.Sprintf("Failed to trigger repo-maintenance: %v", err))
 		printer.StepInfo("Hint: verify your token has 'workflow' scope with: gh auth refresh -s workflow")
 		printer.StepInfo("Changes committed successfully, but you may need to manually trigger the workflow")
-	} else {
-		printer.StepDone("Triggered repo-maintenance workflow")
+		return time.Time{}, nil
+	}
+	printer.StepDone("Triggered repo-maintenance workflow")
+
+	return dispatchTime, nil
+}
+
+// awaitRepoMaintenance watches the repo-maintenance workflow run triggered by a
+// config.yaml push, waits for it to complete, and prints any PR URLs from its
+// annotations.
+func awaitRepoMaintenance(ctx context.Context, client forge.Client, printer *ui.Printer, org string, dispatchTime time.Time) {
+	awaitRepoMaintenanceWithInterval(ctx, client, printer, org, dispatchTime, 5*time.Second, 36)
+}
+
+func awaitRepoMaintenanceWithInterval(ctx context.Context, client forge.Client, printer *ui.Printer, org string, dispatchTime time.Time, pollInterval time.Duration, maxAttempts int) {
+	printer.Blank()
+	printer.StepStart("Watching repo-maintenance workflow")
+
+	// Poll for a workflow run created after dispatchTime.
+	var run *forge.WorkflowRun
+	for attempt := range maxAttempts {
+		select {
+		case <-ctx.Done():
+			printer.StepWarn("context cancelled while waiting for workflow")
+			return
+		case <-time.After(pollInterval):
+		}
+
+		runs, err := client.ListWorkflowRuns(ctx, org, forge.ConfigRepoName, "repo-maintenance.yml")
+		if err != nil {
+			printer.StepInfo(fmt.Sprintf("waiting for workflow run (attempt %d)...", attempt+1))
+			continue
+		}
+
+		for i := range runs {
+			r := &runs[i]
+			runTime, parseErr := time.Parse(time.RFC3339, r.CreatedAt)
+			if parseErr != nil {
+				continue
+			}
+			if runTime.Before(dispatchTime) {
+				continue
+			}
+			if r.Status == "completed" {
+				run = r
+				break
+			}
+			printer.StepInfo(fmt.Sprintf("workflow run: %s (%s)", r.HTMLURL, r.Status))
+			break // found our run, keep waiting
+		}
+		if run != nil {
+			break
+		}
 	}
 
-	return nil
+	if run == nil {
+		printer.StepWarn("timed out waiting for repo-maintenance workflow")
+		printer.StepInfo("check the repo-maintenance workflow in .fullsend for results")
+		return
+	}
+
+	if run.Conclusion == "success" {
+		printer.StepDone("repo-maintenance completed successfully")
+	} else {
+		printer.StepWarn(fmt.Sprintf("repo-maintenance completed with conclusion: %s", run.Conclusion))
+	}
+	printer.StepInfo(fmt.Sprintf("workflow run: %s", run.HTMLURL))
+
+	// Harvest PR URLs from workflow annotations (::notice:: commands).
+	annotations, err := client.GetWorkflowRunAnnotations(ctx, org, forge.ConfigRepoName, run.ID)
+	if err != nil {
+		return
+	}
+	for _, a := range annotations {
+		if a.Level == "notice" {
+			printer.StepInfo(a.Message)
+		}
+	}
 }
 
 // checkPerRepoScopes verifies the token has sufficient permissions for per-repo install.
