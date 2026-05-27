@@ -43,13 +43,14 @@ type RepoConfig struct {
 
 // OrgConfig is the top-level configuration for a fullsend organization.
 type OrgConfig struct {
-	Version    string                `yaml:"version"`
-	KillSwitch bool                  `yaml:"kill_switch,omitempty"`
-	Dispatch   DispatchConfig        `yaml:"dispatch"`
-	Inference  InferenceConfig       `yaml:"inference,omitempty"`
-	Defaults   RepoDefaults          `yaml:"defaults"`
-	Agents     []AgentEntry          `yaml:"agents"`
-	Repos      map[string]RepoConfig `yaml:"repos"`
+	Version                string                `yaml:"version"`
+	KillSwitch             bool                  `yaml:"kill_switch,omitempty"`
+	Dispatch               DispatchConfig        `yaml:"dispatch"`
+	Inference              InferenceConfig       `yaml:"inference,omitempty"`
+	Defaults               RepoDefaults          `yaml:"defaults"`
+	Agents                 []AgentEntry          `yaml:"agents"`
+	Repos                  map[string]RepoConfig `yaml:"repos"`
+	AllowedRemoteResources []string              `yaml:"allowed_remote_resources,omitempty"`
 }
 
 // ValidRoles returns the set of recognized agent roles.

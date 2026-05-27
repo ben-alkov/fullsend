@@ -664,3 +664,78 @@ func TestPerRepoConfig_RoundTrip(t *testing.T) {
 	assert.Equal(t, original.Roles, parsed.Roles)
 	assert.Equal(t, original.KillSwitch, parsed.KillSwitch)
 }
+
+// --- AllowedRemoteResources tests ---
+
+func TestOrgConfig_AllowedRemoteResources(t *testing.T) {
+	t.Run("parse YAML with allowed_remote_resources", func(t *testing.T) {
+		yamlData := `
+version: "1"
+dispatch:
+  platform: github-actions
+defaults:
+  roles:
+    - fullsend
+  max_implementation_retries: 2
+agents: []
+repos: {}
+allowed_remote_resources:
+  - https://example.com/skills/
+  - https://cdn.example.com/policies/
+`
+		cfg, err := ParseOrgConfig([]byte(yamlData))
+		require.NoError(t, err)
+		assert.Equal(t, []string{"https://example.com/skills/", "https://cdn.example.com/policies/"}, cfg.AllowedRemoteResources)
+	})
+
+	t.Run("parse YAML without allowed_remote_resources", func(t *testing.T) {
+		yamlData := `
+version: "1"
+dispatch:
+  platform: github-actions
+defaults:
+  roles:
+    - fullsend
+  max_implementation_retries: 2
+agents: []
+repos: {}
+`
+		cfg, err := ParseOrgConfig([]byte(yamlData))
+		require.NoError(t, err)
+		assert.Empty(t, cfg.AllowedRemoteResources)
+	})
+
+	t.Run("marshal with field", func(t *testing.T) {
+		cfg := &OrgConfig{
+			Version:  "1",
+			Dispatch: DispatchConfig{Platform: "github-actions"},
+			Defaults: RepoDefaults{
+				Roles:                    []string{"fullsend"},
+				MaxImplementationRetries: 2,
+			},
+			Agents:                 []AgentEntry{},
+			Repos:                  map[string]RepoConfig{},
+			AllowedRemoteResources: []string{"https://example.com/skills/"},
+		}
+		data, err := cfg.Marshal()
+		require.NoError(t, err)
+		assert.Contains(t, string(data), "allowed_remote_resources:")
+		assert.Contains(t, string(data), "https://example.com/skills/")
+	})
+
+	t.Run("marshal without field omits key", func(t *testing.T) {
+		cfg := &OrgConfig{
+			Version:  "1",
+			Dispatch: DispatchConfig{Platform: "github-actions"},
+			Defaults: RepoDefaults{
+				Roles:                    []string{"fullsend"},
+				MaxImplementationRetries: 2,
+			},
+			Agents: []AgentEntry{},
+			Repos:  map[string]RepoConfig{},
+		}
+		data, err := cfg.Marshal()
+		require.NoError(t, err)
+		assert.NotContains(t, string(data), "allowed_remote_resources")
+	})
+}
