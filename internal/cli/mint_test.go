@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"sort"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/fullsend-ai/fullsend/internal/config"
+	"github.com/fullsend-ai/fullsend/internal/ui"
 )
 
 func TestMintCommand_HasSubcommands(t *testing.T) {
@@ -351,4 +353,37 @@ func TestResolveEnrollAppIDs_RoleMissingFromSource(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown-role")
 	assert.Contains(t, err.Error(), "not found in source org")
+}
+
+// --- confirmUnenroll tests ---
+
+func TestConfirmUnenroll_Match(t *testing.T) {
+	printer := ui.New(&strings.Builder{})
+	reader := bufio.NewReader(strings.NewReader("acme-org\n"))
+	err := confirmUnenroll(printer, "acme-org", reader, true)
+	require.NoError(t, err)
+}
+
+func TestConfirmUnenroll_Mismatch(t *testing.T) {
+	printer := ui.New(&strings.Builder{})
+	reader := bufio.NewReader(strings.NewReader("wrong-name\n"))
+	err := confirmUnenroll(printer, "acme-org", reader, true)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "confirmation did not match")
+}
+
+func TestConfirmUnenroll_EOF(t *testing.T) {
+	printer := ui.New(&strings.Builder{})
+	reader := bufio.NewReader(strings.NewReader(""))
+	err := confirmUnenroll(printer, "acme-org", reader, true)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading confirmation")
+}
+
+func TestConfirmUnenroll_NonTerminal(t *testing.T) {
+	printer := ui.New(&strings.Builder{})
+	reader := bufio.NewReader(strings.NewReader("acme-org\n"))
+	err := confirmUnenroll(printer, "acme-org", reader, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "stdin is not a terminal")
 }

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -211,7 +212,9 @@ func (c *LiveGCFClient) CreateWIFProvider(ctx context.Context, projectNumber, po
 
 	if resp.StatusCode == http.StatusConflict {
 		io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
-		_ = c.undeleteWIFProvider(ctx, projectNumber, poolID, providerID)
+		if err := c.undeleteWIFProvider(ctx, projectNumber, poolID, providerID); err != nil {
+			log.Printf("undelete attempt during conflict recovery: %v", err)
+		}
 		if err := c.UpdateWIFProvider(ctx, projectNumber, poolID, providerID, cfg); err != nil {
 			return err
 		}

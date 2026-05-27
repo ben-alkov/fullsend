@@ -2031,6 +2031,87 @@ func TestBuildRepoProviderID(t *testing.T) {
 	}
 }
 
+// --- stripPlaceholderOrg tests ---
+
+func TestStripPlaceholderOrg(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"empty string", "", ""},
+		{"only placeholder", PlaceholderOrg, ""},
+		{"placeholder with real orgs", "acme," + PlaceholderOrg + ",widgetco", "acme,widgetco"},
+		{"no placeholder", "acme,widgetco", "acme,widgetco"},
+		{"placeholder at start", PlaceholderOrg + ",acme", "acme"},
+		{"placeholder at end", "acme," + PlaceholderOrg, "acme"},
+		{"multiple placeholders", PlaceholderOrg + "," + PlaceholderOrg, ""},
+		{"whitespace around entries", " acme , " + PlaceholderOrg + " , widgetco ", "acme,widgetco"},
+		{"single real org", "acme", "acme"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := stripPlaceholderOrg(tc.input)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// --- stripPlaceholderRoleAppIDs tests ---
+
+func TestStripPlaceholderRoleAppIDs(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			"empty JSON object",
+			`{}`,
+			`{}`,
+		},
+		{
+			"only placeholder entries",
+			`{"` + PlaceholderOrg + `/coder":"000","` + PlaceholderOrg + `/triage":"001"}`,
+			`{}`,
+		},
+		{
+			"placeholder mixed with real orgs",
+			`{"acme/coder":"111","` + PlaceholderOrg + `/coder":"000","widgetco/triage":"222"}`,
+			`{"acme/coder":"111","widgetco/triage":"222"}`,
+		},
+		{
+			"no placeholder entries",
+			`{"acme/coder":"111","acme/triage":"222"}`,
+			`{"acme/coder":"111","acme/triage":"222"}`,
+		},
+		{
+			"malformed JSON returns input unchanged",
+			`{invalid json`,
+			`{invalid json`,
+		},
+		{
+			"empty string returns unchanged",
+			"",
+			"",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := stripPlaceholderRoleAppIDs(tc.input)
+			if tc.name == "malformed JSON returns input unchanged" || tc.name == "empty string returns unchanged" {
+				assert.Equal(t, tc.want, got)
+			} else {
+				// Compare as parsed JSON to avoid key-ordering issues.
+				var gotMap, wantMap map[string]string
+				require.NoError(t, json.Unmarshal([]byte(got), &gotMap))
+				require.NoError(t, json.Unmarshal([]byte(tc.want), &wantMap))
+				assert.Equal(t, wantMap, gotMap)
+			}
+		})
+	}
+}
+
 // --- interface compliance ---
 
 func TestProvisioner_ImplementsDispatcher(t *testing.T) {

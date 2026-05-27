@@ -84,7 +84,7 @@ func newMintDeployCmd() *cobra.Command {
 			printer := ui.New(os.Stdout)
 			ctx := cmd.Context()
 
-			printer.Banner()
+			printer.Banner(Version())
 			printer.Blank()
 			printer.Header("Deploying token mint")
 			printer.Blank()
@@ -200,7 +200,7 @@ Per-repo enrollment (fullsend mint enroll acme/widget):
 				return err
 			}
 
-			printer.Banner()
+			printer.Banner(Version())
 			printer.Blank()
 
 			if strings.Contains(arg, "/") {
@@ -591,7 +591,7 @@ Requires typing the org/repo name to confirm (unless --dry-run or --yolo).`,
 			printer := ui.New(os.Stdout)
 			ctx := cmd.Context()
 
-			printer.Banner()
+			printer.Banner(Version())
 			printer.Blank()
 
 			if isRepo {
@@ -888,7 +888,7 @@ into that org's PEM secret status.`,
 }
 
 func runMintStatus(ctx context.Context, printer *ui.Printer, project, region, org string) error {
-	printer.Banner()
+	printer.Banner(Version())
 	printer.Blank()
 	printer.Header("Mint Status")
 	printer.Blank()

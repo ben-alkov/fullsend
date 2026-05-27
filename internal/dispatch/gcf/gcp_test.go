@@ -886,6 +886,163 @@ func TestLiveGCFClient_GetProjectNumber(t *testing.T) {
 	})
 }
 
+// --- DisableSecretVersion ---
+
+func TestLiveGCFClient_DisableSecretVersion(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, http.MethodPost, r.Method)
+			assert.Contains(t, r.URL.Path, "secrets/my-secret/versions/latest:disable")
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer srv.Close()
+
+		err := newTestClient(srv).DisableSecretVersion(context.Background(), "proj", "my-secret")
+		require.NoError(t, err)
+	})
+
+	t.Run("not found is idempotent", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer srv.Close()
+
+		err := newTestClient(srv).DisableSecretVersion(context.Background(), "proj", "missing")
+		require.NoError(t, err)
+	})
+
+	t.Run("error", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprintln(w, `{"error":{"message":"permission denied"}}`)
+		}))
+		defer srv.Close()
+
+		err := newTestClient(srv).DisableSecretVersion(context.Background(), "proj", "secret")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unexpected status 403")
+	})
+}
+
+// --- DeleteSecret ---
+
+func TestLiveGCFClient_DeleteSecret(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, http.MethodDelete, r.Method)
+			assert.Contains(t, r.URL.Path, "secrets/my-secret")
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer srv.Close()
+
+		err := newTestClient(srv).DeleteSecret(context.Background(), "proj", "my-secret")
+		require.NoError(t, err)
+	})
+
+	t.Run("not found is idempotent", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer srv.Close()
+
+		err := newTestClient(srv).DeleteSecret(context.Background(), "proj", "missing")
+		require.NoError(t, err)
+	})
+
+	t.Run("error", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprintln(w, `{"error":{"message":"permission denied"}}`)
+		}))
+		defer srv.Close()
+
+		err := newTestClient(srv).DeleteSecret(context.Background(), "proj", "secret")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unexpected status 403")
+	})
+}
+
+// --- DisableWIFProvider ---
+
+func TestLiveGCFClient_DisableWIFProvider(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, http.MethodPatch, r.Method)
+			assert.Contains(t, r.URL.RawQuery, "updateMask=disabled")
+			var body map[string]interface{}
+			json.NewDecoder(r.Body).Decode(&body)
+			assert.Equal(t, true, body["disabled"])
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintln(w, `{"name":"operations/disable-op","done":true}`)
+		}))
+		defer srv.Close()
+
+		err := newTestClient(srv).DisableWIFProvider(context.Background(), "123", "pool", "prov")
+		require.NoError(t, err)
+	})
+
+	t.Run("not found is idempotent", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer srv.Close()
+
+		err := newTestClient(srv).DisableWIFProvider(context.Background(), "123", "pool", "missing")
+		require.NoError(t, err)
+	})
+
+	t.Run("error", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprintln(w, `{"error":{"message":"permission denied"}}`)
+		}))
+		defer srv.Close()
+
+		err := newTestClient(srv).DisableWIFProvider(context.Background(), "123", "pool", "prov")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unexpected status 403")
+	})
+}
+
+// --- DeleteWIFProvider ---
+
+func TestLiveGCFClient_DeleteWIFProvider(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, http.MethodDelete, r.Method)
+			assert.Contains(t, r.URL.Path, "providers/prov")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintln(w, `{"name":"operations/delete-op","done":true}`)
+		}))
+		defer srv.Close()
+
+		err := newTestClient(srv).DeleteWIFProvider(context.Background(), "123", "pool", "prov")
+		require.NoError(t, err)
+	})
+
+	t.Run("not found is idempotent", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer srv.Close()
+
+		err := newTestClient(srv).DeleteWIFProvider(context.Background(), "123", "pool", "missing")
+		require.NoError(t, err)
+	})
+
+	t.Run("error", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprintln(w, `{"error":{"message":"permission denied"}}`)
+		}))
+		defer srv.Close()
+
+		err := newTestClient(srv).DeleteWIFProvider(context.Background(), "123", "pool", "prov")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unexpected status 403")
+	})
+}
+
 // --- iamAudience ---
 
 func TestIAMAudience(t *testing.T) {
