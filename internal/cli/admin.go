@@ -369,7 +369,7 @@ Inference authentication:
 					printer.StepInfo("Would auto-provision WIF provider in project " + inferenceProject)
 				} else {
 					printer.StepStart("Provisioning WIF infrastructure for inference")
-					gcpClient := gcf.NewLiveGCFClient()
+					gcpClient := gcf.NewLiveGCFClient(inferenceProject)
 					provisioner := gcf.NewProvisioner(gcf.Config{
 						ProjectID:  inferenceProject,
 						GitHubOrgs: []string{org},
@@ -689,7 +689,7 @@ func runPerRepoInstall(ctx context.Context, c perRepoInstallConfig) error {
 			ProjectID:  mintProject,
 			Region:     mintRegion,
 			GitHubOrgs: []string{owner},
-		}, gcf.NewLiveGCFClient())
+		}, gcf.NewLiveGCFClient(mintProject))
 
 		if mintURL != "" {
 			mintFound = true
@@ -901,7 +901,7 @@ func runPerRepoInstall(ctx context.Context, c perRepoInstallConfig) error {
 			FunctionSourceDir: mintSourceDir,
 			DeployMode:        deployMode,
 			Repo:              owner + "/" + repo,
-		}, gcf.NewLiveGCFClient())
+		}, gcf.NewLiveGCFClient(mintProject))
 
 		provResult, provErr := mintProvisioner.Provision(ctx)
 		if provErr != nil {
@@ -922,7 +922,7 @@ func runPerRepoInstall(ctx context.Context, c perRepoInstallConfig) error {
 			AgentPEMs:   agentPEMs,
 			MintURL:     mintURL,
 			Repo:        owner + "/" + repo,
-		}, gcf.NewLiveGCFClient())
+		}, gcf.NewLiveGCFClient(mintProject))
 
 		if _, err := mintProvisioner.Provision(ctx); err != nil {
 			printer.StepFail("Mint provisioning failed")
@@ -937,7 +937,7 @@ func runPerRepoInstall(ctx context.Context, c perRepoInstallConfig) error {
 			ProjectID:  inferenceProject,
 			GitHubOrgs: []string{owner},
 			Repo:       owner + "/" + repo,
-		}, gcf.NewLiveGCFClient())
+		}, gcf.NewLiveGCFClient(inferenceProject))
 		var provErr error
 		inferenceWIFProvider, provErr = provisioner.ProvisionWIF(ctx)
 		if provErr != nil {
@@ -1286,7 +1286,7 @@ func copySharedAppPEMs(ctx context.Context, client forge.Client, printer *ui.Pri
 		ProjectID:  mintProject,
 		Region:     mintRegion,
 		GitHubOrgs: []string{org},
-	}, gcf.NewLiveGCFClient())
+	}, gcf.NewLiveGCFClient(mintProject))
 
 	existingIDs, err := prov.GetExistingRoleAppIDs(ctx)
 	if err != nil {
@@ -1373,7 +1373,7 @@ func runAppSetup(ctx context.Context, client forge.Client, printer *ui.Printer, 
 		pemProvisioner = gcf.NewProvisioner(gcf.Config{
 			ProjectID:  mintProject,
 			GitHubOrgs: []string{org},
-		}, gcf.NewLiveGCFClient())
+		}, gcf.NewLiveGCFClient(mintProject))
 	}
 
 	// In OIDC mint mode, PEMs live in Secret Manager — check there.
@@ -1577,7 +1577,7 @@ func runInstall(ctx context.Context, client forge.Client, printer *ui.Printer, o
 			FunctionSourceDir: mintSourceDir,
 			DeployMode:        deployMode,
 			MintURL:           mintURL,
-		}, gcf.NewLiveGCFClient())
+		}, gcf.NewLiveGCFClient(mintProject))
 	}
 
 	stack := buildLayerStack(org, client, cfg, printer, user, privateRepo, enabledRepos, agentCreds, enrolledRepoIDs, inferenceProvider, vendorBinary, vendorFullsendBinary, disp)

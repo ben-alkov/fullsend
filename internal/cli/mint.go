@@ -104,7 +104,7 @@ func newMintDeployCmd() *cobra.Command {
 				return nil
 			}
 
-			gcpClient := gcf.NewLiveGCFClient()
+			gcpClient := gcf.NewLiveGCFClient(project)
 
 			if sourceDir == "" {
 				sourceDir = gcf.DefaultFunctionSourceDir()
@@ -259,7 +259,7 @@ func runMintEnrollOrg(ctx context.Context, printer *ui.Printer, org, project, re
 	printer.Header("Enrolling org " + org + " in mint")
 	printer.Blank()
 
-	gcpClient := gcf.NewLiveGCFClient()
+	gcpClient := gcf.NewLiveGCFClient(project)
 	provisioner := gcf.NewProvisioner(gcf.Config{
 		ProjectID:  project,
 		Region:     region,
@@ -375,7 +375,7 @@ func runMintEnrollRepo(ctx context.Context, printer *ui.Printer, repoFullName, p
 	printer.Header("Enrolling repo " + repoFullName + " in mint")
 	printer.Blank()
 
-	gcpClient := gcf.NewLiveGCFClient()
+	gcpClient := gcf.NewLiveGCFClient(project)
 	provisioner := gcf.NewProvisioner(gcf.Config{
 		ProjectID:  project,
 		Region:     region,
@@ -643,7 +643,7 @@ func runMintUnenrollOrg(ctx context.Context, printer *ui.Printer, org, project, 
 	printer.Header("Unenrolling org " + org + " from mint")
 	printer.Blank()
 
-	gcpClient := gcf.NewLiveGCFClient()
+	gcpClient := gcf.NewLiveGCFClient(project)
 	provisioner := gcf.NewProvisioner(gcf.Config{
 		ProjectID:  project,
 		Region:     region,
@@ -764,7 +764,7 @@ func runMintUnenrollRepo(ctx context.Context, printer *ui.Printer, repoFullName,
 	printer.Header("Unenrolling repo " + repoFullName + " from mint")
 	printer.Blank()
 
-	gcpClient := gcf.NewLiveGCFClient()
+	gcpClient := gcf.NewLiveGCFClient(project)
 	provisioner := gcf.NewProvisioner(gcf.Config{
 		ProjectID:  project,
 		Region:     region,
@@ -893,7 +893,7 @@ func runMintStatus(ctx context.Context, printer *ui.Printer, project, region, or
 	printer.Header("Mint Status")
 	printer.Blank()
 
-	gcpClient := gcf.NewLiveGCFClient()
+	gcpClient := gcf.NewLiveGCFClient(project)
 	provisioner := gcf.NewProvisioner(gcf.Config{
 		ProjectID:  project,
 		Region:     region,

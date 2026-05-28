@@ -111,11 +111,13 @@ type LiveGCFClient struct {
 	skipUploadURLCheck bool // testing only: skip googleapis.com domain validation
 }
 
-// NewLiveGCFClient creates a new LiveGCFClient.
-func NewLiveGCFClient() *LiveGCFClient {
-	return &LiveGCFClient{
-		Client: gcp.NewClient(),
-	}
+// NewLiveGCFClient creates a new LiveGCFClient. The quotaProject is
+// set as x-goog-user-project on every request so API quota is billed
+// to the target project, not the shared ADC OAuth client project.
+func NewLiveGCFClient(quotaProject string) *LiveGCFClient {
+	c := gcp.NewClient()
+	c.QuotaProject = quotaProject
+	return &LiveGCFClient{Client: c}
 }
 
 // CreateServiceAccount creates a new service account.

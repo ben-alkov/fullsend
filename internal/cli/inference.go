@@ -158,7 +158,7 @@ func runInferenceProvision(cmd *cobra.Command, printer *ui.Printer, org, repo, p
 
 	ctx := cmd.Context()
 
-	gcpClient := gcf.NewLiveGCFClient()
+	gcpClient := gcf.NewLiveGCFClient(project)
 	provisioner := gcf.NewProvisioner(gcf.Config{
 		ProjectID:   project,
 		GitHubOrgs:  []string{org},
@@ -255,7 +255,7 @@ Use --format=json to get a machine-readable status + config output.`,
 
 func runInferenceStatus(cmd *cobra.Command, org, repo, project, pool, provider, format string) error {
 	ctx := cmd.Context()
-	gcpClient := gcf.NewLiveGCFClient()
+	gcpClient := gcf.NewLiveGCFClient(project)
 
 	poolName := pool
 	providerName := provider
