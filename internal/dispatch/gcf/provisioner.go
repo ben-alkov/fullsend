@@ -459,7 +459,7 @@ func (p *Provisioner) RegisterPerRepoWIF(ctx context.Context, repo string) error
 	}
 
 	if err := p.gcpAPI.UpdateServiceEnvVars(ctx, p.cfg.ProjectID, p.cfg.Region, functionName, updated); err != nil {
-		return fmt.Errorf("updating mint env vars: %w", err)
+		return fmt.Errorf("updating PER_REPO_WIF_REPOS: %w", err)
 	}
 	return nil
 }
@@ -1513,7 +1513,7 @@ func (p *Provisioner) RemoveOrgFromMint(ctx context.Context, org string) error {
 	updated["ALLOWED_ROLES"] = deriveAllowedRoles(updated["ROLE_APP_IDS"])
 
 	if err := p.gcpAPI.UpdateServiceEnvVars(ctx, p.cfg.ProjectID, p.cfg.Region, functionName, updated); err != nil {
-		return fmt.Errorf("updating mint env vars: %w", err)
+		return fmt.Errorf("removing org from mint env vars: %w", err)
 	}
 	return nil
 }
@@ -1547,7 +1547,7 @@ func (p *Provisioner) RemoveRepoFromMint(ctx context.Context, repo string) error
 	updated["PER_REPO_WIF_REPOS"] = strings.Join(filtered, ",")
 
 	if err := p.gcpAPI.UpdateServiceEnvVars(ctx, p.cfg.ProjectID, p.cfg.Region, functionName, updated); err != nil {
-		return fmt.Errorf("updating mint env vars: %w", err)
+		return fmt.Errorf("removing repo from mint env vars: %w", err)
 	}
 	return nil
 }

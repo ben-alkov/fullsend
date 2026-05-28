@@ -1098,8 +1098,9 @@ func (c *LiveGCFClient) UpdateServiceEnvVars(ctx context.Context, projectID, reg
 		return fmt.Errorf("marshaling Cloud Run service update: %w", err)
 	}
 
-	// PATCH the service. Cloud Run creates a new revision with the updated env.
-	patchResp, err := c.Client.DoRequest(ctx, http.MethodPatch, serviceURL, string(payloadBytes))
+	// PATCH the service with updateMask scoped to template.containers to avoid
+	// clobbering unrelated fields in the read-modify-write cycle.
+	patchResp, err := c.Client.DoRequest(ctx, http.MethodPatch, serviceURL+"?updateMask=template.containers", string(payloadBytes))
 	if err != nil {
 		return fmt.Errorf("patching Cloud Run service: %w", err)
 	}
@@ -1111,18 +1112,24 @@ func (c *LiveGCFClient) UpdateServiceEnvVars(ctx context.Context, projectID, reg
 	}
 
 	var op struct {
-		Name string `json:"name"`
-		Done bool   `json:"done"`
+		Name  string `json:"name"`
+		Done  bool   `json:"done"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
 	}
 	if err := json.NewDecoder(patchResp.Body).Decode(&op); err != nil {
 		return fmt.Errorf("decoding Cloud Run patch response: %w", err)
 	}
 
 	if op.Done {
+		if op.Error != nil {
+			return fmt.Errorf("Cloud Run service update failed: %s", op.Error.Message)
+		}
 		return nil
 	}
 	if op.Name == "" {
-		return nil
+		return fmt.Errorf("Cloud Run PATCH returned incomplete response: done=false with no operation name")
 	}
 
 	return c.waitForCloudRunOperation(ctx, op.Name)
@@ -1132,6 +1139,9 @@ func (c *LiveGCFClient) UpdateServiceEnvVars(ctx context.Context, projectID, reg
 // Cloud Run operations are polled at run.googleapis.com, not
 // cloudfunctions.googleapis.com.
 func (c *LiveGCFClient) waitForCloudRunOperation(ctx context.Context, operationName string) error {
+	if !operationNamePattern.MatchString(operationName) {
+		return fmt.Errorf("invalid Cloud Run operation name format: %q", operationName)
+	}
 	reqURL := fmt.Sprintf("https://run.googleapis.com/v2/%s", operationName)
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)

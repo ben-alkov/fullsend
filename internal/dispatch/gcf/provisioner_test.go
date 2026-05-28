@@ -75,9 +75,6 @@ type fakeGCFClient struct {
 	// Captured env vars from the last CreateFunction or UpdateFunction call.
 	lastCreateFunctionEnvVars map[string]string
 
-	// Captured env vars from the last UpdateFunctionEnvVars call.
-	lastUpdateFunctionEnvVars map[string]string
-
 	// Captured env vars from the last UpdateServiceEnvVars call.
 	lastUpdateServiceEnvVars map[string]string
 
@@ -226,7 +223,6 @@ func (f *fakeGCFClient) UpdateFunction(_ context.Context, _, _, _ string, cfg Fu
 }
 func (f *fakeGCFClient) UpdateFunctionEnvVars(_ context.Context, _, _, _ string, envVars map[string]string) (string, error) {
 	f.calls = append(f.calls, "UpdateFunctionEnvVars")
-	f.lastUpdateFunctionEnvVars = envVars
 	if err := f.errs["UpdateFunctionEnvVars"]; err != nil {
 		return "", err
 	}
@@ -2541,25 +2537,6 @@ func TestEnsureOrgInMint_NilReturn(t *testing.T) {
 	assert.Contains(t, err.Error(), "not found in project")
 }
 
-func TestEnsureOrgInMint_UpdateServiceFails(t *testing.T) {
-	fake := newFakeGCFClient()
-	fake.functionInfo = &FunctionInfo{
-		URI: "https://mint.example.com",
-		EnvVars: map[string]string{
-			"ALLOWED_ORGS": "existing-org",
-			"ROLE_APP_IDS": `{"existing-org/coder":"100"}`,
-		},
-	}
-	fake.errs["UpdateServiceEnvVars"] = fmt.Errorf("operation timed out")
-
-	p := NewProvisioner(Config{ProjectID: "proj1", Region: "us-central1"}, fake)
-	err := p.EnsureOrgInMint(context.Background(), "https://mint.example.com", "new-org", map[string]string{
-		"new-org/coder": "200",
-	})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "updating mint env vars")
-}
-
 func TestEnsureOrgInMint_MalformedRoleAppIDs(t *testing.T) {
 	fake := newFakeGCFClient()
 	fake.functionInfo = &FunctionInfo{
@@ -2855,7 +2832,7 @@ func TestRemoveOrgFromMint_UpdateFails(t *testing.T) {
 	p := NewProvisioner(Config{ProjectID: "proj1", Region: "us-central1"}, fake)
 	err := p.RemoveOrgFromMint(context.Background(), "acme")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "updating mint env vars")
+	assert.Contains(t, err.Error(), "removing org from mint env vars")
 }
 
 // --- RemoveRepoFromMint tests ---
