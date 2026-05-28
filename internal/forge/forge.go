@@ -203,6 +203,10 @@ type Client interface {
 	CreateOrUpdateOrgVariable(ctx context.Context, org, name, value string, selectedRepoIDs []int64) error
 	OrgVariableExists(ctx context.Context, org, name string) (bool, error)
 	DeleteOrgVariable(ctx context.Context, org, name string) error
+	SetOrgVariableRepos(ctx context.Context, org, name string, repoIDs []int64) error
+	// GetOrgVariableRepos returns the list of repository IDs that have access
+	// to the given org-level variable.
+	GetOrgVariableRepos(ctx context.Context, org, name string) ([]int64, error)
 
 	// CI/Workflow operations
 	GetLatestWorkflowRun(ctx context.Context, owner, repo, workflowFile string) (*WorkflowRun, error)

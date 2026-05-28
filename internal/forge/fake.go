@@ -120,8 +120,9 @@ type FakeClient struct {
 	OrgSecretRepoIDs map[string][]int64 // key: "org/name" → repo IDs
 
 	// Org-level variable state
-	OrgVariables      map[string]bool   // key: "org/name"
-	OrgVariableValues map[string]string // key: "org/name" → value
+	OrgVariables       map[string]bool    // key: "org/name"
+	OrgVariableValues  map[string]string  // key: "org/name" → value
+	OrgVariableRepoIDs map[string][]int64 // key: "org/name" → repo IDs
 
 	// Error injection: key is method name, value is error to return.
 	Errors map[string]error
@@ -1064,6 +1065,11 @@ func (f *FakeClient) CreateOrUpdateOrgVariable(_ context.Context, org, name, val
 		f.OrgVariableValues = make(map[string]string)
 	}
 	f.OrgVariableValues[org+"/"+name] = value
+
+	if f.OrgVariableRepoIDs == nil {
+		f.OrgVariableRepoIDs = make(map[string][]int64)
+	}
+	f.OrgVariableRepoIDs[org+"/"+name] = selectedRepoIDs
 	return nil
 }
 
@@ -1079,6 +1085,35 @@ func (f *FakeClient) OrgVariableExists(_ context.Context, org, name string) (boo
 		return false, nil
 	}
 	return f.OrgVariables[org+"/"+name], nil
+}
+
+func (f *FakeClient) SetOrgVariableRepos(_ context.Context, org, name string, repoIDs []int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if e := f.err("SetOrgVariableRepos"); e != nil {
+		return e
+	}
+
+	if f.OrgVariableRepoIDs == nil {
+		f.OrgVariableRepoIDs = make(map[string][]int64)
+	}
+	f.OrgVariableRepoIDs[org+"/"+name] = repoIDs
+	return nil
+}
+
+func (f *FakeClient) GetOrgVariableRepos(_ context.Context, org, name string) ([]int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if e := f.err("GetOrgVariableRepos"); e != nil {
+		return nil, e
+	}
+
+	if f.OrgVariableRepoIDs == nil {
+		return nil, nil
+	}
+	return f.OrgVariableRepoIDs[org+"/"+name], nil
 }
 
 func (f *FakeClient) DeleteOrgVariable(_ context.Context, org, name string) error {

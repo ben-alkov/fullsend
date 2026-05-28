@@ -722,6 +722,113 @@ func TestRunEnableRepos_CommitMessageFormat(t *testing.T) {
 	assert.Contains(t, client.CreatedFiles[0].Message, "chore: enable 2 repositories")
 }
 
+func TestRunEnableRepos_UpdatesOrgVariableVisibility(t *testing.T) {
+	// Setup: initial config with repo A enabled, repo B disabled.
+	// Dispatch mode is oidc-mint. Org variable FULLSEND_MINT_URL exists.
+	cfg := setupTestConfig(map[string]bool{
+		"web-app": true,
+		"api":     false,
+	})
+	cfg.Dispatch.Mode = "oidc-mint"
+
+	client := setupTestClient("testorg", cfg, []string{"web-app", "api"})
+	// Assign repo IDs so we can verify they appear in the variable visibility.
+	for i := range client.Repos {
+		switch client.Repos[i].Name {
+		case ".fullsend":
+			client.Repos[i].ID = 100
+		case "web-app":
+			client.Repos[i].ID = 200
+		case "api":
+			client.Repos[i].ID = 300
+		}
+	}
+	// Pre-populate the org variable so it "exists".
+	client.OrgVariables = map[string]bool{"testorg/FULLSEND_MINT_URL": true}
+	client.OrgVariableValues = map[string]string{"testorg/FULLSEND_MINT_URL": "https://mint.example.com"}
+
+	printer := ui.New(&discardWriter{})
+
+	// Action: enable repo "api".
+	err := runEnableRepos(context.Background(), client, printer, "testorg", []string{"api"}, false, true)
+	require.NoError(t, err)
+
+	// Assert: SetOrgVariableRepos was called with both enrolled repo IDs
+	// plus the config repo (.fullsend).
+	require.Contains(t, client.OrgVariableRepoIDs, "testorg/FULLSEND_MINT_URL")
+	repoIDs := client.OrgVariableRepoIDs["testorg/FULLSEND_MINT_URL"]
+	assert.Contains(t, repoIDs, int64(100), "config repo ID should be included")
+	assert.Contains(t, repoIDs, int64(200), "web-app repo ID should be included")
+	assert.Contains(t, repoIDs, int64(300), "api repo ID should be included")
+}
+
+func TestRunEnableRepos_SkipsVariableSyncWhenNotOIDCMint(t *testing.T) {
+	// When dispatch mode is not oidc-mint, variable sync should be skipped.
+	cfg := setupTestConfig(map[string]bool{
+		"web-app": false,
+	})
+	// No dispatch mode set (empty string).
+
+	client := setupTestClient("testorg", cfg, []string{"web-app"})
+	client.OrgVariables = map[string]bool{"testorg/FULLSEND_MINT_URL": true}
+
+	printer := ui.New(&discardWriter{})
+
+	err := runEnableRepos(context.Background(), client, printer, "testorg", []string{"web-app"}, false, true)
+	require.NoError(t, err)
+
+	// SetOrgVariableRepos should not have been called.
+	assert.Nil(t, client.OrgVariableRepoIDs)
+}
+
+func TestRunEnableRepos_VariableSyncErrorDoesNotBlockEnable(t *testing.T) {
+	// When SetOrgVariableRepos fails, the enable command should still
+	// succeed (best-effort contract).
+	cfg := setupTestConfig(map[string]bool{
+		"web-app": false,
+	})
+	cfg.Dispatch.Mode = "oidc-mint"
+
+	client := setupTestClient("testorg", cfg, []string{"web-app"})
+	for i := range client.Repos {
+		switch client.Repos[i].Name {
+		case ".fullsend":
+			client.Repos[i].ID = 100
+		case "web-app":
+			client.Repos[i].ID = 200
+		}
+	}
+	client.OrgVariables = map[string]bool{"testorg/FULLSEND_MINT_URL": true}
+	client.Errors = map[string]error{
+		"SetOrgVariableRepos": fmt.Errorf("API rate limit exceeded"),
+	}
+
+	printer := ui.New(&discardWriter{})
+
+	err := runEnableRepos(context.Background(), client, printer, "testorg", []string{"web-app"}, false, true)
+	require.NoError(t, err, "enable should succeed even when variable sync fails")
+}
+
+func TestRunEnableRepos_SkipsVariableSyncWhenVariableNotExists(t *testing.T) {
+	// When the org variable doesn't exist yet (mint not provisioned),
+	// sync should skip gracefully.
+	cfg := setupTestConfig(map[string]bool{
+		"web-app": false,
+	})
+	cfg.Dispatch.Mode = "oidc-mint"
+
+	client := setupTestClient("testorg", cfg, []string{"web-app"})
+	// No OrgVariables set — FULLSEND_MINT_URL doesn't exist.
+
+	printer := ui.New(&discardWriter{})
+
+	err := runEnableRepos(context.Background(), client, printer, "testorg", []string{"web-app"}, false, true)
+	require.NoError(t, err)
+
+	// SetOrgVariableRepos should not have been called.
+	assert.Nil(t, client.OrgVariableRepoIDs)
+}
+
 // Business logic tests for runDisableRepos
 
 func TestRunDisableRepos_DisableSingleRepo(t *testing.T) {

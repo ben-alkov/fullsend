@@ -2145,7 +2145,10 @@ func runEnableRepos(ctx context.Context, client forge.Client, printer *ui.Printe
 	}
 
 	// Determine which repos to enable.
+	// We always need the full org repo list (for validation or discovery),
+	// so fetch it once and reuse for org variable visibility sync later.
 	var reposToEnable []string
+	var allOrgRepos []forge.Repository
 	if all {
 		// Get all org repos by calling ListOrgRepos.
 		// Note: disable --all iterates cfg.Repos instead of calling ListOrgRepos.
@@ -2153,13 +2156,13 @@ func runEnableRepos(ctx context.Context, client forge.Client, printer *ui.Printe
 		// while disable --all operates on previously configured repos (which may have
 		// been deleted from the org but still need unenrollment PRs for cleanup).
 		printer.StepStart("Discovering all organization repositories")
-		allRepos, err := client.ListOrgRepos(ctx, org)
+		allOrgRepos, err = client.ListOrgRepos(ctx, org)
 		if err != nil {
 			printer.StepFail("Failed to list organization repositories")
 			printer.StepInfo("Hint: verify your token has 'repo' scope with: gh auth refresh -s repo")
 			return fmt.Errorf("listing org repos: %w", err)
 		}
-		for _, r := range allRepos {
+		for _, r := range allOrgRepos {
 			if r.Name != forge.ConfigRepoName {
 				reposToEnable = append(reposToEnable, r.Name)
 			}
@@ -2172,7 +2175,7 @@ func runEnableRepos(ctx context.Context, client forge.Client, printer *ui.Printe
 		// one API call per repo (O(n) → O(1) API calls).
 		printer.StepStart("Validating repository names")
 
-		allOrgRepos, err := client.ListOrgRepos(ctx, org)
+		allOrgRepos, err = client.ListOrgRepos(ctx, org)
 		if err != nil {
 			printer.StepFail("Failed to list organization repositories")
 			printer.StepInfo("Hint: verify your token has 'repo' scope with: gh auth refresh -s repo")
@@ -2224,14 +2227,25 @@ func runEnableRepos(ctx context.Context, client forge.Client, printer *ui.Printe
 
 	if changed == 0 {
 		printer.StepInfo("All specified repositories are already enabled")
-		return nil
-	}
-	printer.StepDone(fmt.Sprintf("Updated %d repositories in config.yaml", changed))
+	} else {
+		printer.StepDone(fmt.Sprintf("Updated %d repositories in config.yaml", changed))
 
-	// Save updated config.
-	commitMsg := fmt.Sprintf("chore: enable %d repositories for fullsend enrollment", changed)
-	if err := saveRepoConfig(ctx, client, printer, org, cfg, commitMsg); err != nil {
-		return err
+		// Save updated config.
+		commitMsg := fmt.Sprintf("chore: enable %d repositories for fullsend enrollment", changed)
+		if err := saveRepoConfig(ctx, client, printer, org, cfg, commitMsg); err != nil {
+			return err
+		}
+	}
+
+	// Sync org variable visibility so enrolled repos can read dispatch
+	// variables like FULLSEND_MINT_URL. Runs even when changed == 0 to
+	// reconcile a previously failed best-effort sync on re-run.
+	if cfg.Dispatch.Mode == "oidc-mint" {
+		syncOrgVariableVisibility(ctx, client, printer, org, cfg, allOrgRepos)
+	}
+
+	if changed == 0 {
+		return nil
 	}
 
 	printer.Blank()
@@ -2242,6 +2256,52 @@ func runEnableRepos(ctx context.Context, client forge.Client, printer *ui.Printe
 	})
 
 	return nil
+}
+
+// dispatchOrgVariableNames returns the org-level variable names managed by the
+// dispatch layer, derived from the gcf provisioner to stay in sync automatically.
+var dispatchOrgVariableNames = gcf.NewProvisioner(gcf.Config{}, nil).OrgVariableNames()
+
+// syncOrgVariableVisibility updates the "selected" repository list for each
+// dispatch org variable so that all currently enrolled repos (plus the config
+// repo) can read them. This is best-effort: failures are logged as warnings
+// but do not fail the enable command, because the repo-maintenance workflow
+// can reconcile this later.
+func syncOrgVariableVisibility(ctx context.Context, client forge.Client, printer *ui.Printer, org string, cfg *config.OrgConfig, allOrgRepos []forge.Repository) {
+	// Collect IDs for all enabled repos.
+	enrolledRepoIDs := collectEnrolledRepoIDs(allOrgRepos, cfg.EnabledRepos())
+
+	// Ensure the config repo (.fullsend) is included — it needs access
+	// to dispatch variables for its own workflows.
+	seen := make(map[int64]bool, len(enrolledRepoIDs))
+	for _, id := range enrolledRepoIDs {
+		seen[id] = true
+	}
+	for _, r := range allOrgRepos {
+		if r.Name == forge.ConfigRepoName && !seen[r.ID] {
+			enrolledRepoIDs = append(enrolledRepoIDs, r.ID)
+			break
+		}
+	}
+
+	for _, varName := range dispatchOrgVariableNames {
+		exists, checkErr := client.OrgVariableExists(ctx, org, varName)
+		if checkErr != nil {
+			printer.StepWarn(fmt.Sprintf("could not check org variable %s: %v", varName, checkErr))
+			continue
+		}
+		if !exists {
+			// Variable not yet created (e.g. mint not provisioned yet).
+			continue
+		}
+
+		printer.StepStart(fmt.Sprintf("Updating %s visibility for enrolled repos", varName))
+		if setErr := client.SetOrgVariableRepos(ctx, org, varName, enrolledRepoIDs); setErr != nil {
+			printer.StepWarn(fmt.Sprintf("failed to update %s visibility: %v", varName, setErr))
+		} else {
+			printer.StepDone(fmt.Sprintf("Updated %s visibility (%d repos)", varName, len(enrolledRepoIDs)))
+		}
+	}
 }
 
 // runDisableRepos disables the specified repositories from fullsend enrollment.
@@ -2335,6 +2395,16 @@ func runDisableRepos(ctx context.Context, client forge.Client, printer *ui.Print
 	commitMsg := fmt.Sprintf("chore: disable %d repositories from fullsend enrollment", changed)
 	if err := saveRepoConfig(ctx, client, printer, org, cfg, commitMsg); err != nil {
 		return err
+	}
+
+	// Sync org variable visibility to revoke access for disabled repos.
+	if cfg.Dispatch.Mode == "oidc-mint" {
+		allOrgRepos, listErr := client.ListOrgRepos(ctx, org)
+		if listErr != nil {
+			printer.StepWarn(fmt.Sprintf("could not list org repos for variable sync: %v", listErr))
+		} else {
+			syncOrgVariableVisibility(ctx, client, printer, org, cfg, allOrgRepos)
+		}
 	}
 
 	printer.Blank()

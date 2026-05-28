@@ -1968,6 +1968,47 @@ func (c *LiveClient) DeleteOrgVariable(ctx context.Context, org, name string) er
 	return &APIError{StatusCode: resp.StatusCode, Message: "unexpected status deleting org variable"}
 }
 
+// SetOrgVariableRepos sets the list of repositories that can access an org variable.
+func (c *LiveClient) SetOrgVariableRepos(ctx context.Context, org, name string, repoIDs []int64) error {
+	if repoIDs == nil {
+		repoIDs = []int64{}
+	}
+	payload := map[string]any{
+		"selected_repository_ids": repoIDs,
+	}
+
+	resp, err := c.put(ctx, fmt.Sprintf("/orgs/%s/actions/variables/%s/repositories", org, name), payload)
+	if err != nil {
+		return fmt.Errorf("set org variable repos for %s: %w", name, err)
+	}
+	resp.Body.Close()
+	return nil
+}
+
+// GetOrgVariableRepos returns the repository IDs that have access to an org variable.
+func (c *LiveClient) GetOrgVariableRepos(ctx context.Context, org, name string) ([]int64, error) {
+	resp, err := c.get(ctx, fmt.Sprintf("/orgs/%s/actions/variables/%s/repositories", org, name))
+	if err != nil {
+		return nil, fmt.Errorf("get org variable repos for %s: %w", name, err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Repositories []struct {
+			ID int64 `json:"id"`
+		} `json:"repositories"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode org variable repos for %s: %w", name, err)
+	}
+
+	ids := make([]int64, len(result.Repositories))
+	for i, r := range result.Repositories {
+		ids[i] = r.ID
+	}
+	return ids, nil
+}
+
 // isNotFound checks whether an error is a 404 API error.
 func isNotFound(err error) bool {
 	var apiErr *APIError
