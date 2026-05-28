@@ -582,6 +582,26 @@ func TestResolveLinuxBinary_Download(t *testing.T) {
 	assert.NoError(t, validateLinuxBinary(binPath), "downloaded binary should be a valid Linux/amd64 ELF")
 }
 
+func TestAgentWorkingDirExcludes_ContainsKnownPatterns(t *testing.T) {
+	// Verify the exclusion list contains the known agent working directories.
+	expected := []string{".agentready/", ".fullsend-workspace/"}
+	for _, pattern := range expected {
+		found := false
+		for _, exclude := range agentWorkingDirExcludes {
+			if exclude == pattern {
+				found = true
+				break
+			}
+		}
+		assert.True(t, found, "agentWorkingDirExcludes should contain %q", pattern)
+	}
+}
+
+func TestAgentWorkingDirExcludes_NotEmpty(t *testing.T) {
+	assert.NotEmpty(t, agentWorkingDirExcludes,
+		"agentWorkingDirExcludes must not be empty — agents create working dirs that need exclusion")
+}
+
 func TestReadOIDCAuthFile_Success(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "auth")
 	require.NoError(t, os.WriteFile(f, []byte("bearer test-token"), 0o600))

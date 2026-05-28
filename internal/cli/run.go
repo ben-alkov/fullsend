@@ -43,6 +43,14 @@ const (
 	maxContextScanDepth = 5
 )
 
+// agentWorkingDirExcludes lists directory patterns that agents may create
+// during execution but must never commit. These are added to
+// .git/info/exclude before the agent runs so git ignores them entirely.
+var agentWorkingDirExcludes = []string{
+	".agentready/",
+	".fullsend-workspace/",
+}
+
 func newRunCmd() *cobra.Command {
 	var fullsendDir string
 	var outputBase string
@@ -448,6 +456,14 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 				printer.StepDone("Injected org-level AGENTS.md (target repo has none)")
 			}
 		}
+	}
+
+	// 8a-2. Exclude agent working directories from git tracking.
+	// Agents may create working directories (e.g. .agentready/) during
+	// execution. These must never appear in commits. Adding them to
+	// .git/info/exclude ensures git status/add ignores them entirely.
+	if err := excludeAgentWorkingDirs(sandboxName, repoDir, printer); err != nil {
+		printer.StepWarn("Could not exclude agent working dirs: " + err.Error())
 	}
 
 	// 8b. Copy agent-input files (if configured).
@@ -1246,6 +1262,25 @@ func relOrAbs(base, path string) string {
 		return path
 	}
 	return rel
+}
+
+// excludeAgentWorkingDirs adds agent working directory patterns to
+// .git/info/exclude so they are invisible to git status and git add.
+func excludeAgentWorkingDirs(sandboxName, repoDir string, printer *ui.Printer) error {
+	var lines []string
+	for _, pattern := range agentWorkingDirExcludes {
+		lines = append(lines, pattern)
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	payload := strings.Join(lines, "\n")
+	excludeCmd := fmt.Sprintf("printf '%%s\\n' '%s' >> %s/.git/info/exclude",
+		payload, repoDir)
+	if _, _, _, err := sandbox.Exec(sandboxName, excludeCmd, 5*time.Second); err != nil {
+		return fmt.Errorf("writing git exclude: %w", err)
+	}
+	return nil
 }
 
 // hasAgentsMD checks whether the repo directory contains an AGENTS.md file
