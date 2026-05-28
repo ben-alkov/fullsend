@@ -1258,3 +1258,13 @@ func TestEncodeBase64(t *testing.T) {
 	result := encodeBase64([]byte("hello"))
 	assert.Equal(t, "aGVsbG8=", result)
 }
+
+func TestNewLiveGCFClient_SetsQuotaProject(t *testing.T) {
+	c := NewLiveGCFClient("target-project")
+	assert.Equal(t, "target-project", c.Client.QuotaProject)
+}
+
+func TestNewLiveGCFClient_EmptyQuotaProject(t *testing.T) {
+	c := NewLiveGCFClient("")
+	assert.Empty(t, c.Client.QuotaProject)
+}
