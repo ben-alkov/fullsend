@@ -293,8 +293,8 @@ func runMintEnrollOrg(ctx context.Context, printer *ui.Printer, org, project, re
 		}
 		printer.StepInfo(fmt.Sprintf("  Would add %s to ALLOWED_ORGS", org))
 		printer.StepInfo(fmt.Sprintf("  Would copy PEMs from %s for %d roles", sourceOrg, len(roleList)))
-		printer.StepInfo(fmt.Sprintf("  Would grant roles/aiplatform.user to %s/.fullsend", org))
-		printer.StepInfo(fmt.Sprintf("  Would update WIF condition to include %s", org))
+		printer.Blank()
+		printer.StepInfo("To grant Vertex AI access, run 'fullsend inference enroll' separately")
 		return nil
 	}
 
@@ -324,28 +324,13 @@ func runMintEnrollOrg(ctx context.Context, printer *ui.Printer, org, project, re
 	}
 	printer.StepDone("Org registered in mint")
 
-	// Step 5: Grant Vertex AI access.
-	printer.StepStart("Granting Vertex AI access")
-	if err := provisioner.GrantOrgVertexAIAccess(ctx, org); err != nil {
-		printer.StepFail("Failed to grant Vertex AI access")
-		return fmt.Errorf("granting Vertex AI access: %w", err)
-	}
-	printer.StepDone("Vertex AI access granted (propagation may take several minutes)")
-
-	// Step 6: Update WIF provider condition to include this org.
-	printer.StepStart("Updating WIF provider condition")
-	if err := provisioner.EnsureOrgInWIFCondition(ctx, org); err != nil {
-		printer.StepFail("Failed to update WIF condition")
-		return fmt.Errorf("updating WIF condition: %w", err)
-	}
-	printer.StepDone("WIF condition updated")
-
 	printer.Blank()
 	printer.Summary("Enrollment complete", []string{
 		fmt.Sprintf("Organization: %s", org),
 		fmt.Sprintf("Roles: %s", strings.Join(roleList, ", ")),
 		fmt.Sprintf("Mint URL: %s", discovery.URL),
-		fmt.Sprintf("Next: fullsend admin install %s --mint-url=%s --skip-mint-check", org, discovery.URL),
+		fmt.Sprintf("Next: fullsend inference enroll %s --project=%s", org, project),
+		fmt.Sprintf("Then: fullsend admin install %s --mint-url=%s --skip-mint-check", org, discovery.URL),
 	})
 
 	return nil

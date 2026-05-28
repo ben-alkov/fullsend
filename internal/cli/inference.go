@@ -27,6 +27,8 @@ to the GitHub admin who runs 'fullsend admin install'.`,
 	}
 	cmd.AddCommand(newInferenceProvisionCmd())
 	cmd.AddCommand(newInferenceStatusCmd())
+	cmd.AddCommand(newInferenceEnrollCmd())
+	cmd.AddCommand(newInferenceUnenrollCmd())
 	return cmd
 }
 
@@ -405,4 +407,210 @@ func formatStatusEnv(result *inferenceStatusResult) string {
 		sb.WriteString(fmt.Sprintf("FULLSEND_GCP_WIF_PROVIDER=%s\n", result.WIFProvider))
 	}
 	return sb.String()
+}
+
+func newInferenceEnrollCmd() *cobra.Command {
+	var project string
+	var pool string
+	var provider string
+	var dryRun bool
+
+	cmd := &cobra.Command{
+		Use:   "enroll <org>",
+		Short: "Grant an org Vertex AI access and add it to the WIF condition",
+		Long: `Enrolls a GitHub organization for inference by:
+
+  1. Granting roles/aiplatform.user to the org's .fullsend repo principal
+  2. Adding the org to the WIF provider's attribute condition
+
+This command manages the inference-layer access that was previously
+bundled into 'fullsend mint enroll'. Run it after 'inference provision'
+to grant a new org access to an existing WIF pool.
+
+Repo-scoped enrollment is handled by 'inference provision' directly.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if project == "" {
+				return fmt.Errorf("--project is required")
+			}
+			if !gcpProjectPattern.MatchString(project) {
+				return fmt.Errorf("invalid GCP project ID %q: must be 6-30 lowercase letters, digits, and hyphens", project)
+			}
+
+			org := strings.ToLower(args[0])
+			if err := validateOrgName(org); err != nil {
+				return err
+			}
+
+			printer := ui.New(cmd.OutOrStdout())
+
+			if dryRun {
+				return runInferenceEnrollDryRun(printer, org, project, pool, provider)
+			}
+
+			return runInferenceEnroll(cmd, printer, org, project, pool, provider)
+		},
+	}
+
+	cmd.Flags().StringVar(&project, "project", "", "GCP project ID for Vertex AI (required)")
+	cmd.Flags().StringVar(&pool, "pool", "fullsend-pool", "WIF pool name")
+	cmd.Flags().StringVar(&provider, "provider", "github-oidc", "WIF provider name")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview changes without making them")
+
+	return cmd
+}
+
+func runInferenceEnrollDryRun(printer *ui.Printer, org, project, pool, provider string) error {
+	printer.Banner(Version())
+	printer.Blank()
+	printer.Header("Dry run: enroll org " + org + " for inference")
+	printer.Blank()
+	printer.StepInfo(fmt.Sprintf("Organization: %s", org))
+	printer.StepInfo(fmt.Sprintf("GCP project:  %s", project))
+	printer.StepInfo(fmt.Sprintf("WIF pool:     %s", pool))
+	printer.StepInfo(fmt.Sprintf("WIF provider: %s", provider))
+	printer.Blank()
+	printer.StepInfo("Would perform:")
+	printer.StepInfo(fmt.Sprintf("  1. Grant roles/aiplatform.user to %s/.fullsend principal", org))
+	printer.StepInfo(fmt.Sprintf("  2. Add %s to WIF provider %s attribute condition", org, provider))
+	printer.Blank()
+	return nil
+}
+
+func runInferenceEnroll(cmd *cobra.Command, printer *ui.Printer, org, project, pool, provider string) error {
+	printer.Banner(Version())
+	printer.Blank()
+	printer.Header("Enrolling org " + org + " for inference")
+	printer.Blank()
+
+	ctx := cmd.Context()
+
+	gcpClient := gcf.NewLiveGCFClient()
+	provisioner := gcf.NewProvisioner(gcf.Config{
+		ProjectID:   project,
+		GitHubOrgs:  []string{org},
+		WIFPoolName: pool,
+		WIFProvider: provider,
+	}, gcpClient)
+
+	printer.StepStart("Granting Vertex AI access")
+	if err := provisioner.GrantOrgVertexAIAccess(ctx, org); err != nil {
+		printer.StepFail("Failed to grant Vertex AI access")
+		return fmt.Errorf("granting Vertex AI access: %w", err)
+	}
+	printer.StepDone("Vertex AI access granted")
+
+	printer.StepStart("Updating WIF provider condition")
+	if err := provisioner.EnsureOrgInWIFCondition(ctx, org); err != nil {
+		printer.StepFail("Failed to update WIF condition")
+		return fmt.Errorf("updating WIF condition: %w", err)
+	}
+	printer.StepDone("WIF condition updated")
+
+	printer.Blank()
+	printer.Summary("Inference enrollment complete", []string{
+		fmt.Sprintf("Organization: %s", org),
+		fmt.Sprintf("GCP project: %s", project),
+		"IAM policy changes may take up to 7 minutes to propagate",
+	})
+
+	return nil
+}
+
+func newInferenceUnenrollCmd() *cobra.Command {
+	var project string
+	var pool string
+	var provider string
+	var dryRun bool
+
+	cmd := &cobra.Command{
+		Use:   "unenroll <org>",
+		Short: "Remove an org from the WIF condition",
+		Long: `Removes a GitHub organization from the inference WIF provider's
+attribute condition.
+
+Note: the IAM binding (roles/aiplatform.user) is NOT automatically
+revoked. To fully revoke access, remove the IAM binding manually in
+the GCP console or via gcloud.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if project == "" {
+				return fmt.Errorf("--project is required")
+			}
+			if !gcpProjectPattern.MatchString(project) {
+				return fmt.Errorf("invalid GCP project ID %q: must be 6-30 lowercase letters, digits, and hyphens", project)
+			}
+
+			org := strings.ToLower(args[0])
+			if err := validateOrgName(org); err != nil {
+				return err
+			}
+
+			printer := ui.New(cmd.OutOrStdout())
+
+			if dryRun {
+				return runInferenceUnenrollDryRun(printer, org, project, pool, provider)
+			}
+
+			return runInferenceUnenroll(cmd, printer, org, project, pool, provider)
+		},
+	}
+
+	cmd.Flags().StringVar(&project, "project", "", "GCP project ID for Vertex AI (required)")
+	cmd.Flags().StringVar(&pool, "pool", "fullsend-pool", "WIF pool name")
+	cmd.Flags().StringVar(&provider, "provider", "github-oidc", "WIF provider name")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview changes without making them")
+
+	return cmd
+}
+
+func runInferenceUnenrollDryRun(printer *ui.Printer, org, project, pool, provider string) error {
+	printer.Banner(Version())
+	printer.Blank()
+	printer.Header("Dry run: unenroll org " + org + " from inference")
+	printer.Blank()
+	printer.StepInfo(fmt.Sprintf("Organization: %s", org))
+	printer.StepInfo(fmt.Sprintf("GCP project:  %s", project))
+	printer.StepInfo(fmt.Sprintf("WIF pool:     %s", pool))
+	printer.StepInfo(fmt.Sprintf("WIF provider: %s", provider))
+	printer.Blank()
+	printer.StepInfo("Would perform:")
+	printer.StepInfo(fmt.Sprintf("  1. Remove %s from WIF provider %s attribute condition", org, provider))
+	printer.Blank()
+	printer.StepWarn("IAM binding (roles/aiplatform.user) is NOT revoked automatically")
+	printer.Blank()
+	return nil
+}
+
+func runInferenceUnenroll(cmd *cobra.Command, printer *ui.Printer, org, project, pool, provider string) error {
+	printer.Banner(Version())
+	printer.Blank()
+	printer.Header("Unenrolling org " + org + " from inference")
+	printer.Blank()
+
+	ctx := cmd.Context()
+
+	gcpClient := gcf.NewLiveGCFClient()
+	provisioner := gcf.NewProvisioner(gcf.Config{
+		ProjectID:   project,
+		GitHubOrgs:  []string{org},
+		WIFPoolName: pool,
+		WIFProvider: provider,
+	}, gcpClient)
+
+	printer.StepStart("Removing org from WIF provider condition")
+	if err := provisioner.RemoveOrgFromWIFCondition(ctx, org); err != nil {
+		printer.StepFail("Failed to update WIF condition")
+		return fmt.Errorf("updating WIF condition: %w", err)
+	}
+	printer.StepDone("WIF condition updated")
+
+	printer.Blank()
+	printer.Summary("Inference unenrollment complete", []string{
+		fmt.Sprintf("Organization: %s", org),
+		fmt.Sprintf("GCP project: %s", project),
+		"Note: IAM binding (roles/aiplatform.user) was NOT revoked — remove manually if needed",
+	})
+
+	return nil
 }

@@ -1181,10 +1181,36 @@ func (p *Provisioner) GrantOrgVertexAIAccess(ctx context.Context, org string) er
 		return fmt.Errorf("getting project number: %w", err)
 	}
 
+	return p.grantOrgVertexAIAccessWithNumber(ctx, projectNumber, org)
+}
+
+func (p *Provisioner) grantOrgVertexAIAccessWithNumber(ctx context.Context, projectNumber, org string) error {
 	principal := fmt.Sprintf("principalSet://iam.googleapis.com/projects/%s/locations/global/workloadIdentityPools/%s/attribute.repository/%s/.fullsend",
 		projectNumber, p.cfg.WIFPoolName, org)
 	if err := p.gcpAPI.SetProjectIAMBinding(ctx, p.cfg.ProjectID, principal, "roles/aiplatform.user"); err != nil {
 		return fmt.Errorf("granting Vertex AI access for org %s: %w", org, err)
+	}
+	return nil
+}
+
+// GrantRepoVertexAIAccess grants roles/aiplatform.user to a specific repo's
+// principal so that its workflows can call Vertex AI.
+func (p *Provisioner) GrantRepoVertexAIAccess(ctx context.Context, repo string) error {
+	repo = strings.ToLower(repo)
+
+	projectNumber, err := p.gcpAPI.GetProjectNumber(ctx, p.cfg.ProjectID)
+	if err != nil {
+		return fmt.Errorf("getting project number: %w", err)
+	}
+
+	return p.grantRepoVertexAIAccessWithNumber(ctx, projectNumber, repo)
+}
+
+func (p *Provisioner) grantRepoVertexAIAccessWithNumber(ctx context.Context, projectNumber, repo string) error {
+	principal := fmt.Sprintf("principalSet://iam.googleapis.com/projects/%s/locations/global/workloadIdentityPools/%s/attribute.repository/%s",
+		projectNumber, p.cfg.WIFPoolName, repo)
+	if err := p.gcpAPI.SetProjectIAMBinding(ctx, p.cfg.ProjectID, principal, "roles/aiplatform.user"); err != nil {
+		return fmt.Errorf("granting Vertex AI access for repo %s: %w", repo, err)
 	}
 	return nil
 }
@@ -1408,21 +1434,15 @@ func (p *Provisioner) ProvisionWIF(ctx context.Context) (wifProvider string, err
 		projectNumber = wifResult.projectNumber
 	}
 
-	// IAM policy changes can take up to 7 minutes to propagate.
-	// Workflows that rely on these bindings may fail during that window.
 	if p.cfg.Repo != "" {
-		principal := fmt.Sprintf("principalSet://iam.googleapis.com/projects/%s/locations/global/workloadIdentityPools/%s/attribute.repository/%s",
-			projectNumber, p.cfg.WIFPoolName, repo)
-		if err := p.gcpAPI.SetProjectIAMBinding(ctx, p.cfg.ProjectID, principal, "roles/aiplatform.user"); err != nil {
-			return "", fmt.Errorf("granting Vertex AI access for repo %s: %w", repo, err)
+		if err := p.grantRepoVertexAIAccessWithNumber(ctx, projectNumber, repo); err != nil {
+			return "", err
 		}
 		log.Printf("granted roles/aiplatform.user to %s (propagation may take several minutes)", repo)
 	} else {
 		for _, org := range orgs {
-			principal := fmt.Sprintf("principalSet://iam.googleapis.com/projects/%s/locations/global/workloadIdentityPools/%s/attribute.repository/%s/.fullsend",
-				projectNumber, p.cfg.WIFPoolName, org)
-			if err := p.gcpAPI.SetProjectIAMBinding(ctx, p.cfg.ProjectID, principal, "roles/aiplatform.user"); err != nil {
-				return "", fmt.Errorf("granting Vertex AI access for org %s: %w", org, err)
+			if err := p.grantOrgVertexAIAccessWithNumber(ctx, projectNumber, org); err != nil {
+				return "", err
 			}
 		}
 		log.Printf("granted roles/aiplatform.user to %d org(s) (propagation may take several minutes)", len(orgs))
