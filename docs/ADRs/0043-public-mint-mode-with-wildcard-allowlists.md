@@ -40,7 +40,7 @@ Keep explicit `ALLOWED_ORGS` and `PER_REPO_WIF_REPOS` only; no `*` semantics. Pu
 
 ### Public mint with wildcards and upstream-only workflow provenance
 
-Introduce a **public mint mode** when `ALLOWED_ORGS` contains `*`, with `job_workflow_ref` restricted to an allowlisted set of workflows under `fullsend-ai/fullsend`. Explicit org/repo lists without `*` continue to denote **tight** deployments.
+Introduce a **public mint mode** when `ALLOWED_ORGS` contains `*`, with `job_workflow_ref` restricted to workflows under `fullsend-ai/fullsend/.github/workflows/`. Explicit org/repo lists without `*` continue to denote **tight** deployments.
 
 **Chosen.**
 
@@ -57,7 +57,7 @@ Introduce a **public mint mode** when `ALLOWED_ORGS` contains `*`, with `job_wor
 
    **Tight mint:** `WIF_PROVIDER_NAME` points at the org-merged provider (CEL lists known orgs). `PER_REPO_WIF_REPOS` may list specific `owner/repo` values so those repos use per-repo provider ids (`gh-{owner}-{repo}`) instead of the default.
 
-   **Public mint:** Operators provision a **single permissive** WIF provider (CEL does not enumerate orgs/repos) and set **`WIF_PROVIDER_NAME` to that provider’s id**. Leave `PER_REPO_WIF_REPOS` **unset or empty** so every `repository` claim falls through to the default—matching current `resolveWIFProvider` behavior without code changes. Mint authorization is in application checks (`ALLOWED_ORGS=*`, `job_workflow_ref`, `ALLOWED_WORKFLOW_FILES`, `ROLE_APP_IDS`, installation scoping), not in STS org/repo enumeration.
+   **Public mint:** Operators provision a **single permissive** WIF provider (CEL does not enumerate orgs/repos) and set **`WIF_PROVIDER_NAME` to that provider’s id**. Leave `PER_REPO_WIF_REPOS` **unset or empty** so every `repository` claim falls through to the default—matching current `resolveWIFProvider` behavior without code changes. Mint authorization is in application checks (`ALLOWED_ORGS=*`, `job_workflow_ref`, `ROLE_APP_IDS`, installation scoping), not in STS org/repo enumeration.
 
    **Note:** `PER_REPO_WIF_REPOS=*` does **not** mean “all repos use the default provider” in today’s implementation; it registers the literal key `*` and does not match real repo names. Public mode should **omit** `PER_REPO_WIF_REPOS`, not set it to `*`.
 
@@ -65,13 +65,13 @@ Introduce a **public mint mode** when `ALLOWED_ORGS` contains `*`, with `job_wor
 
 3. **`PER_REPO_WIF_REPOS` (tight mode optional).** Remains for **tight** deployments: explicit `owner/repo` entries select per-repo STS providers and enable legacy `job_workflow_ref` paths under `{owner}/{repo}/.github/workflows/`. Unused in public mode (empty/unset).
 
-4. **Workflow provenance in public mode.** When `ALLOWED_ORGS` contains `*`, `prevalidateOIDCToken` **only** accepts `job_workflow_ref` under `fullsend-ai/fullsend/.github/workflows/`. Reject `{org}/.fullsend/` and `{owner}/{repo}/` self-workflow prefixes. `ALLOWED_WORKFLOW_FILES` must be an **explicit** basename allowlist covering the built-in `reusable-{stage}.yml` files (and `reusable-dispatch.yml` where routing mints occur); `*` is not permitted in public mode.
+4. **Workflow provenance in public mode.** When `ALLOWED_ORGS` contains `*`, `prevalidateOIDCToken` **only** accepts `job_workflow_ref` under `fullsend-ai/fullsend/.github/workflows/`. Reject `{org}/.fullsend/` and `{owner}/{repo}/` self-workflow prefixes.
 
-5. **Org event dispatch ([ADR 0041](0041-synchronous-workflow-call-event-dispatch.md)).** Per-org and per-repo installs converge on upstream reusables for **event-driven** agent runs. Public mint does not carve out an exception for legacy `{org}/.fullsend/` workflow paths. Non-event entry points that [ADR 0041](0041-synchronous-workflow-call-event-dispatch.md) still allows on `workflow_dispatch` (e.g. `repo-maintenance.yml`, manual prioritize) must either call an allowlisted `reusable-*.yml` or use **tight** mint until they do. Implementation of ADR 0041 in `.fullsend` is a separate delivery track; the **design** for org dispatch is not open.
+5. **Org event dispatch ([ADR 0041](0041-synchronous-workflow-call-event-dispatch.md)).** Per-org and per-repo installs converge on upstream reusables for **event-driven** agent runs. Public mint does not carve out an exception for legacy `{org}/.fullsend/` workflow paths. Non-event entry points that [ADR 0041](0041-synchronous-workflow-call-event-dispatch.md) still allows on `workflow_dispatch` (e.g. `repo-maintenance.yml`, manual prioritize) must either call an upstream `reusable-*.yml` or use **tight** mint until they do. Implementation of ADR 0041 in `.fullsend` is a separate delivery track; the **design** for org dispatch is not open.
 
 6. **Ref pinning.** Any ref on `fullsend-ai/fullsend` is acceptable in `job_workflow_ref` (e.g. `@refs/tags/v0`, `@refs/heads/main`, commit SHA). The mint validates **repository and path** (`fullsend-ai/fullsend/.github/workflows/<file>`), not a pinned tag set. Stricter ref policy may be added later without changing the public/tight split.
 
-7. **Shared mint caller.** Mint requests in public mode must run inside allowlisted reusable workflows and use `fullsend-ai/fullsend/.github/actions/mint-token` at a caller-chosen ref. The reusable **workflow file** is the attestable unit in `job_workflow_ref`, not the composite action path.
+7. **Shared mint caller.** Mint requests in public mode must run inside upstream reusable workflows and use `fullsend-ai/fullsend/.github/actions/mint-token` at a caller-chosen ref. The reusable **workflow file** is the attestable unit in `job_workflow_ref`, not the composite action path.
 
 8. **Unchanged mint gates.** Issuer, audience (`OIDC_AUDIENCE`), expiry/skew, STS exchange, `ALLOWED_ROLES`, `ROLE_APP_IDS`, and per-role `rolePermissions` downscoping remain mandatory.
 
@@ -80,12 +80,12 @@ Introduce a **public mint mode** when `ALLOWED_ORGS` contains `*`, with `job_wor
 10. **New agent roles (not derived from an existing role).** Adding a capability that needs a **new** GitHub App identity or permission set (not “coder with a different harness”) requires, in order:
    - a new **shared** GitHub App (installed by adopting orgs),
    - mint configuration updates (`ROLE_APP_IDS`, `rolePermissions`, `ALLOWED_ROLES`),
-   - a new **shared** workflow file under `fullsend-ai/fullsend/.github/workflows/` on the public mint `ALLOWED_WORKFLOW_FILES` list.
+   - a new **shared** workflow file under `fullsend-ai/fullsend/.github/workflows/`.
    Reusing an existing role’s App (e.g. fix → coder) is unchanged ([ADR 0007](0007-per-role-github-apps.md)).
 
 11. **Deferred to future ADRs (mint-only):**
     - Dedicated reusable workflow(s) for custom agent **stages** beyond the built-in set.
-    - **Prioritize** on `workflow_dispatch`: whether manual prioritize mints via an allowlisted `reusable-*.yml` or remains tight-mint-only until wired ([ADR 0041](0041-synchronous-workflow-call-event-dispatch.md) keeps non-event `workflow_dispatch` entry points).
+    - **Prioritize** on `workflow_dispatch`: whether manual prioritize mints via an upstream `reusable-*.yml` or remains tight-mint-only until wired ([ADR 0041](0041-synchronous-workflow-call-event-dispatch.md) keeps non-event `workflow_dispatch` entry points).
     - Mint infrastructure: WIF pool/provider provisioning, Cloud Function deployment, CEL definitions, abuse controls, WAF, and monitoring.
 
 12. **Normative specs (`docs/normative/`).** Not required for this decision. The reference mint is implemented in `internal/mint/` and configured via documented env vars; this ADR plus [ADR 0029](0029-central-token-mint-secretless-fullsend.md) are the contract for that implementation. A versioned normative spec is **out of scope** until there are multiple independent mint implementations that must interoperate on the same byte-level env and claim rules.
@@ -95,7 +95,7 @@ Introduce a **public mint mode** when `ALLOWED_ORGS` contains `*`, with `job_wor
 - Public mode: `ALLOWED_ORGS=*`, permissive provider id in `WIF_PROVIDER_NAME`, `PER_REPO_WIF_REPOS` empty. Tight mode: explicit `ALLOWED_ORGS`, org-merged provider in `WIF_PROVIDER_NAME`, optional `PER_REPO_WIF_REPOS` list.
 - Provider provisioning and IAM are deferred to a mint infrastructure ADR; this ADR does not specify how providers are created.
 - Custom agents remain configuration-only unless a new shared App, mint role, and upstream workflow file are added.
-- Org and per-repo **public** mint both assume event-driven runs mint from allowlisted `fullsend-ai/fullsend` reusables per [ADR 0041](0041-synchronous-workflow-call-event-dispatch.md) and [ADR 0033](0033-per-repo-installation-mode.md); legacy `{org}/.fullsend/` provenance is not supported in public mode.
+- Org and per-repo **public** mint both assume event-driven runs mint from `fullsend-ai/fullsend` reusables per [ADR 0041](0041-synchronous-workflow-call-event-dispatch.md) and [ADR 0033](0033-per-repo-installation-mode.md); legacy `{org}/.fullsend/` provenance is not supported in public mode.
 - Ref-any on `fullsend-ai/fullsend` trades pinning rigor for simpler rollout; supply-chain risk on upstream repo refs is accepted for now.
 - Public and tight modes share the same mint routing code; only deployed provider CEL and env values differ. LLM access stays on install-scoped providers, not the mint STS provider.
 
