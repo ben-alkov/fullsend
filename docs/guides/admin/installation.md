@@ -503,10 +503,11 @@ The `admin install` command performs all setup in a single invocation. For organ
 | Role | Command | What it does |
 |------|---------|-------------|
 | GCP Admin (Mint) | `fullsend mint deploy` | Deploy the token mint Cloud Function |
-| GCP Admin (Mint) | `fullsend mint enroll <org\|owner/repo>` | Register an org or repo in the mint, store PEMs |
+| GCP Admin (Mint) | `fullsend mint enroll <org\|owner/repo>` | Register an org or repo in the mint, store PEMs (does not grant Agent Platform access — use `inference provision`) |
 | GCP Admin (Mint) | `fullsend mint unenroll <org\|owner/repo>` | Remove an org or repo from the mint |
 | GCP Admin (Mint) | `fullsend mint status` | Inspect mint state and PEM health |
-| GCP Admin (Inference) | `fullsend inference provision <org\|owner/repo>` | Create WIF pool/provider for Agent Platform |
+| GCP Admin (Inference) | `fullsend inference provision <org\|owner/repo>` | Create WIF pool/provider and grant Agent Platform access (idempotent — safe to re-run for new orgs) |
+| GCP Admin (Inference) | `fullsend inference deprovision <org\|owner/repo>` | Remove org or repo from WIF |
 | GCP Admin (Inference) | `fullsend inference status <org\|owner/repo>` | Check WIF health, print config values |
 | GitHub Maintainer | `fullsend github setup <org\|owner/repo>` | Configure GitHub org or repo (no GCP needed) |
 | GitHub Maintainer | `fullsend github enroll <org> [repo...]` | Add repositories to agent enrollment |

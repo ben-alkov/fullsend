@@ -22,11 +22,12 @@ func newInferenceCmd() *cobra.Command {
 
 These commands only require GCP project access — no GitHub token or
 mint project is needed. Use them to set up Workload Identity Federation
-for Vertex AI inference, then hand off the WIF provider resource name
+for Agent Platform inference, then hand off the WIF provider resource name
 to the GitHub admin who runs 'fullsend admin install'.`,
 	}
 	cmd.AddCommand(newInferenceProvisionCmd())
 	cmd.AddCommand(newInferenceStatusCmd())
+	cmd.AddCommand(newInferenceDeprovisionCmd())
 	return cmd
 }
 
@@ -64,7 +65,7 @@ func newInferenceProvisionCmd() *cobra.Command {
 		Use:   "provision <org|owner/repo>",
 		Short: "Create WIF infrastructure for inference",
 		Long: `Provisions Workload Identity Federation infrastructure in a GCP project
-for GitHub Actions to authenticate and access Vertex AI.
+for GitHub Actions to authenticate and access Agent Platform.
 
 Org-scoped mode (e.g. 'fullsend inference provision acme'):
   Creates a WIF pool and provider scoped to all repos in the org.
@@ -94,6 +95,10 @@ WIF pools are always created at locations/global.`,
 				return fmt.Errorf("--provider is not supported in repo-scoped mode (provider ID is auto-generated from owner/repo)")
 			}
 
+			if org == gcf.PlaceholderOrg {
+				return fmt.Errorf("cannot provision reserved placeholder org %q", org)
+			}
+
 			printer := ui.New(cmd.OutOrStdout())
 
 			if dryRun {
@@ -104,7 +109,7 @@ WIF pools are always created at locations/global.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&project, "project", "", "GCP project ID for Vertex AI (required)")
+	cmd.Flags().StringVar(&project, "project", "", "GCP project ID for Agent Platform (required)")
 	cmd.Flags().StringVar(&pool, "pool", "fullsend-pool", "WIF pool name")
 	cmd.Flags().StringVar(&provider, "provider", "github-oidc", "WIF provider name (org-scoped only)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview changes without making them")
@@ -241,11 +246,15 @@ Use --format=json to get a machine-readable status + config output.`,
 				return fmt.Errorf("--provider is not supported in repo-scoped mode (provider ID is auto-generated from owner/repo)")
 			}
 
+			if org == gcf.PlaceholderOrg {
+				return fmt.Errorf("cannot check status of reserved placeholder org %q", org)
+			}
+
 			return runInferenceStatus(cmd, org, repo, project, pool, provider, format)
 		},
 	}
 
-	cmd.Flags().StringVar(&project, "project", "", "GCP project ID for Vertex AI (required)")
+	cmd.Flags().StringVar(&project, "project", "", "GCP project ID for Agent Platform (required)")
 	cmd.Flags().StringVar(&pool, "pool", "fullsend-pool", "WIF pool name")
 	cmd.Flags().StringVar(&provider, "provider", "github-oidc", "WIF provider name")
 	cmd.Flags().StringVar(&format, "format", "text", "output format: text, json, env")
@@ -405,4 +414,161 @@ func formatStatusEnv(result *inferenceStatusResult) string {
 		sb.WriteString(fmt.Sprintf("FULLSEND_GCP_WIF_PROVIDER=%s\n", result.WIFProvider))
 	}
 	return sb.String()
+}
+
+func newInferenceDeprovisionCmd() *cobra.Command {
+	var project string
+	var pool string
+	var provider string
+	var dryRun bool
+
+	cmd := &cobra.Command{
+		Use:   "deprovision <org|owner/repo>",
+		Short: "Remove inference WIF access for an org or repo",
+		Long: `Removes inference WIF access for a GitHub organization or repository.
+
+Org-scoped mode (e.g. 'fullsend inference deprovision acme'):
+  Removes the org from the shared WIF provider's attribute condition.
+  The WIF pool and provider are left in place for other orgs.
+
+Repo-scoped mode (e.g. 'fullsend inference deprovision acme/widget'):
+  Deletes the repo's dedicated WIF provider entirely.
+
+Note: the IAM binding (roles/aiplatform.user) is NOT automatically
+revoked. To fully revoke access, remove the IAM binding manually in
+the GCP console or via gcloud.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if project == "" {
+				return fmt.Errorf("--project is required")
+			}
+			if !gcpProjectPattern.MatchString(project) {
+				return fmt.Errorf("invalid GCP project ID %q: must be 6-30 lowercase letters, digits, and hyphens", project)
+			}
+
+			org, repo, err := parseOrgOrRepo(args[0])
+			if err != nil {
+				return err
+			}
+
+			if repo != "" && cmd.Flags().Changed("provider") {
+				return fmt.Errorf("--provider is not supported in repo-scoped mode (provider ID is auto-generated from owner/repo)")
+			}
+
+			if org == gcf.PlaceholderOrg {
+				return fmt.Errorf("cannot deprovision reserved placeholder org %q", org)
+			}
+
+			printer := ui.New(cmd.OutOrStdout())
+
+			if dryRun {
+				return runInferenceDeprovisionDryRun(printer, org, repo, project, pool, provider)
+			}
+
+			return runInferenceDeprovision(cmd, printer, org, repo, project, pool, provider)
+		},
+	}
+
+	cmd.Flags().StringVar(&project, "project", "", "GCP project ID for Agent Platform (required)")
+	cmd.Flags().StringVar(&pool, "pool", "fullsend-pool", "WIF pool name")
+	cmd.Flags().StringVar(&provider, "provider", "github-oidc", "WIF provider name (org-scoped only)")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview changes without making them")
+
+	return cmd
+}
+
+func runInferenceDeprovisionDryRun(printer *ui.Printer, org, repo, project, pool, provider string) error {
+	printer.Banner(Version())
+	printer.Blank()
+
+	if repo != "" {
+		printer.Header("Dry run: deprovision repo " + repo + " from inference")
+		printer.Blank()
+		parts := strings.SplitN(repo, "/", 2)
+		providerID := gcf.BuildRepoProviderID(parts[0], parts[1])
+		printer.StepInfo(fmt.Sprintf("Repository:   %s", repo))
+		printer.StepInfo(fmt.Sprintf("GCP project:  %s", project))
+		printer.StepInfo(fmt.Sprintf("WIF pool:     %s", pool))
+		printer.StepInfo(fmt.Sprintf("WIF provider: %s (repo-scoped)", providerID))
+		printer.Blank()
+		printer.StepInfo("Would perform:")
+		printer.StepInfo(fmt.Sprintf("  1. Delete WIF provider %s", providerID))
+	} else {
+		printer.Header("Dry run: deprovision org " + org + " from inference")
+		printer.Blank()
+		printer.StepInfo(fmt.Sprintf("Organization: %s", org))
+		printer.StepInfo(fmt.Sprintf("GCP project:  %s", project))
+		printer.StepInfo(fmt.Sprintf("WIF pool:     %s", pool))
+		printer.StepInfo(fmt.Sprintf("WIF provider: %s", provider))
+		printer.Blank()
+		printer.StepInfo("Would perform:")
+		printer.StepInfo(fmt.Sprintf("  1. Remove %s from WIF provider %s attribute condition", org, provider))
+	}
+
+	printer.Blank()
+	printer.StepWarn("IAM binding (roles/aiplatform.user) is NOT revoked automatically")
+	printer.Blank()
+	return nil
+}
+
+func runInferenceDeprovision(cmd *cobra.Command, printer *ui.Printer, org, repo, project, pool, provider string) error {
+	printer.Banner(Version())
+	printer.Blank()
+
+	ctx := cmd.Context()
+	gcpClient := gcf.NewLiveGCFClient(project)
+
+	if repo != "" {
+		printer.Header("Deprovisioning inference for repo: " + repo)
+		printer.Blank()
+
+		parts := strings.SplitN(repo, "/", 2)
+		providerID := gcf.BuildRepoProviderID(parts[0], parts[1])
+
+		provisioner := gcf.NewProvisioner(gcf.Config{
+			ProjectID:   project,
+			WIFPoolName: pool,
+		}, gcpClient)
+
+		printer.StepStart("Deleting WIF provider " + providerID)
+		if err := provisioner.DeleteWIFProvider(ctx, providerID); err != nil {
+			printer.StepFail("Failed to delete WIF provider")
+			return fmt.Errorf("deleting WIF provider: %w", err)
+		}
+		printer.StepDone("WIF provider deleted")
+
+		printer.Blank()
+		printer.Summary("Inference deprovisioning complete", []string{
+			fmt.Sprintf("Repository: %s", repo),
+			fmt.Sprintf("GCP project: %s", project),
+			fmt.Sprintf("Deleted WIF provider: %s", providerID),
+			"Note: IAM binding (roles/aiplatform.user) was NOT revoked — remove manually if needed",
+		})
+	} else {
+		printer.Header("Deprovisioning inference for org: " + org)
+		printer.Blank()
+
+		provisioner := gcf.NewProvisioner(gcf.Config{
+			ProjectID:   project,
+			GitHubOrgs:  []string{org},
+			WIFPoolName: pool,
+			WIFProvider: provider,
+		}, gcpClient)
+
+		printer.StepStart("Removing org from WIF provider condition")
+		if err := provisioner.RemoveOrgFromWIFCondition(ctx, org); err != nil {
+			printer.StepFail("Failed to update WIF condition")
+			return fmt.Errorf("updating WIF condition: %w", err)
+		}
+		printer.StepDone("WIF condition updated")
+
+		printer.Blank()
+		printer.Summary("Inference deprovisioning complete", []string{
+			fmt.Sprintf("Organization: %s", org),
+			fmt.Sprintf("GCP project: %s", project),
+			"Note: IAM binding (roles/aiplatform.user) was NOT revoked — remove manually if needed",
+		})
+	}
+
+	return nil
 }

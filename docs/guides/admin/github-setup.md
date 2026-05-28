@@ -27,14 +27,14 @@ fullsend separates infrastructure management into distinct roles. A single perso
 | Role | Commands | Access Required | Provisions |
 |------|----------|-----------------|------------|
 | **GCP Admin (Mint)**\* | `fullsend mint deploy`, `mint enroll`, `mint unenroll`, `mint status` | GCP project with Cloud Functions, Secret Manager, IAM | Token mint Cloud Function, PEM secrets |
-| **GCP Admin (Inference)** | `fullsend inference provision`, `inference status` | GCP project with IAM, Agent Platform enabled | WIF pool/provider, IAM bindings for Agent Platform |
+| **GCP Admin (Inference)** | `fullsend inference provision`, `inference deprovision`, `inference status` | GCP project with IAM, Agent Platform enabled | WIF pool/provider, IAM bindings for Agent Platform |
 | **GitHub Maintainer (org)** | `fullsend github setup <org>`, `github enroll`, `github unenroll`, `github set`, `github status`, `github uninstall`, `github sync-scaffold` | GitHub org owner (`admin:org` scope) | GitHub Apps, config repo, org variables, workflows, enrollment |
 | **GitHub Maintainer (repo)** | `fullsend github setup <owner/repo>`, `github set` | GitHub repo admin (`repo` + `workflow` scopes) | Repo-level secrets, variables, shim workflow |
 | **Full Admin** | `fullsend admin install` | GCP + GitHub | Everything above in one command |
 
 \*The mint is fully self-hostable, but most users currently use the mint service hosted by the fullsend team for convenience. Work is in progress to offer this as a secure, trusted public service — reducing the need for per-org `mint enroll` operations and GCP-side management.
 
-The typical workflow: a GCP admin runs `mint deploy` (one-time), `mint enroll` (once per new org or repo), and `inference provision`, then hands off the mint URL and WIF provider resource name to a GitHub maintainer who runs `github setup`. For users of the fullsend-hosted mint, `mint deploy` is already done — only `mint enroll` is needed for new orgs or repos (planned to be eliminated in a future release).
+The typical workflow: a GCP admin runs `mint deploy` (one-time), `mint enroll` (once per new org or repo), and `inference provision` (to create WIF and grant Agent Platform access), then hands off the mint URL and WIF provider resource name to a GitHub maintainer who runs `github setup`. For users of the fullsend-hosted mint, `mint deploy` is already done — only `mint enroll` and `inference provision` are needed for new orgs (planned to be simplified in a future release).
 
 **Ordering flexibility:** GCP operations (`mint deploy`, `mint enroll`, `inference provision`) are pure GCP — they do not interact with GitHub and do not require the GitHub Apps to be installed. `mint enroll` copies app IDs from the mint's existing configuration (defaulting to `--source-org=fullsend-ai`), not from the target org's GitHub installations. The GitHub Apps must be installed on the target org before **agents can run**, but the timing relative to GCP setup is flexible:
 
@@ -231,7 +231,7 @@ fullsend github uninstall acme-corp
 
 This removes the `.fullsend` config repo, org variables (`FULLSEND_MINT_URL`), and org secrets (`FULLSEND_DISPATCH_TOKEN`). It also lists any installed GitHub Apps and provides links for manual deletion. Add `--yolo` to skip the confirmation prompt.
 
-> **Note:** `github uninstall` only removes GitHub-side configuration. GCP resources (mint, WIF, PEM secrets) are managed separately via `fullsend mint unenroll` and `fullsend inference` commands by the GCP administrator.
+> **Note:** `github uninstall` only removes GitHub-side configuration. GCP resources (mint, WIF, PEM secrets) are managed separately via `fullsend mint unenroll` and `fullsend inference deprovision` commands by the GCP administrator.
 
 ## Relationship to admin install
 
@@ -240,7 +240,7 @@ This removes the `.fullsend` config repo, org variables (`FULLSEND_MINT_URL`), a
 ```
 fullsend admin install <org>
   ├── mint deploy + mint enroll      → fullsend mint deploy + fullsend mint enroll <org>
-  ├── inference provision            → fullsend inference provision <org>
+  ├── inference provision             → fullsend inference provision <org>
   └── github setup                   → fullsend github setup <org> --mint-url=... --inference-wif-provider=...
 ```
 

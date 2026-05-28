@@ -16,6 +16,9 @@ func TestInferenceCommand_HasSubcommands(t *testing.T) {
 	}
 	assert.True(t, names["provision"], "expected provision subcommand")
 	assert.True(t, names["status"], "expected status subcommand")
+	assert.True(t, names["deprovision"], "expected deprovision subcommand")
+	assert.False(t, names["enroll"], "enroll is handled by provision, not a separate subcommand")
+	assert.False(t, names["unenroll"], "unenroll replaced by deprovision")
 }
 
 func TestInferenceCommand_RegisteredInRoot(t *testing.T) {
@@ -148,6 +151,24 @@ func TestInferenceProvisionCmd_RejectsInvalidOrgName(t *testing.T) {
 	err := cmd.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid")
+}
+
+func TestInferenceProvisionCmd_RejectsPlaceholderOrg(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"inference", "provision", "x0fullsend0placeholder",
+		"--project", "my-project"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot provision reserved placeholder org")
+}
+
+func TestInferenceProvisionCmd_RejectsPlaceholderOrgInRepoMode(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"inference", "provision", "x0fullsend0placeholder/somerepo",
+		"--project", "my-project"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot provision reserved placeholder org")
 }
 
 func TestInferenceProvisionCmd_RejectsInvalidRepoFormat(t *testing.T) {
@@ -368,6 +389,24 @@ func TestInferenceStatusCmd_RejectsProviderInRepoMode(t *testing.T) {
 	assert.Contains(t, err.Error(), "--provider is not supported in repo-scoped mode")
 }
 
+func TestInferenceStatusCmd_RejectsPlaceholderOrg(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"inference", "status", "x0fullsend0placeholder",
+		"--project", "my-project"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot check status of reserved placeholder org")
+}
+
+func TestInferenceStatusCmd_RejectsPlaceholderOrgInRepoMode(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"inference", "status", "x0fullsend0placeholder/somerepo",
+		"--project", "my-project"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot check status of reserved placeholder org")
+}
+
 func TestInferenceProvisionCmd_RejectsProviderInRepoMode(t *testing.T) {
 	cmd := newRootCmd()
 	cmd.SetArgs([]string{"inference", "provision", "acme/widget",
@@ -376,4 +415,138 @@ func TestInferenceProvisionCmd_RejectsProviderInRepoMode(t *testing.T) {
 	err := cmd.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--provider is not supported in repo-scoped mode")
+}
+
+// --- deprovision tests ---
+
+func TestInferenceDeprovisionCmd_RequiresArg(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"inference", "deprovision"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "accepts 1 arg(s)")
+}
+
+func TestInferenceDeprovisionCmd_RequiresProject(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"inference", "deprovision", "acme"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--project is required")
+}
+
+func TestInferenceDeprovisionCmd_RejectsInvalidProjectID(t *testing.T) {
+	tests := []struct {
+		name    string
+		project string
+	}{
+		{"uppercase", "MY-PROJECT"},
+		{"too short", "ab"},
+		{"starts with digit", "1project"},
+		{"starts with hyphen", "-project"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := newRootCmd()
+			cmd.SetArgs([]string{"inference", "deprovision", "acme",
+				"--project", tc.project, "--dry-run"})
+			err := cmd.Execute()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "invalid GCP project ID")
+		})
+	}
+}
+
+func TestInferenceDeprovisionCmd_DryRunOrgSucceeds(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"inference", "deprovision", "acme",
+		"--project", "my-project",
+		"--dry-run"})
+	err := cmd.Execute()
+	require.NoError(t, err)
+}
+
+func TestInferenceDeprovisionCmd_DryRunRepoSucceeds(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"inference", "deprovision", "acme/widget",
+		"--project", "my-project",
+		"--dry-run"})
+	err := cmd.Execute()
+	require.NoError(t, err)
+}
+
+func TestInferenceDeprovisionCmd_RejectsPlaceholderOrg(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"inference", "deprovision", "x0fullsend0placeholder",
+		"--project", "my-project"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot deprovision reserved placeholder org")
+}
+
+func TestInferenceDeprovisionCmd_RejectsPlaceholderOrgInRepoMode(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"inference", "deprovision", "x0fullsend0placeholder/somerepo",
+		"--project", "my-project"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot deprovision reserved placeholder org")
+}
+
+func TestInferenceDeprovisionCmd_RejectsInvalidOrgName(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"inference", "deprovision", "-invalid",
+		"--project", "my-project"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid")
+}
+
+func TestInferenceDeprovisionCmd_RejectsInvalidRepoFormat(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"inference", "deprovision", "acme/",
+		"--project", "my-project"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid")
+}
+
+func TestInferenceDeprovisionCmd_RejectsProviderInRepoMode(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"inference", "deprovision", "acme/widget",
+		"--project", "my-project",
+		"--provider", "custom-provider"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--provider is not supported in repo-scoped mode")
+}
+
+func TestInferenceDeprovisionCmd_Flags(t *testing.T) {
+	cmd := newInferenceDeprovisionCmd()
+
+	projectFlag := cmd.Flags().Lookup("project")
+	require.NotNil(t, projectFlag, "expected --project flag")
+
+	poolFlag := cmd.Flags().Lookup("pool")
+	require.NotNil(t, poolFlag, "expected --pool flag")
+	assert.Equal(t, "fullsend-pool", poolFlag.DefValue)
+
+	providerFlag := cmd.Flags().Lookup("provider")
+	require.NotNil(t, providerFlag, "expected --provider flag")
+	assert.Equal(t, "github-oidc", providerFlag.DefValue)
+
+	dryRunFlag := cmd.Flags().Lookup("dry-run")
+	require.NotNil(t, dryRunFlag, "expected --dry-run flag")
+}
+
+func TestInferenceDeprovisionCmd_DoesNotRequireGitHubToken(t *testing.T) {
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
+
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"inference", "deprovision", "acme",
+		"--project", "my-project",
+		"--dry-run"})
+	err := cmd.Execute()
+	require.NoError(t, err)
 }

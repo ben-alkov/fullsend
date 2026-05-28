@@ -106,7 +106,7 @@ A single mint instance can serve multiple orgs:
 
 ## Inference — Agent Platform with Workload Identity Federation
 
-> Managed by: `fullsend inference provision`, `fullsend inference status`
+> Managed by: `fullsend inference provision`, `fullsend inference deprovision`, `fullsend inference status`
 
 Inference authentication uses GCP Workload Identity Federation (WIF) to allow GitHub Actions to authenticate to Agent Platform without service account keys.
 

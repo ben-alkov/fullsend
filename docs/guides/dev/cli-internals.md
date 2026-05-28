@@ -21,6 +21,7 @@ fullsend
 │   └── status       [org]                   # Inspect mint state and PEM health
 ├── inference                                # GCP: inference WIF management
 │   ├── provision    <org|owner/repo>        # Create WIF pool/provider for Agent Platform
+│   ├── deprovision  <org|owner/repo>        # Remove WIF access for org or repo
 │   └── status       <org|owner/repo>        # Check WIF health, print config
 ├── github                                   # GitHub-only configuration
 │   ├── setup        <org|owner/repo>        # Configure fullsend (no GCP needed)
@@ -50,7 +51,7 @@ The `admin install` command performs all setup in a single invocation. The `mint
 | Phase 4: WIF provisioning | `fullsend inference provision` | GCP project (inference) |
 | Phases 5-7: GitHub setup + enrollment | `fullsend github setup` | GitHub only |
 
-The typical handoff: a GCP admin runs `mint deploy` and `inference provision`, then passes the mint URL and WIF provider resource name to a GitHub maintainer who runs `github setup --mint-url=... --inference-wif-provider=...`. See [Setting up with pre-provisioned infrastructure](../admin/github-setup.md).
+The typical handoff: a GCP admin runs `mint deploy`, `mint enroll`, and `inference provision`, then passes the mint URL and WIF provider resource name to a GitHub maintainer who runs `github setup --mint-url=... --inference-wif-provider=...`. See [Setting up with pre-provisioned infrastructure](../admin/github-setup.md).
 
 ### Token Resolution Chain
 

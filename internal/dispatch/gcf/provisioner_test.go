@@ -1291,7 +1291,7 @@ func TestProvisioner_Provision_SetProjectIAMBindingError(t *testing.T) {
 
 	_, err := p.Provision(context.Background())
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "granting Vertex AI access for org org")
+	assert.Contains(t, err.Error(), "granting Agent Platform access for org org")
 	assert.Contains(t, err.Error(), "project iam denied")
 }
 
@@ -1693,7 +1693,7 @@ func TestProvisionWIF_IAMBindingFails(t *testing.T) {
 
 	_, err := p.ProvisionWIF(context.Background())
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "granting Vertex AI access for org acme")
+	assert.Contains(t, err.Error(), "granting Agent Platform access for org acme")
 }
 
 func TestProvisionWIF_MultipleOrgs(t *testing.T) {
