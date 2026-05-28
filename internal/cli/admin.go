@@ -1738,8 +1738,10 @@ func runUninstall(ctx context.Context, client forge.Client, printer *ui.Printer,
 				printer.StepStart(fmt.Sprintf("Opening %s settings...", slug))
 				if err := browser.Open(ctx, deleteURL); err != nil {
 					printer.StepWarn(fmt.Sprintf("Could not open browser: %v", err))
+					printer.StepInfo(fmt.Sprintf("  Delete manually at: %s", deleteURL))
+				} else {
+					printer.StepDone(fmt.Sprintf("Opened %s — %s", slug, deleteURL))
 				}
-				printer.StepInfo(fmt.Sprintf("  Delete manually at: %s", deleteURL))
 			}
 			printer.Blank()
 		} else if listErr == nil {

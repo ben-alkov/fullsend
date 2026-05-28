@@ -1765,9 +1765,9 @@ func TestRunUninstall_NoBrowserOpenInCI(t *testing.T) {
 	require.NoError(t, err)
 
 	output := buf.String()
-	assert.Contains(t, output, "Delete manually at:")
-	assert.Contains(t, output, "fullsend-ai-coder")
-	// NopBrowser.Open returns nil, so the warning should never appear.
+	// NopBrowser.Open returns nil, so the success path runs.
+	assert.Contains(t, output, "Opened fullsend-ai-coder")
+	assert.Contains(t, output, "fullsend-ai-coder/advanced")
 	// DefaultBrowser.Open would fail in a headless environment, producing
 	// this warning — its absence proves NopBrowser was injected.
 	assert.NotContains(t, output, "Could not open browser")
