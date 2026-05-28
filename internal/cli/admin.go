@@ -1725,29 +1725,21 @@ func runUninstall(ctx context.Context, client forge.Client, printer *ui.Printer,
 
 		if len(existingSlugs) > 0 {
 			printer.Header("App cleanup")
+			printer.StepInfo("Opening browser for each app that needs to be deleted.")
+			printer.StepInfo("Click 'Delete GitHub App' on each page, then return here.")
+			printer.Blank()
 
+			var browser appsetup.BrowserOpener = appsetup.DefaultBrowser{}
 			if os.Getenv("CI") != "" {
-				printer.StepInfo("CI environment detected; skipping browser opens.")
-				for _, slug := range existingSlugs {
-					deleteURL := fmt.Sprintf("https://github.com/organizations/%s/settings/apps/%s/advanced", org, slug)
-					printer.StepInfo(fmt.Sprintf("  Delete manually at: %s", deleteURL))
+				browser = appsetup.NopBrowser{}
+			}
+			for _, slug := range existingSlugs {
+				deleteURL := fmt.Sprintf("https://github.com/organizations/%s/settings/apps/%s/advanced", org, slug)
+				printer.StepStart(fmt.Sprintf("Opening %s settings...", slug))
+				if err := browser.Open(ctx, deleteURL); err != nil {
+					printer.StepWarn(fmt.Sprintf("Could not open browser: %v", err))
 				}
-			} else {
-				printer.StepInfo("Opening browser for each app that needs to be deleted.")
-				printer.StepInfo("Click 'Delete GitHub App' on each page, then return here.")
-				printer.Blank()
-
-				browser := appsetup.DefaultBrowser{}
-				for _, slug := range existingSlugs {
-					deleteURL := fmt.Sprintf("https://github.com/organizations/%s/settings/apps/%s/advanced", org, slug)
-					printer.StepStart(fmt.Sprintf("Opening %s settings...", slug))
-					if err := browser.Open(ctx, deleteURL); err != nil {
-						printer.StepWarn(fmt.Sprintf("Could not open browser: %v", err))
-						printer.StepInfo(fmt.Sprintf("  Delete manually at: %s", deleteURL))
-					} else {
-						printer.StepDone(fmt.Sprintf("Opened %s", slug))
-					}
-				}
+				printer.StepInfo(fmt.Sprintf("  Delete manually at: %s", deleteURL))
 			}
 			printer.Blank()
 		} else if listErr == nil {

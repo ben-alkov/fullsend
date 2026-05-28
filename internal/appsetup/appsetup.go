@@ -58,6 +58,11 @@ type SecretExistsFunc func(role string) (bool, error)
 // StoreSecretFunc stores a PEM secret for a given role immediately after app creation.
 type StoreSecretFunc func(ctx context.Context, role, pem string) error
 
+// NopBrowser is a no-op browser used in CI/automated environments.
+type NopBrowser struct{}
+
+func (NopBrowser) Open(_ context.Context, _ string) error { return nil }
+
 // DefaultBrowser opens URLs using platform-specific commands.
 type DefaultBrowser struct{}
 
