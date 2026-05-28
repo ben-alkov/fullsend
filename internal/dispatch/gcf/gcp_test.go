@@ -1146,6 +1146,44 @@ func TestLiveGCFClient_UpdateServiceEnvVars(t *testing.T) {
 		})
 		require.NoError(t, err)
 	})
+
+	t.Run("context_canceled_during_polling", func(t *testing.T) {
+		callCount := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			callCount++
+			if callCount == 1 {
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"template": map[string]interface{}{
+						"containers": []interface{}{
+							map[string]interface{}{"image": "img", "env": []interface{}{}},
+						},
+					},
+				})
+				return
+			}
+			if callCount == 2 {
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"name": "projects/proj/locations/us-central1/operations/op-789",
+					"done": false,
+				})
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{"done": false})
+		}))
+		defer srv.Close()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		err := newTestClient(srv).UpdateServiceEnvVars(ctx, "proj", "us-central1", "my-svc", map[string]string{
+			"KEY": "val",
+		})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, context.Canceled)
+	})
 }
 
 // --- WaitForOperation ---
