@@ -51,10 +51,10 @@ const (
 var orgPool = []string{
 	"halfsend-01",
 	"halfsend-02",
-	// "halfsend-03", // not yet enrolled in mint
-	// "halfsend-04", // not yet enrolled in mint
-	// "halfsend-05", // not yet enrolled in mint
-	// "halfsend-06", // not yet enrolled in mint
+	"halfsend-03",
+	"halfsend-04",
+	"halfsend-05",
+	"halfsend-06",
 }
 
 // acquireOrg scans the pool for an unlocked org and acquires its lock.
