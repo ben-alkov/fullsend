@@ -999,6 +999,153 @@ func TestLiveGCFClient_UpdateServiceEnvVars(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "incomplete response")
 	})
+
+	t.Run("no_template", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{})
+		}))
+		defer srv.Close()
+
+		err := newTestClient(srv).UpdateServiceEnvVars(context.Background(), "proj", "us-central1", "my-svc", map[string]string{})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "has no template")
+	})
+
+	t.Run("container_not_object", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"template": map[string]interface{}{
+					"containers": []interface{}{"not-an-object"},
+				},
+			})
+		}))
+		defer srv.Close()
+
+		err := newTestClient(srv).UpdateServiceEnvVars(context.Background(), "proj", "us-central1", "my-svc", map[string]string{})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "container is not an object")
+	})
+
+	t.Run("malformed_get_response", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("not json"))
+		}))
+		defer srv.Close()
+
+		err := newTestClient(srv).UpdateServiceEnvVars(context.Background(), "proj", "us-central1", "my-svc", map[string]string{})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "decoding Cloud Run service")
+	})
+
+	t.Run("polling_operation_error", func(t *testing.T) {
+		callCount := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			callCount++
+			if callCount == 1 {
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"template": map[string]interface{}{
+						"containers": []interface{}{
+							map[string]interface{}{"image": "img", "env": []interface{}{}},
+						},
+					},
+				})
+				return
+			}
+			if callCount == 2 {
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"name": "projects/proj/locations/us-central1/operations/op-456",
+					"done": false,
+				})
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"done":  true,
+				"error": map[string]string{"message": "revision deployment failed"},
+			})
+		}))
+		defer srv.Close()
+
+		err := newTestClient(srv).UpdateServiceEnvVars(context.Background(), "proj", "us-central1", "my-svc", map[string]string{
+			"KEY": "val",
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "revision deployment failed")
+	})
+
+	t.Run("invalid_operation_name", func(t *testing.T) {
+		callCount := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			callCount++
+			if callCount == 1 {
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"template": map[string]interface{}{
+						"containers": []interface{}{
+							map[string]interface{}{"image": "img", "env": []interface{}{}},
+						},
+					},
+				})
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"name": "../../../evil",
+				"done": false,
+			})
+		}))
+		defer srv.Close()
+
+		err := newTestClient(srv).UpdateServiceEnvVars(context.Background(), "proj", "us-central1", "my-svc", map[string]string{
+			"KEY": "val",
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid Cloud Run operation name")
+	})
+
+	t.Run("multiple_env_vars_sorted", func(t *testing.T) {
+		callCount := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			callCount++
+			if callCount == 1 {
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"template": map[string]interface{}{
+						"containers": []interface{}{
+							map[string]interface{}{"image": "img", "env": []interface{}{}},
+						},
+					},
+				})
+				return
+			}
+			var body map[string]interface{}
+			json.NewDecoder(r.Body).Decode(&body)
+			tmpl := body["template"].(map[string]interface{})
+			containers := tmpl["containers"].([]interface{})
+			container := containers[0].(map[string]interface{})
+			envs := container["env"].([]interface{})
+			assert.Len(t, envs, 3)
+			assert.Equal(t, "ALPHA", envs[0].(map[string]interface{})["name"])
+			assert.Equal(t, "BETA", envs[1].(map[string]interface{})["name"])
+			assert.Equal(t, "GAMMA", envs[2].(map[string]interface{})["name"])
+
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{"done": true})
+		}))
+		defer srv.Close()
+
+		err := newTestClient(srv).UpdateServiceEnvVars(context.Background(), "proj", "us-central1", "my-svc", map[string]string{
+			"GAMMA": "3",
+			"ALPHA": "1",
+			"BETA":  "2",
+		})
+		require.NoError(t, err)
+	})
 }
 
 // --- WaitForOperation ---

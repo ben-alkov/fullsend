@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -1070,14 +1071,20 @@ func (c *LiveGCFClient) UpdateServiceEnvVars(ctx context.Context, projectID, reg
 	}
 
 	var service map[string]interface{}
-	if err := json.NewDecoder(getResp.Body).Decode(&service); err != nil {
+	if err := json.NewDecoder(io.LimitReader(getResp.Body, 10<<20)).Decode(&service); err != nil {
 		return fmt.Errorf("decoding Cloud Run service: %w", err)
 	}
 
 	// Build the env var array in Cloud Run format: [{name, value}, ...].
+	// Sort keys for deterministic PATCH payloads.
+	keys := make([]string, 0, len(envVars))
+	for k := range envVars {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
 	envArray := make([]map[string]string, 0, len(envVars))
-	for k, v := range envVars {
-		envArray = append(envArray, map[string]string{"name": k, "value": v})
+	for _, k := range keys {
+		envArray = append(envArray, map[string]string{"name": k, "value": envVars[k]})
 	}
 
 	// Navigate to template.containers[0] and replace its env field.
@@ -1120,7 +1127,7 @@ func (c *LiveGCFClient) UpdateServiceEnvVars(ctx context.Context, projectID, reg
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-	if err := json.NewDecoder(patchResp.Body).Decode(&op); err != nil {
+	if err := json.NewDecoder(io.LimitReader(patchResp.Body, 1<<20)).Decode(&op); err != nil {
 		return fmt.Errorf("decoding Cloud Run patch response: %w", err)
 	}
 
