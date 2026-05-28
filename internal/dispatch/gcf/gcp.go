@@ -1168,7 +1168,7 @@ func (c *LiveGCFClient) waitForCloudRunOperation(ctx context.Context, operationN
 				Message string `json:"message"`
 			} `json:"error"`
 		}
-		decodeErr := json.NewDecoder(resp.Body).Decode(&op)
+		decodeErr := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&op)
 		resp.Body.Close()
 		if decodeErr != nil {
 			return fmt.Errorf("decoding Cloud Run operation status: %w", decodeErr)
