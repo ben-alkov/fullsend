@@ -357,6 +357,32 @@ func TestBuildScanContextCommand_SourcesEnv(t *testing.T) {
 	assert.Contains(t, cmd, "-exec fullsend scan context")
 }
 
+func TestCopyFile(t *testing.T) {
+	t.Run("copies content and preserves permissions", func(t *testing.T) {
+		src := filepath.Join(t.TempDir(), "source")
+		dst := filepath.Join(t.TempDir(), "dest")
+
+		content := []byte("hello world")
+		require.NoError(t, os.WriteFile(src, content, 0o755))
+
+		require.NoError(t, copyFile(src, dst))
+
+		got, err := os.ReadFile(dst)
+		require.NoError(t, err)
+		assert.Equal(t, content, got)
+
+		info, err := os.Stat(dst)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o755), info.Mode().Perm())
+	})
+
+	t.Run("fails on missing source", func(t *testing.T) {
+		dst := filepath.Join(t.TempDir(), "dest")
+		err := copyFile("/no/such/file", dst)
+		assert.Error(t, err)
+	})
+}
+
 func TestCollectOpenshellLogs_EmptyRunDir(t *testing.T) {
 	// Should be a no-op when runDir is empty — no panic, no error.
 	printer := ui.New(io.Discard)

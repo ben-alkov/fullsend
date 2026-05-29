@@ -721,8 +721,20 @@ func bootstrapSandbox(sandboxName, repoDir, fullsendBinary string, h *harness.Ha
 		if err := validateLinuxBinary(localBinary); err != nil {
 			return fmt.Errorf("fullsend binary %q is not valid for the sandbox: %w", localBinary, err)
 		}
-		remoteBinary := fmt.Sprintf("%s/bin/fullsend", sandbox.SandboxWorkspace)
-		if err := sandbox.Upload(sandboxName, localBinary, remoteBinary); err != nil {
+		// Use UploadDir (tarball-based) instead of Upload for the binary.
+		// Upload silently fails for large files (~16MB); the tarball
+		// approach compresses and extracts reliably inside the sandbox.
+		remoteBinDir := fmt.Sprintf("%s/bin", sandbox.SandboxWorkspace)
+		remoteBinary := fmt.Sprintf("%s/fullsend", remoteBinDir)
+		tmpDir, err := os.MkdirTemp("", "fullsend-bin-upload-*")
+		if err != nil {
+			return fmt.Errorf("creating temp dir for binary upload: %w", err)
+		}
+		defer os.RemoveAll(tmpDir)
+		if err := copyFile(localBinary, filepath.Join(tmpDir, "fullsend")); err != nil {
+			return fmt.Errorf("staging fullsend binary: %w", err)
+		}
+		if err := sandbox.UploadDir(sandboxName, tmpDir, remoteBinDir); err != nil {
 			return fmt.Errorf("copying fullsend binary to sandbox: %w", err)
 		}
 		chmodCmd := fmt.Sprintf("chmod +x %s", remoteBinary)
@@ -1778,6 +1790,31 @@ func validateLinuxBinary(path string) error {
 		return fmt.Errorf("ELF machine is %s, expected %s for %s (set FULLSEND_SANDBOX_ARCH to override)", f.Machine, expected, arch)
 	}
 	return nil
+}
+
+// copyFile copies src to dst, preserving permissions.
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	info, err := in.Stat()
+	if err != nil {
+		return err
+	}
+	return os.Chmod(dst, info.Mode())
 }
 
 var validArchs = map[string]bool{"amd64": true, "arm64": true}
