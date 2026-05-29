@@ -551,20 +551,25 @@ func runMintEnrollOrg(ctx context.Context, printer *ui.Printer, org, project, re
 			}
 		}
 		printer.StepInfo(fmt.Sprintf("  Would add %s to ALLOWED_ORGS", org))
-		printer.StepInfo(fmt.Sprintf("  Would copy PEMs from %s for %d roles", appSet, len(roleList)))
+		printer.StepInfo(fmt.Sprintf("  Would copy or re-enable PEMs from %s for %d roles", appSet, len(roleList)))
+		printer.StepInfo(fmt.Sprintf("  Would add %s to WIF provider condition", org))
 		printer.Blank()
 		printer.StepInfo("To grant Agent Platform access, run 'fullsend inference provision' separately")
 		return nil
 	}
 
-	// Step 3: Copy PEM secrets from app set.
+	// Step 3: Copy PEM secrets from app set (or re-enable if disabled by unenroll).
 	for _, role := range roleList {
 		exists, existsErr := provisioner.SecretExists(ctx, org, role)
 		if existsErr != nil {
 			return fmt.Errorf("checking PEM for %s/%s: %w", org, role, existsErr)
 		}
 		if exists {
-			printer.StepDone(fmt.Sprintf("PEM exists: %s/%s", org, role))
+			if err := provisioner.EnablePEMSecrets(ctx, org, []string{role}); err != nil {
+				printer.StepFail(fmt.Sprintf("Failed to re-enable PEM for %s/%s", org, role))
+				return fmt.Errorf("re-enabling PEM for %s/%s: %w", org, role, err)
+			}
+			printer.StepDone(fmt.Sprintf("PEM ready: %s/%s (re-enabled)", org, role))
 			continue
 		}
 		printer.StepStart(fmt.Sprintf("Copying PEM for %s/%s from %s", org, role, appSet))
@@ -582,6 +587,14 @@ func runMintEnrollOrg(ctx context.Context, printer *ui.Printer, org, project, re
 		return fmt.Errorf("registering org: %w", err)
 	}
 	printer.StepDone("Org registered in mint")
+
+	// Step 5: Ensure org is in WIF provider condition.
+	printer.StepStart("Updating WIF provider condition")
+	if err := provisioner.EnsureOrgInWIFCondition(ctx, org); err != nil {
+		printer.StepFail("Failed to update WIF condition")
+		return fmt.Errorf("updating WIF condition: %w", err)
+	}
+	printer.StepDone("WIF condition updated")
 
 	printer.Blank()
 	printer.Summary("Enrollment complete", []string{

@@ -82,6 +82,7 @@ type GCFClient interface {
 	AddSecretVersion(ctx context.Context, projectID, secretID string, data []byte) error
 	AccessSecretVersion(ctx context.Context, projectID, secretID string) ([]byte, error)
 	DisableSecretVersion(ctx context.Context, projectID, secretID string) error
+	EnableSecretVersion(ctx context.Context, projectID, secretID string) error
 	DeleteSecret(ctx context.Context, projectID, secretID string) error
 
 	// IAM bindings
@@ -470,13 +471,17 @@ func (c *LiveGCFClient) DisableSecretVersion(ctx context.Context, projectID, sec
 	}
 
 	var version struct {
-		Name string `json:"name"`
+		Name  string `json:"name"`
+		State string `json:"state"`
 	}
 	if err := json.NewDecoder(io.LimitReader(getResp.Body, 1<<20)).Decode(&version); err != nil {
 		return fmt.Errorf("decoding secret version metadata: %w", err)
 	}
 	if !secretVersionPattern.MatchString(version.Name) {
 		return fmt.Errorf("secret version name %q does not match expected pattern", version.Name)
+	}
+	if version.State == "DISABLED" || version.State == "DESTROYED" {
+		return nil
 	}
 
 	// Disable the resolved version.
@@ -494,6 +499,62 @@ func (c *LiveGCFClient) DisableSecretVersion(ctx context.Context, projectID, sec
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		return fmt.Errorf("unexpected status %d disabling secret version: %s", resp.StatusCode, gcp.ExtractErrorMessage(body))
+	}
+	return nil
+}
+
+// EnableSecretVersion enables the latest version of a Secret Manager secret.
+// Mirrors DisableSecretVersion: resolves "latest" to a numeric version, then
+// enables it. No-op if the version is already enabled or does not exist.
+func (c *LiveGCFClient) EnableSecretVersion(ctx context.Context, projectID, secretID string) error {
+	getURL := fmt.Sprintf("https://secretmanager.googleapis.com/v1/projects/%s/secrets/%s/versions/latest",
+		url.PathEscape(projectID), url.PathEscape(secretID))
+
+	getResp, err := c.Client.DoRequest(ctx, http.MethodGet, getURL, "")
+	if err != nil {
+		return fmt.Errorf("resolving latest secret version: %w", err)
+	}
+	defer getResp.Body.Close()
+
+	if getResp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	if getResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(getResp.Body, 1<<20))
+		return fmt.Errorf("unexpected status %d resolving latest secret version: %s", getResp.StatusCode, gcp.ExtractErrorMessage(body))
+	}
+
+	var version struct {
+		Name  string `json:"name"`
+		State string `json:"state"`
+	}
+	if err := json.NewDecoder(io.LimitReader(getResp.Body, 1<<20)).Decode(&version); err != nil {
+		return fmt.Errorf("decoding secret version metadata: %w", err)
+	}
+	if !secretVersionPattern.MatchString(version.Name) {
+		return fmt.Errorf("secret version name %q does not match expected pattern", version.Name)
+	}
+	if version.State == "ENABLED" {
+		return nil
+	}
+	if version.State == "DESTROYED" {
+		return fmt.Errorf("secret version %s is destroyed and cannot be re-enabled", version.Name)
+	}
+
+	enableURL := fmt.Sprintf("https://secretmanager.googleapis.com/v1/%s:enable", version.Name)
+
+	resp, err := c.Client.DoRequest(ctx, http.MethodPost, enableURL, "{}")
+	if err != nil {
+		return fmt.Errorf("enabling secret version: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return fmt.Errorf("unexpected status %d enabling secret version: %s", resp.StatusCode, gcp.ExtractErrorMessage(body))
 	}
 	return nil
 }

@@ -99,7 +99,7 @@ fullsend admin install "$ORG_NAME" \
   --mint-project "$GCP_PROJECT"
 ```
 
-The installer automatically provisions [Workload Identity Federation (WIF)](https://cloud.google.com/iam/docs/workload-identity-federation) infrastructure (pool `fullsend-pool`, provider `github-oidc`, IAM bindings) in the inference project. WIF eliminates long-lived credentials — GitHub Actions exchange short-lived OIDC tokens for GCP access tokens. To use a pre-existing WIF provider instead, pass `--inference-wif-provider "$WIF_PROVIDER"` with the full resource name (`projects/{number}/locations/global/workloadIdentityPools/{pool}/providers/{id}`) — the CLI validates the format and skips auto-provisioning (see [Advanced: pre-configure WIF](#advanced-pre-configure-wif) below).
+The installer automatically provisions [Workload Identity Federation (WIF)](https://cloud.google.com/iam/docs/workload-identity-federation) infrastructure (pool `fullsend-inference`, provider `github-oidc`, IAM bindings) in the inference project. WIF eliminates long-lived credentials — GitHub Actions exchange short-lived OIDC tokens for GCP access tokens. To use a pre-existing WIF provider instead, pass `--inference-wif-provider "$WIF_PROVIDER"` with the full resource name (`projects/{number}/locations/global/workloadIdentityPools/{pool}/providers/{id}`) — the CLI validates the format and skips auto-provisioning (see [Advanced: pre-configure WIF](#advanced-pre-configure-wif) below).
 
 `--mint-project` specifies the GCP project where the OIDC token mint Cloud Function is deployed. It can be the same project as `--inference-project` or a separate project. The installer automatically provisions a Cloud Function, WIF pool (`fullsend-pool`), WIF provider (`github-oidc`), and Secret Manager secrets in the mint project. A service account (`fullsend-mint`) is also created as the Cloud Function's runtime identity to access Secret Manager — this is internal infrastructure and does not require any admin setup.
 
@@ -533,14 +533,14 @@ If you need custom pool names, attribute conditions, or want to share a provider
 export GCP_PROJECT="<gcp-project>"
 export ORG_NAME="<org-name>"
 
-gcloud iam workload-identity-pools create fullsend-pool \
+gcloud iam workload-identity-pools create fullsend-inference \
   --location=global \
-  --display-name="Fullsend" \
+  --display-name="Fullsend Inference" \
   --project="$GCP_PROJECT"
 
 gcloud iam workload-identity-pools providers create-oidc github-oidc \
   --location=global \
-  --workload-identity-pool=fullsend-pool \
+  --workload-identity-pool=fullsend-inference \
   --issuer-uri="https://token.actions.githubusercontent.com" \
   --attribute-mapping="google.subject=assertion.sub,attribute.repository_owner=assertion.repository_owner,attribute.repository=assertion.repository" \
   --attribute-condition="assertion.repository_owner == '$ORG_NAME'" \
@@ -551,7 +551,7 @@ gcloud iam workload-identity-pools providers create-oidc github-oidc \
 
 ```bash
 export PROJECT_NUMBER=$(gcloud projects describe "$GCP_PROJECT" --format='value(projectNumber)')
-export WIF_PRINCIPAL="principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/fullsend-pool/attribute.repository_owner/$ORG_NAME"
+export WIF_PRINCIPAL="principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/fullsend-inference/attribute.repository_owner/$ORG_NAME"
 
 gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
   --role="roles/aiplatform.user" \
@@ -566,7 +566,7 @@ gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
 **Pass the provider to the installer:**
 
 ```bash
-export WIF_PROVIDER="projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/fullsend-pool/providers/github-oidc"
+export WIF_PROVIDER="projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/fullsend-inference/providers/github-oidc"
 
 fullsend admin install "$ORG_NAME" \
   --inference-project "$GCP_PROJECT" \

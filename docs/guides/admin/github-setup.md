@@ -15,7 +15,7 @@ For the all-in-one setup that provisions both GCP and GitHub in a single command
   - Token mint URL (`--mint-url`) — the HTTPS endpoint of the deployed mint Cloud Function
 - **From your Inference provider admin** (currently GCP Agent Platform, formerly Vertex AI; other providers planned):
   - GCP project ID (`--inference-project`) — the project where Agent Platform is enabled (e.g., `my-gcp-project`)
-  - WIF provider resource name (`--inference-wif-provider`) — the full resource path, e.g., `projects/123456789/locations/global/workloadIdentityPools/fullsend-pool/providers/github-oidc` (note: the leading number is the GCP **project number**, not the project ID string; your GCP admin can find it with `gcloud projects describe <project-id> --format='value(projectNumber)'`)
+  - WIF provider resource name (`--inference-wif-provider`) — the full resource path, e.g., `projects/123456789/locations/global/workloadIdentityPools/fullsend-inference/providers/github-oidc` (note: the leading number is the GCP **project number**, not the project ID string; your GCP admin can find it with `gcloud projects describe <project-id> --format='value(projectNumber)'`)
   - GCP region for inference (`--inference-region`, defaults to `global`)
 
 > **Note:** You do NOT need GCP project access, `gcloud` authentication, or any IAM roles. All GCP infrastructure values are provided as flags.
@@ -89,7 +89,7 @@ Per-org mode creates a `.fullsend` config repository, deploys reusable workflows
 fullsend github setup acme-corp \
   --mint-url=<MINT_URL> \
   --inference-project=my-gcp-project \
-  --inference-wif-provider=projects/123456789/locations/global/workloadIdentityPools/fullsend-pool/providers/github-oidc \
+  --inference-wif-provider=projects/123456789/locations/global/workloadIdentityPools/fullsend-inference/providers/github-oidc \
   --inference-region=global
 ```
 
@@ -124,7 +124,7 @@ Pass `--skip-app-setup` when the GitHub Apps are already installed on the org �
 fullsend github setup acme-corp \
   --mint-url=<MINT_URL> \
   --inference-project=my-gcp-project \
-  --inference-wif-provider=projects/123456789/locations/global/workloadIdentityPools/fullsend-pool/providers/github-oidc \
+  --inference-wif-provider=projects/123456789/locations/global/workloadIdentityPools/fullsend-inference/providers/github-oidc \
   --skip-app-setup
 ```
 
@@ -155,7 +155,7 @@ Per-repo mode bootstraps a single repository with a `.fullsend/` directory, shim
 fullsend github setup acme-corp/my-service \
   --mint-url=<MINT_URL> \
   --inference-project=my-gcp-project \
-  --inference-wif-provider=projects/123456789/locations/global/workloadIdentityPools/fullsend-pool/providers/github-oidc
+  --inference-wif-provider=projects/123456789/locations/global/workloadIdentityPools/fullsend-inference/providers/github-oidc
 ```
 
 Per-repo mode differs from per-org in these ways:

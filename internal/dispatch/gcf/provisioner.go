@@ -86,6 +86,11 @@ const (
 	oidcIssuer      = "https://token.actions.githubusercontent.com"
 	oidcAudience    = "fullsend-mint"
 	functionName    = "fullsend-mint"
+
+	// DefaultInferencePool is the WIF pool used by inference commands.
+	// Separate from the mint pool (defaultPool) so that mint and inference
+	// lifecycle operations don't interfere with each other.
+	DefaultInferencePool = "fullsend-inference"
 )
 
 // Config holds the inputs for GCF mint provisioning.
@@ -1581,6 +1586,25 @@ func (p *Provisioner) DisablePEMSecrets(ctx context.Context, org string, roles [
 		}
 		if err := p.gcpAPI.DisableSecretVersion(ctx, p.cfg.ProjectID, sid); err != nil {
 			return fmt.Errorf("disabling secret %s: %w", sid, err)
+		}
+	}
+	return nil
+}
+
+// EnablePEMSecrets re-enables the latest version of each PEM secret for an
+// org's roles. This reverses DisablePEMSecrets after a re-enrollment.
+// Skips secrets that do not exist.
+func (p *Provisioner) EnablePEMSecrets(ctx context.Context, org string, roles []string) error {
+	for _, role := range roles {
+		sid := secretID(org, role)
+		if err := p.gcpAPI.GetSecret(ctx, p.cfg.ProjectID, sid); err != nil {
+			if errors.Is(err, ErrSecretNotFound) {
+				continue
+			}
+			return fmt.Errorf("checking secret %s: %w", sid, err)
+		}
+		if err := p.gcpAPI.EnableSecretVersion(ctx, p.cfg.ProjectID, sid); err != nil {
+			return fmt.Errorf("enabling secret %s: %w", sid, err)
 		}
 	}
 	return nil

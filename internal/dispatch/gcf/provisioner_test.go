@@ -163,6 +163,10 @@ func (f *fakeGCFClient) DisableSecretVersion(_ context.Context, _ string, sid st
 	f.calls = append(f.calls, "DisableSecretVersion")
 	return f.errs["DisableSecretVersion"]
 }
+func (f *fakeGCFClient) EnableSecretVersion(_ context.Context, _ string, sid string) error {
+	f.calls = append(f.calls, "EnableSecretVersion")
+	return f.errs["EnableSecretVersion"]
+}
 func (f *fakeGCFClient) DeleteSecret(_ context.Context, _ string, sid string) error {
 	f.calls = append(f.calls, "DeleteSecret")
 	if f.secrets != nil {
@@ -2937,6 +2941,62 @@ func TestDisablePEMSecrets_GetSecretError(t *testing.T) {
 	err := p.DisablePEMSecrets(context.Background(), "acme", []string{"coder"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "checking secret")
+}
+
+// --- EnablePEMSecrets tests ---
+
+func TestEnablePEMSecrets_EnablesExistingSecrets(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.secrets = map[string]bool{
+		"fullsend-acme--coder-app-pem":  true,
+		"fullsend-acme--triage-app-pem": true,
+	}
+
+	p := NewProvisioner(Config{ProjectID: "proj1"}, fake)
+	err := p.EnablePEMSecrets(context.Background(), "acme", []string{"coder", "triage"})
+	require.NoError(t, err)
+
+	enableCount := 0
+	for _, call := range fake.calls {
+		if call == "EnableSecretVersion" {
+			enableCount++
+		}
+	}
+	assert.Equal(t, 2, enableCount)
+}
+
+func TestEnablePEMSecrets_SkipsMissingSecrets(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.secrets = map[string]bool{}
+
+	p := NewProvisioner(Config{ProjectID: "proj1"}, fake)
+	err := p.EnablePEMSecrets(context.Background(), "acme", []string{"coder"})
+	require.NoError(t, err)
+
+	assert.NotContains(t, fake.calls, "EnableSecretVersion")
+}
+
+func TestEnablePEMSecrets_GetSecretError(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.errs["GetSecret"] = fmt.Errorf("permission denied")
+
+	p := NewProvisioner(Config{ProjectID: "proj1"}, fake)
+	err := p.EnablePEMSecrets(context.Background(), "acme", []string{"coder"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "checking secret")
+}
+
+func TestEnablePEMSecrets_EnableError(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.secrets = map[string]bool{
+		"fullsend-acme--coder-app-pem": true,
+	}
+	fake.errs["EnableSecretVersion"] = fmt.Errorf("version destroyed")
+
+	p := NewProvisioner(Config{ProjectID: "proj1"}, fake)
+	err := p.EnablePEMSecrets(context.Background(), "acme", []string{"coder"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "enabling secret")
 }
 
 // --- DeletePEMSecrets tests ---
