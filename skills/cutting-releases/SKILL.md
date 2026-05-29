@@ -4,7 +4,7 @@ description: >
   Use when the user wants to tag a release, cut a release candidate, or ship a
   new version. Also use when asking about release process, versioning, or how
   GoReleaser is configured.
-allowed-tools: Read, Grep, Glob, AskUserQuestion, Bash(git tag:*), Bash(git log:*), Bash(git diff:*), Bash(git pull:*), Bash(git push:*), Bash(gh release:*), Bash(gh run:*), Bash(git checkout:*), Bash(git fetch:*), Bash(make lint:*), Bash(bash skills/cutting-releases/scripts/install-binary.sh:*)
+allowed-tools: Read, Grep, Glob, AskUserQuestion, Bash(git tag:*), Bash(git log:*), Bash(git diff:*), Bash(git pull:*), Bash(git push:*), Bash(gh release:*), Bash(gh run:*), Bash(git checkout:*), Bash(git fetch:*), Bash(bash skills/cutting-releases/scripts/install-binary.sh:*)
 ---
 
 # Cutting Releases
@@ -19,6 +19,12 @@ title comes from the tag annotation via `name_template` in `.goreleaser.yml`.
 Run this audit **before** tagging. The goal is to verify that moving
 the `v0` reusable-workflow tag and publishing new scaffold templates
 will not break downstream orgs.
+
+Start by fetching the latest remote state:
+
+```
+git fetch origin
+```
 
 ### A. Diff reusable workflows
 
