@@ -569,7 +569,7 @@ func runMintEnrollOrg(ctx context.Context, printer *ui.Printer, org, project, re
 				printer.StepFail(fmt.Sprintf("Failed to re-enable PEM for %s/%s", org, role))
 				return fmt.Errorf("re-enabling PEM for %s/%s: %w", org, role, err)
 			}
-			printer.StepDone(fmt.Sprintf("PEM exists: %s/%s", org, role))
+			printer.StepDone(fmt.Sprintf("PEM ready: %s/%s (re-enabled)", org, role))
 			continue
 		}
 		printer.StepStart(fmt.Sprintf("Copying PEM for %s/%s from %s", org, role, appSet))
