@@ -252,6 +252,9 @@ type audience []string
 func (a *audience) UnmarshalJSON(data []byte) error {
 	var s string
 	if json.Unmarshal(data, &s) == nil {
+		if strings.TrimSpace(s) == "" {
+			return fmt.Errorf("aud must not be empty")
+		}
 		*a = []string{s}
 		return nil
 	}
@@ -261,6 +264,11 @@ func (a *audience) UnmarshalJSON(data []byte) error {
 	}
 	if len(arr) == 0 {
 		return fmt.Errorf("aud must not be empty")
+	}
+	for _, v := range arr {
+		if strings.TrimSpace(v) == "" {
+			return fmt.Errorf("aud must not contain empty values")
+		}
 	}
 	*a = arr
 	return nil
