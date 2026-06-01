@@ -49,7 +49,7 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      stage: ${{ steps.role-check.outputs.skipped == 'true' && '' || steps.route.outputs.stage }}
+      stage: ${{ steps.role-check.outputs.skipped != 'true' && steps.route.outputs.stage || '' }}
       trigger_source: ${{ steps.route.outputs.trigger_source }}
       event_payload: ${{ steps.payload.outputs.event_payload }}
     steps:
