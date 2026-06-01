@@ -3,7 +3,7 @@
 // last to first, deleting expired tokens on each page. Reports how many
 // unexpired tokens remain and prints the URL for manual review.
 //
-// This is a helper for hack/cleanup-pats and is not intended to be run directly.
+// Usage: go run hack/cleanup-pats.go
 //
 //go:build ignore
 
