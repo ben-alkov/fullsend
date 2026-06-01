@@ -182,10 +182,8 @@ github_csma_run() {
 
     : >"${outfile}"
     : >"${errfile}"
-    if gh "$@" >"${outfile}" 2>"${errfile}"; then
-      cat "${outfile}"
-      return 0
-    fi
+    local rc=0
+    gh "$@" >"${outfile}" 2>"${errfile}" || rc=$?
 
     combined=$(cat "${outfile}" "${errfile}")
     if github_csma_is_rate_limit "${combined}"; then
@@ -193,10 +191,16 @@ github_csma_run() {
         _github_csma_sleep_after_rate_limit "${attempt}" "${resource}"
         continue
       fi
+      _github_csma_emit_failure "${combined}"
+      return 1
     fi
 
-    _github_csma_emit_failure "${combined}"
-    return 1
+    if (( rc != 0 )); then
+      _github_csma_emit_failure "${combined}"
+      return 1
+    fi
+    cat "${outfile}"
+    return 0
   done
 
   return 1
@@ -223,10 +227,8 @@ github_csma_run_pipe() {
 
     : >"${outfile}"
     : >"${errfile}"
-    if gh "$@" <"${infile}" >"${outfile}" 2>"${errfile}"; then
-      cat "${outfile}"
-      return 0
-    fi
+    local rc=0
+    gh "$@" <"${infile}" >"${outfile}" 2>"${errfile}" || rc=$?
 
     combined=$(cat "${outfile}" "${errfile}")
     if github_csma_is_rate_limit "${combined}"; then
@@ -234,10 +236,16 @@ github_csma_run_pipe() {
         _github_csma_sleep_after_rate_limit "${attempt}" "${resource}"
         continue
       fi
+      _github_csma_emit_failure "${combined}"
+      return 1
     fi
 
-    _github_csma_emit_failure "${combined}"
-    return 1
+    if (( rc != 0 )); then
+      _github_csma_emit_failure "${combined}"
+      return 1
+    fi
+    cat "${outfile}"
+    return 0
   done
 
   return 1
@@ -264,10 +272,8 @@ github_csma_run_cmd() {
 
     : >"${outfile}"
     : >"${errfile}"
-    if "$@" <"${infile}" >"${outfile}" 2>"${errfile}"; then
-      cat "${outfile}"
-      return 0
-    fi
+    local rc=0
+    "$@" <"${infile}" >"${outfile}" 2>"${errfile}" || rc=$?
 
     combined=$(cat "${outfile}" "${errfile}")
     if github_csma_is_rate_limit "${combined}"; then
@@ -275,10 +281,16 @@ github_csma_run_cmd() {
         _github_csma_sleep_after_rate_limit "${attempt}" "${resource}"
         continue
       fi
+      _github_csma_emit_failure "${combined}"
+      return 1
     fi
 
-    _github_csma_emit_failure "${combined}"
-    return 1
+    if (( rc != 0 )); then
+      _github_csma_emit_failure "${combined}"
+      return 1
+    fi
+    cat "${outfile}"
+    return 0
   done
 
   return 1
