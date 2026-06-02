@@ -194,7 +194,7 @@ Observability is a cross-cutting concern that touches every other component. Eac
 
 The catalog of available agent roles and their configurations. Responsible for defining what agent types exist, what capabilities each has, and how they are instantiated.
 
-The registry is the bridge between the abstract roles defined in [agent-architecture.md](problems/agent-architecture.md) (correctness agent, intent alignment agent, etc.) and the concrete runtime configurations that the harness uses to set up each agent.
+The registry is the bridge between the abstract roles defined in [agent-architecture.md](problems/agent-architecture.md) (correctness sub-agent, intent & coherence sub-agent, security sub-agent, etc.) and the concrete runtime configurations that the harness uses to set up each agent.
 
 Fullsend provides a base set of agent definitions. The adopting organization's **`.fullsend`** repository extends this with org-specific agents in its `agents/` directory, following the inheritance model: fullsend defaults, then org config, then per-repo overrides. (See [ADR 0003](ADRs/0003-org-config-repo-convention.md).)
 
