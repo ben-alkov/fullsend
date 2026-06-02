@@ -9,11 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fullsend-ai/fullsend/internal/harness"
 	"github.com/fullsend-ai/fullsend/internal/sandbox"
 	"github.com/fullsend-ai/fullsend/internal/security"
 	"github.com/fullsend-ai/fullsend/internal/ui"
 )
+
+const claudeDebugLog = "claude-debug.log"
 
 // ClaudeRuntime implements Runtime using the Claude Code CLI.
 type ClaudeRuntime struct{}
@@ -259,7 +260,7 @@ func installClaudeHooks(sandboxName string, hooks security.ClaudeSandboxHooks) e
 				return fmt.Errorf("setting TIRITH_FAIL_ON: %w", err)
 			}
 		}
-		if harness.BoolDefault(sh.Tirith.Enabled, true) {
+		if boolDefault(sh.Tirith.Enabled, true) {
 			envCmd := fmt.Sprintf("echo 'export TIRITH_REQUIRED=1' >> %s/.env", sandbox.SandboxWorkspace)
 			if _, _, _, err := sandbox.Exec(sandboxName, envCmd, 10*time.Second); err != nil {
 				return fmt.Errorf("setting TIRITH_REQUIRED: %w", err)
@@ -268,6 +269,13 @@ func installClaudeHooks(sandboxName string, hooks security.ClaudeSandboxHooks) e
 	}
 
 	return nil
+}
+
+func boolDefault(b *bool, def bool) bool {
+	if b == nil {
+		return def
+	}
+	return *b
 }
 
 func bootstrapPlugins(sandboxName, configDir string, plugins []string) error {

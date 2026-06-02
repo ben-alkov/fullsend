@@ -952,6 +952,45 @@ func TestValidateResourceTypes(t *testing.T) {
 	})
 }
 
+func TestHasURLReferences(t *testing.T) {
+	tests := []struct {
+		name string
+		h    Harness
+		want bool
+	}{
+		{
+			name: "local only",
+			h:    Harness{Agent: "agents/test.md", Policy: "policies/p.yaml", Skills: []string{"skills/a"}},
+			want: false,
+		},
+		{
+			name: "empty fields",
+			h:    Harness{Agent: "agents/test.md"},
+			want: false,
+		},
+		{
+			name: "URL agent",
+			h:    Harness{Agent: "https://example.com/agents/test.md#sha256=abc"},
+			want: true,
+		},
+		{
+			name: "URL policy",
+			h:    Harness{Agent: "agents/test.md", Policy: "https://example.com/p.yaml#sha256=abc"},
+			want: true,
+		},
+		{
+			name: "URL skill",
+			h:    Harness{Agent: "agents/test.md", Skills: []string{"skills/a", "https://example.com/s.md#sha256=abc"}},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.h.HasURLReferences())
+		})
+	}
+}
+
 func TestMatchesAllowedPrefix(t *testing.T) {
 	h := &Harness{
 		Agent: "agents/test.md",

@@ -8,8 +8,6 @@ import (
 	"github.com/fullsend-ai/fullsend/internal/ui"
 )
 
-const claudeDebugLog = "claude-debug.log"
-
 // RunMetrics collects execution statistics from stream parsing.
 type RunMetrics struct {
 	ToolCalls atomic.Int32
@@ -35,6 +33,7 @@ type TranscriptError struct {
 }
 
 // Runtime is an agent execution backend (LLM tool-use loop) inside the sandbox.
+// TODO: split transcript/debug helpers before adding a second runtime implementation.
 type Runtime interface {
 	Name() string
 	ConfigDir() string

@@ -40,13 +40,13 @@ This isn't a temporary implementation limitation that will be solved by bigger m
 
 ### The defense-in-depth argument
 
-A single monolithic review agent is a single point of failure. If that agent is fooled — by prompt injection, by a cleverly disguised malicious change, by a subtle logic error — all review is compromised. Multiple specialized sub-agents with different concerns create defense in depth: even if the correctness agent is fooled, the security agent might catch it. Even if the security agent misses something, the intent alignment agent might flag that the change doesn't match any authorized work.
+A single monolithic review agent is a single point of failure. If that agent is fooled — by prompt injection, by a cleverly disguised malicious change, by a subtle logic error — all review is compromised. Multiple specialized sub-agents with different concerns create defense in depth: even if the correctness agent is fooled, the security agent might catch it. Even if the security sub-agent misses something, the intent & coherence sub-agent might flag that the change doesn't match any authorized work.
 
 This maps directly to the zero-trust principle from the [security threat model](security-threat-model.md). Sub-agents don't trust each other's judgments — each independently evaluates the change from its own perspective. A merge requires all sub-agents to pass, not just one generalist to approve.
 
 ### The specialization argument
 
-Different review concerns require different context. A correctness reviewer needs deep understanding of the codebase's logic and patterns. A security reviewer needs knowledge of common vulnerability patterns and the organization's specific threat model. An intent alignment reviewer needs access to the intent repo and the feature authorization state. Loading all of this context into one agent is wasteful — each sub-agent loads only the context relevant to its concern, using its context window more effectively.
+Different review concerns require different context. A correctness reviewer needs deep understanding of the codebase's logic and patterns. A security reviewer needs knowledge of common vulnerability patterns and the organization's specific threat model. An intent & coherence reviewer needs access to the intent repo and the feature authorization state. Loading all of this context into one agent is wasteful — each sub-agent loads only the context relevant to its concern, using its context window more effectively.
 
 ## Review sub-agent decomposition
 
