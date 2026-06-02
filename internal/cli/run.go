@@ -24,8 +24,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/fullsend-ai/fullsend/internal/config"
 	"github.com/fullsend-ai/fullsend/internal/envfile"
+	"github.com/fullsend-ai/fullsend/internal/fetch"
 	"github.com/fullsend-ai/fullsend/internal/harness"
+	"github.com/fullsend-ai/fullsend/internal/resolve"
 	"github.com/fullsend-ai/fullsend/internal/sandbox"
 	"github.com/fullsend-ai/fullsend/internal/scaffold"
 	"github.com/fullsend-ai/fullsend/internal/security"
@@ -49,6 +52,7 @@ func newRunCmd() *cobra.Command {
 	var envFiles []string
 	var noPostScript bool
 	var debugFilter string
+	var offline bool
 
 	cmd := &cobra.Command{
 		Use:   "run <agent-name>",
@@ -58,7 +62,7 @@ func newRunCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			agentName := args[0]
 			printer := ui.New(os.Stdout)
-			return runAgent(agentName, fullsendDir, outputBase, targetRepo, fullsendBinary, envFiles, noPostScript, debugFilter, printer)
+			return runAgent(cmd.Context(), agentName, fullsendDir, outputBase, targetRepo, fullsendBinary, envFiles, noPostScript, debugFilter, offline, printer)
 		},
 	}
 
@@ -70,13 +74,14 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&noPostScript, "no-post-script", false, "skip post-script execution (agent still runs full inference)")
 	cmd.Flags().StringVar(&debugFilter, "debug", "", `enable Claude Code debug logging with optional category filter (e.g. "api,hooks")`)
 	cmd.Flags().Lookup("debug").NoOptDefVal = "*"
+	cmd.Flags().BoolVar(&offline, "offline", false, "reject network fetches; only use cached remote resources")
 	_ = cmd.MarkFlagRequired("fullsend-dir")
 	_ = cmd.MarkFlagRequired("target-repo")
 
 	return cmd
 }
 
-func runAgent(agentName, fullsendDir, outputBase, targetRepo, fullsendBinary string, envFiles []string, noPostScript bool, debug string, printer *ui.Printer) (runErr error) {
+func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRepo, fullsendBinary string, envFiles []string, noPostScript bool, debug string, offline bool, printer *ui.Printer) (runErr error) {
 	printer.Banner(Version())
 	printer.Blank()
 	printer.Header("Running agent: " + agentName)
@@ -107,6 +112,49 @@ func runAgent(agentName, fullsendDir, outputBase, targetRepo, fullsendBinary str
 	if err := h.ResolveRelativeTo(absFullsendDir); err != nil {
 		printer.StepFail("Path validation failed")
 		return fmt.Errorf("resolving paths: %w", err)
+	}
+
+	if h.HasURLReferences() {
+		orgConfigPath := filepath.Join(absFullsendDir, "config.yaml")
+		orgConfigData, err := os.ReadFile(orgConfigPath)
+		if err != nil {
+			printer.StepFail("Failed to load org config")
+			if os.IsNotExist(err) {
+				return fmt.Errorf("URL-referenced resources require an org-level config.yaml with allowed_remote_resources (expected at %s)", orgConfigPath)
+			}
+			return fmt.Errorf("reading org config for remote resource validation: %w", err)
+		}
+		orgCfg, err := config.ParseOrgConfig(orgConfigData)
+		if err != nil {
+			printer.StepFail("Failed to parse org config")
+			return fmt.Errorf("parsing org config: %w", err)
+		}
+
+		if err := h.ValidateAllowedRemoteResources(orgCfg.AllowedRemoteResources); err != nil {
+			printer.StepFail("Remote resource allowlist validation failed")
+			return fmt.Errorf("validating allowed remote resources: %w", err)
+		}
+
+		policy := fetch.DefaultPolicy
+		policy.Offline = offline
+
+		deps, err := resolve.ResolveHarness(ctx, h, resolve.ResolveOpts{
+			WorkspaceRoot: absFullsendDir,
+			FetchPolicy:   policy,
+			AuditLogPath:  filepath.Join(absFullsendDir, ".fullsend-cache", "fetch-audit.jsonl"),
+		})
+		if err != nil {
+			printer.StepFail("Remote resource resolution failed")
+			return fmt.Errorf("resolving remote resources: %w", err)
+		}
+
+		for _, dep := range deps {
+			if dep.CacheHit {
+				printer.StepInfo(fmt.Sprintf("Resolved %s (cache hit)", dep.URL))
+			} else {
+				printer.StepInfo(fmt.Sprintf("Fetched %s -> %s", dep.URL, dep.LocalPath))
+			}
+		}
 	}
 
 	if resolved, overridden := applySandboxImageOverride(h.Image); overridden {

@@ -424,11 +424,13 @@ func (h *Harness) ValidateRunnerEnv() error {
 }
 
 // ValidateFilesExist checks that all file paths referenced by the harness
-// exist on disk. Call after ResolveRelativeTo so paths are absolute.
-// Pre/post scripts run on the host and must be file paths (no inline args).
+// exist on disk. Callers must invoke ResolveRelativeTo first (to make
+// paths absolute), then resolve.ResolveHarness (to replace any URL
+// references with local cache paths). The IsURL guard inside is
+// defense-in-depth in case the ordering is violated.
 func (h *Harness) ValidateFilesExist() error {
 	check := func(label, path string) error {
-		if path == "" {
+		if path == "" || IsURL(path) {
 			return nil
 		}
 		if _, err := os.Stat(path); err != nil {
@@ -604,6 +606,21 @@ func (h *Harness) ValidateResourceTypes() error {
 	}
 
 	return nil
+}
+
+// HasURLReferences reports whether any declarative field (agent, policy, skills)
+// contains a URL. Used to skip remote resource validation and resolution when
+// the harness references only local paths.
+func (h *Harness) HasURLReferences() bool {
+	if IsURL(h.Agent) || IsURL(h.Policy) {
+		return true
+	}
+	for _, s := range h.Skills {
+		if IsURL(s) {
+			return true
+		}
+	}
+	return false
 }
 
 // MatchesAllowedPrefix reports whether rawURL starts with any entry in

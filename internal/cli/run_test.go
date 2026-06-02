@@ -81,6 +81,13 @@ func TestRunCommand_HasTargetRepoFlag(t *testing.T) {
 	require.Contains(t, annotations, "cobra_annotation_bash_completion_one_required_flag")
 }
 
+func TestRunCommand_HasOfflineFlag(t *testing.T) {
+	cmd := newRunCmd()
+	flag := cmd.Flags().Lookup("offline")
+	require.NotNil(t, flag)
+	assert.Equal(t, "false", flag.DefValue)
+}
+
 func TestBuildClaudeCommand_Basic(t *testing.T) {
 	cmd := buildClaudeCommand("hello-world", "", "/tmp/workspace/repo", nil, "")
 	assert.Contains(t, cmd, "cd /tmp/workspace/repo")
