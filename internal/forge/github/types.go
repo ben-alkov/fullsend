@@ -133,7 +133,7 @@ func AgentAppConfig(org, role, appSet string) AppConfig {
 		base.Permissions = AppPermissions{
 			Actions:      "read",
 			Contents:     "read",
-			PullRequests: "read",
+			PullRequests: "write",
 			Issues:       "write",
 		}
 		// No webhook events — triggered via workflow_dispatch from other agents.
