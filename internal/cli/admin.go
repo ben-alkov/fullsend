@@ -965,7 +965,7 @@ func runPerRepoInstall(ctx context.Context, c perRepoInstallConfig) error {
 
 	printer.StepStart("Writing per-repo scaffold files")
 	committed, err := client.CommitFiles(ctx, owner, repo,
-		"chore: initialize fullsend per-repo installation", files)
+		fmt.Sprintf("chore: initialize fullsend-%s per-repo installation", version), files)
 	if err != nil {
 		printer.StepFail("Failed to write scaffold files")
 		return fmt.Errorf("committing scaffold files: %w", err)
@@ -1680,7 +1680,7 @@ func runUninstall(ctx context.Context, client forge.Client, printer *ui.Printer,
 	emptyCfg := config.NewOrgConfig(nil, nil, nil, nil, "")
 	stack := layers.NewStack(
 		layers.NewConfigRepoLayer(org, client, emptyCfg, printer, false),
-		layers.NewWorkflowsLayer(org, client, printer, ""),
+		layers.NewWorkflowsLayer(org, client, printer, "", version),
 		layers.NewSecretsLayer(org, client, nil, printer),
 		layers.NewInferenceLayer(org, client, nil, printer),
 		dispatchLayer,
@@ -1846,7 +1846,7 @@ func buildLayerStack(
 
 	return layers.NewStack(
 		layers.NewConfigRepoLayer(org, client, cfg, printer, privateRepo),
-		layers.NewWorkflowsLayer(org, client, printer, user),
+		layers.NewWorkflowsLayer(org, client, printer, user, version),
 		layers.NewVendorBinaryLayer(org, forge.ConfigRepoName, client, printer, vendorBinary, vendorFn),
 		layers.NewSecretsLayer(org, client, agentCreds, printer).WithOIDCMode(),
 		layers.NewInferenceLayer(org, client, inferenceProvider, printer),

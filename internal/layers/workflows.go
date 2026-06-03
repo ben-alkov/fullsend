@@ -37,6 +37,7 @@ type WorkflowsLayer struct {
 	client            forge.Client
 	ui                *ui.Printer
 	authenticatedUser string
+	version           string
 }
 
 // Compile-time check that WorkflowsLayer implements Layer.
@@ -44,12 +45,14 @@ var _ Layer = (*WorkflowsLayer)(nil)
 
 // NewWorkflowsLayer creates a new WorkflowsLayer.
 // user is the authenticated user who will own CODEOWNERS entries.
-func NewWorkflowsLayer(org string, client forge.Client, printer *ui.Printer, user string) *WorkflowsLayer {
+// version is the fullsend CLI version that generated the scaffold.
+func NewWorkflowsLayer(org string, client forge.Client, printer *ui.Printer, user, version string) *WorkflowsLayer {
 	return &WorkflowsLayer{
 		org:               org,
 		client:            client,
 		ui:                printer,
 		authenticatedUser: user,
+		version:           version,
 	}
 }
 
@@ -106,7 +109,7 @@ func (l *WorkflowsLayer) Install(ctx context.Context) error {
 
 	l.ui.StepStart("Writing scaffold files")
 	committed, err := l.client.CommitFiles(ctx, l.org, forge.ConfigRepoName,
-		"chore: update fullsend scaffold", files)
+		fmt.Sprintf("chore: update fullsend-%s scaffold", l.version), files)
 	if err != nil {
 		l.ui.StepFail("Failed to write scaffold files")
 		return fmt.Errorf("committing scaffold files: %w", err)

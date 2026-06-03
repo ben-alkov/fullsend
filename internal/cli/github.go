@@ -280,7 +280,7 @@ func runGitHubSetupPerRepo(ctx context.Context, client forge.Client, printer *ui
 
 	printer.StepStart("Writing per-repo scaffold files")
 	committed, err := client.CommitFiles(ctx, owner, repo,
-		"chore: initialize fullsend per-repo installation", files)
+		fmt.Sprintf("chore: initialize fullsend-%s per-repo installation", version), files)
 	if err != nil {
 		printer.StepFail("Failed to write scaffold files")
 		return fmt.Errorf("committing scaffold files: %w", err)
@@ -989,7 +989,7 @@ func runGitHubSyncScaffold(ctx context.Context, client forge.Client, printer *ui
 		return fmt.Errorf("getting authenticated user: %w", err)
 	}
 
-	workflowsLayer := layers.NewWorkflowsLayer(org, client, printer, user)
+	workflowsLayer := layers.NewWorkflowsLayer(org, client, printer, user, version)
 
 	if err := workflowsLayer.Install(ctx); err != nil {
 		return fmt.Errorf("syncing scaffold: %w", err)

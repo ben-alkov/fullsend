@@ -19,7 +19,7 @@ func newWorkflowsLayer(t *testing.T, client *forge.FakeClient) (*WorkflowsLayer,
 	t.Helper()
 	var buf bytes.Buffer
 	printer := ui.New(&buf)
-	layer := NewWorkflowsLayer("test-org", client, printer, "admin-user")
+	layer := NewWorkflowsLayer("test-org", client, printer, "admin-user", "test-version")
 	return layer, &buf
 }
 
