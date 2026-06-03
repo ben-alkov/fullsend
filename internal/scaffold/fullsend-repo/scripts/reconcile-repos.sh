@@ -45,6 +45,11 @@ UPDATE_PR_BODY="This PR updates the fullsend shim workflow to match the current 
 
 The shim content has drifted from the template — this brings it back in sync."
 
+UPDATE_COMMIT_MSG="chore: update fullsend shim workflow
+
+Update the shim workflow to match the current template
+in the .fullsend config repo."
+
 if [ ! -f "$SHIM_TEMPLATE" ]; then
   echo "::error::shim template not found at $SHIM_TEMPLATE"
   exit 1
@@ -312,10 +317,6 @@ if [ -n "$ENABLED_REPOS" ]; then
       # Shim is stale — update via PR to respect branch protection.
       echo "⟳ $REPO enrolled but shim is stale — creating update PR"
 
-      UPDATE_COMMIT_MSG="chore: update fullsend shim workflow
-
-Update the shim workflow to match the current template
-in the .fullsend config repo."
       if ! write_shim_to_branch_from_default "$REPO" "$ENROLL_BRANCH" "$EXPECTED_B64" "$UPDATE_COMMIT_MSG"; then
         FAILED=$((FAILED + 1))
         continue
@@ -348,11 +349,7 @@ in the .fullsend config repo."
     if [ -n "$EXISTING_PR" ]; then
       echo "✓ $REPO has existing enrollment PR: $EXISTING_PR"
       # Update the shim on the existing branch to reflect the latest content.
-      REFRESH_COMMIT_MSG="chore: update fullsend shim workflow
-
-Update the shim workflow to match the current template
-in the .fullsend config repo."
-      if ! write_shim_to_branch_from_default "$REPO" "$ENROLL_BRANCH" "$(shim_content_b64)" "$REFRESH_COMMIT_MSG"; then
+      if ! write_shim_to_branch_from_default "$REPO" "$ENROLL_BRANCH" "$(shim_content_b64)" "$UPDATE_COMMIT_MSG"; then
         FAILED=$((FAILED + 1))
       else
         ENROLLED=$((ENROLLED + 1))
@@ -456,13 +453,13 @@ if [ -n "$DISABLED_REPOS" ]; then
     fi
 
     # Delete the shim workflow on the removal branch.
-    REMOVE_COMMIT_MSG="chore: remove fullsend shim workflow
+    UNENROLL_COMMIT_MSG="chore: remove fullsend shim workflow
 
 Remove the shim workflow. The repo has been set to
 enabled: false in the fullsend config."
     if ! gh api "repos/$ORG/$REPO/contents/$SHIM_PATH" \
       --method DELETE \
-      --field "message=$REMOVE_COMMIT_MSG" \
+      --field "message=$UNENROLL_COMMIT_MSG" \
       --field "branch=$UNENROLL_BRANCH" \
       --field "sha=$FILE_SHA" \
       --silent; then

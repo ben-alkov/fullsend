@@ -279,6 +279,13 @@ while IFS= read -r -d '' json_payload; do
     continue
   fi
 
+  # Verify subject does not exceed 50 characters (conventional commit guideline).
+  if [ "${#subject}" -gt 50 ]; then
+    echo "FAIL: commit message #${msg_index} subject exceeds 50 chars"
+    echo "  subject (${#subject} chars): $subject"
+    fail=1
+  fi
+
   # Verify no line in the message exceeds 72 characters.
   while IFS= read -r bline; do
     if [ "${#bline}" -gt 72 ]; then
