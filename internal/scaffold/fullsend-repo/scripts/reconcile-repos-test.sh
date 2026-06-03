@@ -15,6 +15,7 @@ trap 'rm -rf "${TMPDIR}"' EXIT
 CONFIG_DIR="${TMPDIR}/config"
 MOCK_BIN="${TMPDIR}/bin"
 GH_LOG="${TMPDIR}/gh-calls.log"
+COMMIT_MSGS_LOG="${TMPDIR}/commit-msgs.log"
 mkdir -p "${CONFIG_DIR}/templates" "${MOCK_BIN}"
 
 cat > "${CONFIG_DIR}/config.yaml" <<'EOF'
@@ -74,19 +75,29 @@ if [[ "\$1" != "api" ]]; then
   exit 1
 fi
 
-# Extract --jq filter if present.
+# Extract --jq filter and --input if present.
 jq_filter=""
+has_input=false
 shift  # consume "api"
 endpoint="\$1"; shift
 while [[ \$# -gt 0 ]]; do
   case "\$1" in
     --jq) jq_filter="\$2"; shift 2 ;;
-    --input) shift 2 ;;  # consume --input -
+    --input) has_input=true; shift 2 ;;  # consume --input -
     --method|--field) shift 2 ;;
     --silent) shift ;;
     *) shift ;;
   esac
 done
+
+# Capture commit messages from stdin for the git/commits endpoint.
+input_data=""
+if [[ "\$has_input" == "true" ]]; then
+  input_data=\$(cat)
+  if [[ "\$endpoint" == */git/commits ]]; then
+    printf '%s\0' "\$input_data" >> "${COMMIT_MSGS_LOG}"
+  fi
+fi
 
 json=""
 rc=0
@@ -169,3 +180,65 @@ if grep -q "contents/.github/workflows/fullsend.yaml.*--method PUT" "${GH_LOG}";
 fi
 
 echo "PASS: stale shim branch update is atomic"
+
+# ===========================
+# Test: commit messages include a non-trivial body
+# ===========================
+
+if [ ! -f "${COMMIT_MSGS_LOG}" ]; then
+  echo "FAIL: no commit messages were captured"
+  exit 1
+fi
+
+# The log contains null-delimited JSON payloads from git/commits calls.
+# Extract each message and verify it has a subject, blank line, and body.
+msg_index=0
+fail=0
+while IFS= read -r -d '' json_payload; do
+  [ -z "$json_payload" ] && continue
+  msg=$(printf '%s' "$json_payload" | jq -r '.message')
+  msg_index=$((msg_index + 1))
+
+  # A well-formed message has: subject, blank line, body.
+  subject=$(printf '%s\n' "$msg" | head -n1)
+  second_line=$(printf '%s\n' "$msg" | sed -n '2p')
+  body=$(printf '%s\n' "$msg" | tail -n +3)
+
+  if [ -n "$second_line" ]; then
+    echo "FAIL: commit message #${msg_index} missing blank line after subject"
+    echo "  subject: $subject"
+    echo "  line 2: $second_line"
+    fail=1
+    continue
+  fi
+
+  body_trimmed=$(printf '%s' "$body" | tr -d '[:space:]')
+  if [ -z "$body_trimmed" ]; then
+    echo "FAIL: commit message #${msg_index} has no body"
+    echo "  subject: $subject"
+    fail=1
+    continue
+  fi
+
+  # Verify no line in the message exceeds 72 characters.
+  while IFS= read -r bline; do
+    if [ "${#bline}" -gt 72 ]; then
+      echo "FAIL: commit message #${msg_index} has a line exceeding 72 chars"
+      echo "  line (${#bline} chars): $bline"
+      fail=1
+    fi
+  done <<< "$msg"
+done < "${COMMIT_MSGS_LOG}"
+
+if [ "$msg_index" -eq 0 ]; then
+  echo "FAIL: no commit messages found in log"
+  exit 1
+fi
+
+if [ "$fail" -ne 0 ]; then
+  echo "--- captured commit messages ---"
+  cat "${COMMIT_MSGS_LOG}"
+  exit 1
+fi
+
+echo "PASS: commit messages include a non-trivial body (≤72 chars/line)"

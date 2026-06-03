@@ -312,7 +312,11 @@ if [ -n "$ENABLED_REPOS" ]; then
       # Shim is stale — update via PR to respect branch protection.
       echo "⟳ $REPO enrolled but shim is stale — creating update PR"
 
-      if ! write_shim_to_branch_from_default "$REPO" "$ENROLL_BRANCH" "$EXPECTED_B64" "chore: update fullsend shim workflow"; then
+      UPDATE_COMMIT_MSG="chore: update fullsend shim workflow
+
+Update the shim workflow to match the current template
+in the .fullsend config repo."
+      if ! write_shim_to_branch_from_default "$REPO" "$ENROLL_BRANCH" "$EXPECTED_B64" "$UPDATE_COMMIT_MSG"; then
         FAILED=$((FAILED + 1))
         continue
       fi
@@ -344,7 +348,11 @@ if [ -n "$ENABLED_REPOS" ]; then
     if [ -n "$EXISTING_PR" ]; then
       echo "✓ $REPO has existing enrollment PR: $EXISTING_PR"
       # Update the shim on the existing branch to reflect the latest content.
-      if ! write_shim_to_branch_from_default "$REPO" "$ENROLL_BRANCH" "$(shim_content_b64)" "chore: update fullsend shim workflow"; then
+      REFRESH_COMMIT_MSG="chore: update fullsend shim workflow
+
+Update the shim workflow to match the current template
+in the .fullsend config repo."
+      if ! write_shim_to_branch_from_default "$REPO" "$ENROLL_BRANCH" "$(shim_content_b64)" "$REFRESH_COMMIT_MSG"; then
         FAILED=$((FAILED + 1))
       else
         ENROLLED=$((ENROLLED + 1))
@@ -362,7 +370,11 @@ if [ -n "$ENABLED_REPOS" ]; then
       continue
     fi
 
-    if ! write_shim_to_branch_from_default "$REPO" "$ENROLL_BRANCH" "$SHIM_CONTENT" "chore: add fullsend shim workflow"; then
+    ENROLL_COMMIT_MSG="chore: add fullsend shim workflow
+
+Add the shim workflow that routes repository events to
+the fullsend agent dispatch pipeline."
+    if ! write_shim_to_branch_from_default "$REPO" "$ENROLL_BRANCH" "$SHIM_CONTENT" "$ENROLL_COMMIT_MSG"; then
       FAILED=$((FAILED + 1))
       continue
     fi
@@ -444,9 +456,13 @@ if [ -n "$DISABLED_REPOS" ]; then
     fi
 
     # Delete the shim workflow on the removal branch.
+    REMOVE_COMMIT_MSG="chore: remove fullsend shim workflow
+
+Remove the shim workflow. The repo has been set to
+enabled: false in the fullsend config."
     if ! gh api "repos/$ORG/$REPO/contents/$SHIM_PATH" \
       --method DELETE \
-      --field "message=chore: remove fullsend shim workflow" \
+      --field "message=$REMOVE_COMMIT_MSG" \
       --field "branch=$UNENROLL_BRANCH" \
       --field "sha=$FILE_SHA" \
       --silent; then
