@@ -88,6 +88,9 @@ type fakeGCFClient struct {
 	// If nil, falls back to functionInfo.EnvVars.
 	trafficEnvVars map[string]string
 
+	// Track revision info for GetServiceRevisionInfo.
+	revisionInfo *ServiceRevisionInfo
+
 	// Captured project IAM binding arguments.
 	projectIAMBindings []projectIAMBinding
 }
@@ -266,6 +269,20 @@ func (f *fakeGCFClient) GetServiceTrafficEnvVars(_ context.Context, _, _, _ stri
 		return f.functionInfo.EnvVars, nil
 	}
 	return nil, nil
+}
+func (f *fakeGCFClient) GetServiceRevisionInfo(_ context.Context, _, _, _ string) (*ServiceRevisionInfo, error) {
+	f.calls = append(f.calls, "GetServiceRevisionInfo")
+	if err := f.errs["GetServiceRevisionInfo"]; err != nil {
+		return nil, err
+	}
+	if f.revisionInfo != nil {
+		return f.revisionInfo, nil
+	}
+	return &ServiceRevisionInfo{
+		TrafficRevisionShort:   "fullsend-mint-00001-abc",
+		TrafficAllocType:       "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST",
+		TemplateMatchesTraffic: true,
+	}, nil
 }
 func (f *fakeGCFClient) WaitForOperation(_ context.Context, _ string) error {
 	return f.record("WaitForOperation")
@@ -3421,4 +3438,95 @@ func TestValidateRegion(t *testing.T) {
 	assert.True(t, ValidateRegion("europe-west4"))
 	assert.False(t, ValidateRegion("invalid"))
 	assert.False(t, ValidateRegion(""))
+}
+
+// --- Cloud Run revision awareness tests ---
+
+func TestProvisioner_GetServiceRevisionInfo(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.revisionInfo = &ServiceRevisionInfo{
+		TrafficRevision:        "projects/p/locations/r/services/s/revisions/fullsend-mint-00114-fm9",
+		TrafficRevisionShort:   "fullsend-mint-00114-fm9",
+		TrafficAllocType:       "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION",
+		TemplateMatchesTraffic: true,
+	}
+
+	p := newTestProvisioner(Config{
+		ProjectID: "my-project",
+		Region:    "us-central1",
+	}, fake)
+
+	info, err := p.GetServiceRevisionInfo(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "fullsend-mint-00114-fm9", info.TrafficRevisionShort)
+	assert.Contains(t, fake.calls, "GetServiceRevisionInfo")
+}
+
+func TestProvisioner_GetServiceTrafficEnvVars(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.trafficEnvVars = map[string]string{
+		"ALLOWED_ORGS": "acme",
+		"ROLE_APP_IDS": `{"acme/coder":"111"}`,
+	}
+
+	p := newTestProvisioner(Config{
+		ProjectID: "my-project",
+		Region:    "us-central1",
+	}, fake)
+
+	envVars, err := p.GetServiceTrafficEnvVars(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "acme", envVars["ALLOWED_ORGS"])
+	assert.Contains(t, fake.calls, "GetServiceTrafficEnvVars")
+}
+
+func TestProvisioner_EnsureOrgInMint_PreservesInfraKeysFromTrafficRevision(t *testing.T) {
+	// UpdateServiceEnvVars on main uses REVISION-pinned routing, so the
+	// traffic-serving revision always contains the full env var set including
+	// infrastructure keys. EnsureOrgInMint builds the updated env vars
+	// entirely from the traffic-serving revision state.
+	fake := newFakeGCFClient()
+	fake.functionInfo = &FunctionInfo{
+		URI:     "https://fullsend-mint-abc123.run.app",
+		EnvVars: map[string]string{},
+	}
+	// Traffic revision has both infra keys and org data.
+	fake.trafficEnvVars = map[string]string{
+		"GCP_PROJECT_NUMBER":     "123456789",
+		"WIF_POOL_NAME":          "fullsend-pool",
+		"WIF_PROVIDER_NAME":      "github-oidc",
+		"OIDC_AUDIENCE":          "fullsend-mint",
+		"FULLSEND_SOURCE_HASH":   "abc123",
+		"ALLOWED_ORGS":           "existing-org",
+		"ROLE_APP_IDS":           `{"existing-org/coder":"99999"}`,
+		"ALLOWED_WORKFLOW_FILES": "*",
+	}
+
+	p := newTestProvisioner(Config{
+		ProjectID:  "my-project",
+		GitHubOrgs: []string{"new-org"},
+	}, fake)
+
+	err := p.EnsureOrgInMint(context.Background(), "https://fullsend-mint-abc123.run.app", "new-org", map[string]string{"new-org/coder": "11111"})
+	require.NoError(t, err)
+
+	require.NotNil(t, fake.lastUpdateServiceEnvVars)
+
+	// Infrastructure keys from traffic revision should be preserved.
+	assert.Equal(t, "123456789", fake.lastUpdateServiceEnvVars["GCP_PROJECT_NUMBER"])
+	assert.Equal(t, "fullsend-pool", fake.lastUpdateServiceEnvVars["WIF_POOL_NAME"])
+	assert.Equal(t, "github-oidc", fake.lastUpdateServiceEnvVars["WIF_PROVIDER_NAME"])
+	assert.Equal(t, "fullsend-mint", fake.lastUpdateServiceEnvVars["OIDC_AUDIENCE"])
+	assert.Equal(t, "abc123", fake.lastUpdateServiceEnvVars["FULLSEND_SOURCE_HASH"])
+
+	// Org-relevant keys should include both existing and new org.
+	assert.Contains(t, fake.lastUpdateServiceEnvVars["ALLOWED_ORGS"], "existing-org")
+	assert.Contains(t, fake.lastUpdateServiceEnvVars["ALLOWED_ORGS"], "new-org")
+}
+
+func TestMergeRoleAppIDs_EmptyExistingPreservesDesired(t *testing.T) {
+	existing := map[string]string{"ROLE_APP_IDS": ""}
+	desired := map[string]string{"ROLE_APP_IDS": `{"new-org/coder":"111"}`}
+	mergeRoleAppIDs(existing, desired)
+	assert.Equal(t, `{"new-org/coder":"111"}`, desired["ROLE_APP_IDS"])
 }

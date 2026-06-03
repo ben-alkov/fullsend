@@ -528,6 +528,94 @@ func parseAndResolveRoles(rolesStr string) ([]string, error) {
 	return resolved, nil
 }
 
+// verifyEnrollment checks the Cloud Run revision state after enrollment and
+// performs post-write verification by reading back the traffic-serving
+// revision's env vars to confirm the enrollment took effect.
+func verifyEnrollment(ctx context.Context, printer *ui.Printer, provisioner *gcf.Provisioner, org string, appIDs map[string]string, project string) {
+	// Step 4a: Verify revision state.
+	printer.StepStart("Verifying Cloud Run revision state")
+	revInfo, revErr := provisioner.GetServiceRevisionInfo(ctx)
+	if revErr != nil {
+		printer.StepWarn(fmt.Sprintf("Could not verify revision state: %v", revErr))
+	} else if revInfo.TrafficRevisionShort == "" {
+		printer.StepWarn("Could not determine traffic-serving revision")
+	} else if revInfo.TemplateMatchesTraffic {
+		if revInfo.TrafficPercent > 0 {
+			printer.StepDone(fmt.Sprintf("Traffic: %s (%d%%)", revInfo.TrafficRevisionShort, revInfo.TrafficPercent))
+		} else {
+			printer.StepDone(fmt.Sprintf("Traffic: %s", revInfo.TrafficRevisionShort))
+		}
+	} else {
+		printer.StepWarn(fmt.Sprintf("Traffic still on %s — new revision may not be serving", revInfo.TrafficRevisionShort))
+	}
+
+	// Step 4b: Post-write verification — read back the traffic-serving
+	// revision's env vars and confirm the enrollment took effect.
+	// Reuse env vars from GetServiceRevisionInfo when available to avoid
+	// a redundant API round-trip; fall back to GetServiceTrafficEnvVars
+	// if revision info was unavailable.
+	printer.StepStart("Post-write verification")
+	var verifyEnvVars map[string]string
+	if revErr == nil && revInfo.TrafficEnvVars != nil {
+		verifyEnvVars = revInfo.TrafficEnvVars
+	} else {
+		var verifyErr error
+		verifyEnvVars, verifyErr = provisioner.GetServiceTrafficEnvVars(ctx)
+		if verifyErr != nil {
+			printer.StepWarn(fmt.Sprintf("Could not read traffic revision env vars: %v", verifyErr))
+			return
+		}
+	}
+
+	orgPresent := false
+	allowedOrgs := verifyEnvVars["ALLOWED_ORGS"]
+	for _, o := range strings.Split(allowedOrgs, ",") {
+		if strings.EqualFold(strings.TrimSpace(o), org) {
+			orgPresent = true
+			break
+		}
+	}
+
+	// Check ALL expected keys are present, not just any one.
+	var verifyRoleAppIDs map[string]string
+	rolePresent := len(appIDs) == 0 // vacuously true if no keys expected
+	if raw := verifyEnvVars["ROLE_APP_IDS"]; raw != "" {
+		if err := json.Unmarshal([]byte(raw), &verifyRoleAppIDs); err != nil {
+			printer.StepWarn(fmt.Sprintf("ROLE_APP_IDS contains invalid JSON: %v", err))
+		} else {
+			rolePresent = true
+			for key := range appIDs {
+				if _, ok := verifyRoleAppIDs[key]; !ok {
+					rolePresent = false
+					break
+				}
+			}
+		}
+	}
+
+	if orgPresent && rolePresent {
+		orgCount := 0
+		for _, o := range strings.Split(allowedOrgs, ",") {
+			if strings.TrimSpace(o) != "" {
+				orgCount++
+			}
+		}
+		roleCount := len(verifyRoleAppIDs) // reuse already-parsed map
+		printer.StepDone(fmt.Sprintf("ALLOWED_ORGS: %d orgs (%s present)", orgCount, org))
+		printer.StepDone(fmt.Sprintf("ROLE_APP_IDS: %d keys (%s/* present)", roleCount, org))
+	} else {
+		printer.StepFail("Post-write verification FAILED")
+		if !orgPresent {
+			printer.StepInfo(fmt.Sprintf("ALLOWED_ORGS: %s MISSING from traffic-serving revision", org))
+		}
+		if !rolePresent {
+			printer.StepInfo(fmt.Sprintf("ROLE_APP_IDS: %s/* MISSING from traffic-serving revision", org))
+		}
+		printer.StepInfo("The enrollment may not have taken effect on the serving revision.")
+		printer.StepInfo(fmt.Sprintf("Run 'fullsend mint status --project=%s' to investigate.", project))
+	}
+}
+
 func runMintEnrollOrg(ctx context.Context, printer *ui.Printer, org, project, region, appSet, roleAppIDsJSON string, roleList []string, dryRun bool) error {
 	org = strings.ToLower(org)
 	appSet = strings.ToLower(appSet)
@@ -616,6 +704,8 @@ func runMintEnrollOrg(ctx context.Context, printer *ui.Printer, org, project, re
 		return fmt.Errorf("registering org: %w", err)
 	}
 	printer.StepDone("Org registered in mint")
+
+	verifyEnrollment(ctx, printer, provisioner, org, appIDs, project)
 
 	// Step 5: Ensure org is in WIF provider condition.
 	printer.StepStart("Updating WIF provider condition")
@@ -726,6 +816,8 @@ func runMintEnrollRepo(ctx context.Context, printer *ui.Printer, repoFullName, p
 		return fmt.Errorf("registering org: %w", err)
 	}
 	printer.StepDone("Org registered in mint")
+
+	verifyEnrollment(ctx, printer, provisioner, owner, appIDs, project)
 
 	// Step 5: Register per-repo WIF.
 	printer.StepStart("Registering per-repo WIF")
@@ -1223,6 +1315,73 @@ func runMintStatus(ctx context.Context, printer *ui.Printer, project, region, or
 	printer.KeyValue("Project", project)
 	printer.KeyValue("Region", region)
 
+	// Step 2a: Cloud Run revision info.
+	printer.StepStart("Querying Cloud Run revision state")
+	revInfo, revErr := provisioner.GetServiceRevisionInfo(ctx)
+	if revErr != nil {
+		printer.StepWarn(fmt.Sprintf("Could not query Cloud Run revisions: %v", revErr))
+	} else {
+		printer.StepDone("Revision info retrieved")
+		printer.Blank()
+		printer.Header("Cloud Run Revision")
+		if revInfo.TrafficRevisionShort != "" {
+			if revInfo.TrafficPercent > 0 {
+				printer.KeyValue("Traffic", fmt.Sprintf("%s (%d%%)", revInfo.TrafficRevisionShort, revInfo.TrafficPercent))
+			} else {
+				printer.KeyValue("Traffic", revInfo.TrafficRevisionShort)
+			}
+		} else {
+			printer.KeyValue("Traffic", "unknown")
+		}
+
+		allocType := revInfo.TrafficAllocType
+		if allocType == "" {
+			allocType = "unknown"
+		}
+		printer.KeyValue("Alloc type", allocType)
+
+		if revInfo.TemplateMatchesTraffic {
+			printer.KeyValue("Template", fmt.Sprintf("%s (matches traffic)", revInfo.TrafficRevisionShort))
+		} else {
+			// Show a divergence warning.
+			printer.Blank()
+			printer.StepWarn("Service template diverges from traffic-serving revision")
+			printer.StepInfo("Template env vars may not match what the mint is actually serving.")
+			printer.StepInfo(fmt.Sprintf("Traffic revision: %s", revInfo.TrafficRevisionShort))
+			latestShort := revInfo.TemplateRevision
+			if latestShort != "" {
+				parts := strings.Split(latestShort, "/")
+				latestShort = parts[len(parts)-1]
+			}
+			printer.StepInfo(fmt.Sprintf("Template latest:  %s", latestShort))
+		}
+
+		if len(revInfo.RecentRevisions) > 0 {
+			printer.Blank()
+			printer.StepInfo("Recent revisions:")
+			for _, rev := range revInfo.RecentRevisions {
+				status := "Inactive"
+				suffix := ""
+				if rev.Active {
+					status = "Active"
+				}
+				if rev.Name == revInfo.TrafficRevisionShort {
+					suffix = " (current)"
+				}
+				// Format create time to be shorter. Use a safe fallback
+				// if parsing fails to prevent raw API data (which could
+				// contain control characters) from reaching the terminal.
+				createTime := rev.CreateTime
+				if t, err := time.Parse(time.RFC3339Nano, createTime); err == nil {
+					createTime = t.Format("2006-01-02 15:04")
+				} else {
+					createTime = "(unknown)"
+				}
+				printer.StepInfo(fmt.Sprintf("  %s  %s  %-8s%s", rev.Name, createTime, status, suffix))
+			}
+		}
+	}
+
 	// Parse enrolled orgs from ROLE_APP_IDS.
 	var enrolledOrgs []string
 	orgSet := make(map[string]bool)
@@ -1306,15 +1465,25 @@ func runMintStatus(ctx context.Context, printer *ui.Printer, project, region, or
 
 	// Step 4: Determine health.
 	health := "healthy"
+	var healthReasons []string
 	if len(enrolledOrgs) == 0 {
 		health = "degraded"
+		healthReasons = append(healthReasons, "no enrolled orgs")
+	}
+	if revErr == nil && !revInfo.TemplateMatchesTraffic {
+		health = "degraded"
+		healthReasons = append(healthReasons, "template diverges from traffic-serving revision")
 	}
 
 	printer.Blank()
-	printer.Summary("Status", []string{
+	summaryItems := []string{
 		fmt.Sprintf("Health: %s", health),
 		fmt.Sprintf("Enrolled orgs: %d", len(enrolledOrgs)),
-	})
+	}
+	if len(healthReasons) > 0 {
+		summaryItems = append(summaryItems, fmt.Sprintf("Issues: %s", strings.Join(healthReasons, "; ")))
+	}
+	printer.Summary("Status", summaryItems)
 
 	return nil
 }

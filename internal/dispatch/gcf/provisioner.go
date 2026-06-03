@@ -1739,6 +1739,18 @@ func (p *Provisioner) DeleteWIFProvider(ctx context.Context, providerID string) 
 	return p.gcpAPI.DeleteWIFProvider(ctx, projectNumber, p.cfg.WIFPoolName, providerID)
 }
 
+// GetServiceRevisionInfo queries the Cloud Run service for revision details
+// including traffic routing, template divergence, and recent revision history.
+func (p *Provisioner) GetServiceRevisionInfo(ctx context.Context) (*ServiceRevisionInfo, error) {
+	return p.gcpAPI.GetServiceRevisionInfo(ctx, p.cfg.ProjectID, p.cfg.Region, functionName)
+}
+
+// GetServiceTrafficEnvVars reads env vars from the traffic-serving Cloud Run
+// revision. This is a convenience wrapper around the GCFClient method.
+func (p *Provisioner) GetServiceTrafficEnvVars(ctx context.Context) (map[string]string, error) {
+	return p.gcpAPI.GetServiceTrafficEnvVars(ctx, p.cfg.ProjectID, p.cfg.Region, functionName)
+}
+
 func (p *Provisioner) zeroPEMs() {
 	for role, pem := range p.cfg.AgentPEMs {
 		for i := range pem {
