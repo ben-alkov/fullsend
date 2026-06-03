@@ -108,6 +108,11 @@ type GCFClient interface {
 	// matching Cloud Functions deploy behavior). Returns the new revision
 	// name.
 	UpdateServiceEnvVars(ctx context.Context, projectID, region, serviceName string, envVars map[string]string) (string, error)
+	// GetServiceTrafficEnvVars reads environment variables from the Cloud Run
+	// revision currently serving traffic, rather than from the service template.
+	// This avoids reading stale data when the template and traffic-serving
+	// revision have diverged.
+	GetServiceTrafficEnvVars(ctx context.Context, projectID, region, serviceName string) (map[string]string, error)
 	WaitForOperation(ctx context.Context, operationName string) error
 
 	// Project number lookup
@@ -210,10 +215,10 @@ func (c *LiveGCFClient) CreateWIFProvider(ctx context.Context, projectNumber, po
 		"oidc":               oidcConfig,
 		"attributeCondition": cfg.AttributeCondition,
 		"attributeMapping": map[string]string{
-			"google.subject":                "assertion.sub",
-			"attribute.repository_owner":    "assertion.repository_owner",
-			"attribute.repository":          "assertion.repository",
-			"attribute.actor":               "assertion.actor",
+			"google.subject":             "assertion.sub",
+			"attribute.repository_owner": "assertion.repository_owner",
+			"attribute.repository":       "assertion.repository",
+			"attribute.actor":            "assertion.actor",
 		},
 	}
 
@@ -917,8 +922,8 @@ func (c *LiveGCFClient) GetFunction(ctx context.Context, projectID, region, func
 		Name          string `json:"name"`
 		State         string `json:"state"`
 		ServiceConfig struct {
-			URI                    string            `json:"uri"`
-			EnvironmentVariables   map[string]string `json:"environmentVariables"`
+			URI                  string            `json:"uri"`
+			EnvironmentVariables map[string]string `json:"environmentVariables"`
 		} `json:"serviceConfig"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -1323,6 +1328,102 @@ func (c *LiveGCFClient) handleCloudRunLRO(ctx context.Context, resp *http.Respon
 	}
 
 	return c.waitForCloudRunOperation(ctx, op.Name)
+}
+
+// GetServiceTrafficEnvVars reads environment variables from the Cloud Run
+// revision that is currently serving traffic, rather than from the service
+// template. When UpdateServiceEnvVars creates a new revision without routing
+// traffic to it, the service template and the traffic-serving revision diverge.
+// This method resolves that by finding the revision that has traffic allocated
+// and reading its container env vars directly.
+func (c *LiveGCFClient) GetServiceTrafficEnvVars(ctx context.Context, projectID, region, serviceName string) (map[string]string, error) {
+	serviceURL := fmt.Sprintf("https://run.googleapis.com/v2/projects/%s/locations/%s/services/%s",
+		url.PathEscape(projectID), url.PathEscape(region), url.PathEscape(serviceName))
+
+	getResp, err := c.Client.DoRequest(ctx, http.MethodGet, serviceURL, "")
+	if err != nil {
+		return nil, fmt.Errorf("getting Cloud Run service: %w", err)
+	}
+	defer getResp.Body.Close()
+
+	if getResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(getResp.Body, 1<<20))
+		return nil, fmt.Errorf("unexpected status %d getting Cloud Run service: %s", getResp.StatusCode, gcp.ExtractErrorMessage(body))
+	}
+
+	var service struct {
+		Template struct {
+			Containers []struct {
+				Env []struct {
+					Name  string `json:"name"`
+					Value string `json:"value"`
+				} `json:"env"`
+			} `json:"containers"`
+		} `json:"template"`
+		Traffic []struct {
+			Type     string `json:"type"`
+			Revision string `json:"revision"`
+			Percent  int    `json:"percent"`
+		} `json:"traffic"`
+	}
+	if err := json.NewDecoder(io.LimitReader(getResp.Body, 10<<20)).Decode(&service); err != nil {
+		return nil, fmt.Errorf("decoding Cloud Run service: %w", err)
+	}
+
+	// Find the revision currently serving traffic.
+	var trafficRevision string
+	for _, t := range service.Traffic {
+		if t.Percent > 0 && t.Revision != "" {
+			trafficRevision = t.Revision
+			break
+		}
+	}
+
+	// If no explicit traffic routing or the traffic target matches the latest
+	// template, fall back to reading from the service template. This covers
+	// the common case where template and traffic are aligned.
+	if trafficRevision == "" {
+		envVars := make(map[string]string)
+		if len(service.Template.Containers) > 0 {
+			for _, e := range service.Template.Containers[0].Env {
+				envVars[e.Name] = e.Value
+			}
+		}
+		return envVars, nil
+	}
+
+	// GET the specific traffic-serving revision.
+	revisionURL := fmt.Sprintf("https://run.googleapis.com/v2/%s", trafficRevision)
+	revResp, err := c.Client.DoRequest(ctx, http.MethodGet, revisionURL, "")
+	if err != nil {
+		return nil, fmt.Errorf("getting traffic-serving revision: %w", err)
+	}
+	defer revResp.Body.Close()
+
+	if revResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(revResp.Body, 1<<20))
+		return nil, fmt.Errorf("unexpected status %d getting revision %s: %s", revResp.StatusCode, trafficRevision, gcp.ExtractErrorMessage(body))
+	}
+
+	var revision struct {
+		Containers []struct {
+			Env []struct {
+				Name  string `json:"name"`
+				Value string `json:"value"`
+			} `json:"env"`
+		} `json:"containers"`
+	}
+	if err := json.NewDecoder(io.LimitReader(revResp.Body, 10<<20)).Decode(&revision); err != nil {
+		return nil, fmt.Errorf("decoding revision: %w", err)
+	}
+
+	envVars := make(map[string]string)
+	if len(revision.Containers) > 0 {
+		for _, e := range revision.Containers[0].Env {
+			envVars[e.Name] = e.Value
+		}
+	}
+	return envVars, nil
 }
 
 // waitForCloudRunOperation polls a Cloud Run LRO until it completes.

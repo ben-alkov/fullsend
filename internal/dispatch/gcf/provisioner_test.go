@@ -84,6 +84,10 @@ type fakeGCFClient struct {
 	// PATCH failed.
 	updateServiceRevision string
 
+	// trafficEnvVars is returned by GetServiceTrafficEnvVars.
+	// If nil, falls back to functionInfo.EnvVars.
+	trafficEnvVars map[string]string
+
 	// Captured project IAM binding arguments.
 	projectIAMBindings []projectIAMBinding
 }
@@ -243,6 +247,26 @@ func (f *fakeGCFClient) UpdateServiceEnvVars(_ context.Context, _, _, _ string, 
 	f.lastUpdateServiceEnvVars = envVars
 	return f.updateServiceRevision, f.errs["UpdateServiceEnvVars"]
 }
+func (f *fakeGCFClient) GetServiceTrafficEnvVars(_ context.Context, _, _, _ string) (map[string]string, error) {
+	f.calls = append(f.calls, "GetServiceTrafficEnvVars")
+	if err := f.errs["GetServiceTrafficEnvVars"]; err != nil {
+		return nil, err
+	}
+	if f.trafficEnvVars != nil {
+		return f.trafficEnvVars, nil
+	}
+	// Fall back to function info env vars for backward compatibility with
+	// existing tests that don't set trafficEnvVars explicitly. Mirrors
+	// GetFunction's logic: use functionInfoAfterCreate when available
+	// (post-deploy), otherwise use functionInfo.
+	if f.getFunctionCalls > 1 && f.functionInfoAfterCreate != nil {
+		return f.functionInfoAfterCreate.EnvVars, nil
+	}
+	if f.functionInfo != nil {
+		return f.functionInfo.EnvVars, nil
+	}
+	return nil, nil
+}
 func (f *fakeGCFClient) WaitForOperation(_ context.Context, _ string) error {
 	return f.record("WaitForOperation")
 }
@@ -274,8 +298,8 @@ func singleRoleAppIDs() map[string]string {
 
 func multiRolePEMs() map[string][]byte {
 	return map[string][]byte{
-		"coder":   []byte("coder-pem"),
-		"triage":  []byte("triage-pem"),
+		"coder":  []byte("coder-pem"),
+		"triage": []byte("triage-pem"),
 	}
 }
 
@@ -395,9 +419,9 @@ func TestProvisioner_Provision_FullFlow(t *testing.T) {
 		State: "ACTIVE",
 		URI:   "https://fullsend-mint-abc123.run.app",
 		EnvVars: map[string]string{
-			"ALLOWED_ORGS":          "test-org",
-			"ROLE_APP_IDS":          `{"test-org/coder":"12345"}`,
-			"ALLOWED_ROLES":         "coder",
+			"ALLOWED_ORGS":           "test-org",
+			"ROLE_APP_IDS":           `{"test-org/coder":"12345"}`,
+			"ALLOWED_ROLES":          "coder",
 			"ALLOWED_WORKFLOW_FILES": "*",
 		},
 	}
@@ -429,7 +453,8 @@ func TestProvisioner_Provision_FullFlow(t *testing.T) {
 		"CreateFunction",
 		"WaitForOperation",
 		"GetFunction",
-		"GetFunction", // EnsureOrgInMint checks env vars (no-op after first deploy)
+		"GetFunction",              // EnsureOrgInMint checks function metadata
+		"GetServiceTrafficEnvVars", // EnsureOrgInMint reads traffic-serving env vars (no-op after first deploy)
 		"SetCloudRunInvoker",
 	}
 	assert.Equal(t, expected, fake.calls)
@@ -538,13 +563,13 @@ func TestProvisioner_Provision_SkipsRedeployWhenUnchanged(t *testing.T) {
 		URI:   "https://fullsend-mint-abc123.run.app",
 		EnvVars: map[string]string{
 			"GCP_PROJECT_NUMBER":     "123456789",
-			"WIF_POOL_NAME":         "fullsend-pool",
-			"WIF_PROVIDER_NAME":     "github-oidc",
-			"ALLOWED_ORGS":          "test-org",
-			"OIDC_AUDIENCE":         "fullsend-mint",
-			"ALLOWED_ROLES":         "coder",
-			"ROLE_APP_IDS":          `{"test-org/coder":"12345"}`,
-			"FULLSEND_SOURCE_HASH":  srcHash,
+			"WIF_POOL_NAME":          "fullsend-pool",
+			"WIF_PROVIDER_NAME":      "github-oidc",
+			"ALLOWED_ORGS":           "test-org",
+			"OIDC_AUDIENCE":          "fullsend-mint",
+			"ALLOWED_ROLES":          "coder",
+			"ROLE_APP_IDS":           `{"test-org/coder":"12345"}`,
+			"FULLSEND_SOURCE_HASH":   srcHash,
 			"ALLOWED_WORKFLOW_FILES": "*",
 		},
 	}
@@ -581,13 +606,13 @@ func TestProvisioner_Provision_SameHashAutoRoutesToExistingMint(t *testing.T) {
 		URI:   "https://fullsend-mint-abc123.run.app",
 		EnvVars: map[string]string{
 			"GCP_PROJECT_NUMBER":     "123456789",
-			"WIF_POOL_NAME":         "fullsend-pool",
-			"WIF_PROVIDER_NAME":     "github-oidc",
-			"ALLOWED_ORGS":          "test-org",
-			"OIDC_AUDIENCE":         "fullsend-mint",
-			"ALLOWED_ROLES":         "coder",
-			"ROLE_APP_IDS":          `{"test-org/coder":"12345"}`,
-			"FULLSEND_SOURCE_HASH":  srcHash,
+			"WIF_POOL_NAME":          "fullsend-pool",
+			"WIF_PROVIDER_NAME":      "github-oidc",
+			"ALLOWED_ORGS":           "test-org",
+			"OIDC_AUDIENCE":          "fullsend-mint",
+			"ALLOWED_ROLES":          "coder",
+			"ROLE_APP_IDS":           `{"test-org/coder":"12345"}`,
+			"FULLSEND_SOURCE_HASH":   srcHash,
 			"ALLOWED_WORKFLOW_FILES": "*",
 		},
 	}
@@ -671,13 +696,13 @@ func TestProvisioner_Provision_CodeChanged_UpdatesFunction(t *testing.T) {
 		URI:   "https://fullsend-mint-abc123.run.app",
 		EnvVars: map[string]string{
 			"GCP_PROJECT_NUMBER":     "123456789",
-			"WIF_POOL_NAME":         "fullsend-pool",
-			"WIF_PROVIDER_NAME":     "github-oidc",
-			"ALLOWED_ORGS":          "test-org",
-			"OIDC_AUDIENCE":         "fullsend-mint",
-			"ALLOWED_ROLES":         "coder",
-			"ROLE_APP_IDS":          `{"test-org/coder":"12345"}`,
-			"FULLSEND_SOURCE_HASH":  "old-hash-that-wont-match",
+			"WIF_POOL_NAME":          "fullsend-pool",
+			"WIF_PROVIDER_NAME":      "github-oidc",
+			"ALLOWED_ORGS":           "test-org",
+			"OIDC_AUDIENCE":          "fullsend-mint",
+			"ALLOWED_ROLES":          "coder",
+			"ROLE_APP_IDS":           `{"test-org/coder":"12345"}`,
+			"FULLSEND_SOURCE_HASH":   "old-hash-that-wont-match",
 			"ALLOWED_WORKFLOW_FILES": "*",
 		},
 	}
@@ -719,13 +744,13 @@ func TestProvisioner_Provision_SameCodeNewOrg_EnvVarOnlyUpdate(t *testing.T) {
 		URI:   "https://fullsend-mint-abc123.run.app",
 		EnvVars: map[string]string{
 			"GCP_PROJECT_NUMBER":     "123456789",
-			"WIF_POOL_NAME":         "fullsend-pool",
-			"WIF_PROVIDER_NAME":     "github-oidc",
-			"ALLOWED_ORGS":          "existing-org",
-			"OIDC_AUDIENCE":         "fullsend-mint",
-			"ALLOWED_ROLES":         "coder",
-			"ROLE_APP_IDS":          `{"existing-org/coder":"99999"}`,
-			"FULLSEND_SOURCE_HASH":  srcHash,
+			"WIF_POOL_NAME":          "fullsend-pool",
+			"WIF_PROVIDER_NAME":      "github-oidc",
+			"ALLOWED_ORGS":           "existing-org",
+			"OIDC_AUDIENCE":          "fullsend-mint",
+			"ALLOWED_ROLES":          "coder",
+			"ROLE_APP_IDS":           `{"existing-org/coder":"99999"}`,
+			"FULLSEND_SOURCE_HASH":   srcHash,
 			"ALLOWED_WORKFLOW_FILES": "*",
 		},
 	}
@@ -811,19 +836,19 @@ func TestProvisioner_Provision_BundledMode(t *testing.T) {
 	fake := newFakeGCFClient()
 	fake.errs["GetSecret"] = ErrSecretNotFound
 	fake.functionInfo = &FunctionInfo{
-		Name: "projects/shared-project/locations/us-central1/functions/fullsend-mint",
+		Name:  "projects/shared-project/locations/us-central1/functions/fullsend-mint",
 		State: "ACTIVE",
-		URI:  "https://fullsend-mint-shared.run.app",
+		URI:   "https://fullsend-mint-shared.run.app",
 		EnvVars: map[string]string{
 			"ALLOWED_ORGS": "test-org",
 		},
 	}
 
 	p := newTestProvisioner(Config{
-		ProjectID: "shared-project",
+		ProjectID:  "shared-project",
 		GitHubOrgs: []string{"test-org"},
-		AgentPEMs: singleRolePEMs(),
-		MintURL:   "https://fullsend-mint-shared.run.app",
+		AgentPEMs:  singleRolePEMs(),
+		MintURL:    "https://fullsend-mint-shared.run.app",
 	}, fake)
 
 	vars, err := p.Provision(context.Background())
@@ -844,8 +869,8 @@ func TestProvisioner_Provision_BundledMode(t *testing.T) {
 func TestProvisioner_Provision_BundledMode_MissingProjectID(t *testing.T) {
 	p := newTestProvisioner(Config{
 		GitHubOrgs: []string{"test-org"},
-		AgentPEMs: singleRolePEMs(),
-		MintURL:   "https://fullsend-mint-shared.run.app",
+		AgentPEMs:  singleRolePEMs(),
+		MintURL:    "https://fullsend-mint-shared.run.app",
 	}, newFakeGCFClient())
 
 	_, err := p.Provision(context.Background())
@@ -866,10 +891,10 @@ func TestProvisioner_Provision_BundledMode_InvalidMintURL(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			p := newTestProvisioner(Config{
-				ProjectID: "shared-project",
+				ProjectID:  "shared-project",
 				GitHubOrgs: []string{"test-org"},
-				AgentPEMs: singleRolePEMs(),
-				MintURL:   tc.mintURL,
+				AgentPEMs:  singleRolePEMs(),
+				MintURL:    tc.mintURL,
 			}, newFakeGCFClient())
 
 			_, err := p.Provision(context.Background())
@@ -1006,11 +1031,11 @@ func TestProvisioner_Provision_BundledMode_NoPEMs_SecretsExist(t *testing.T) {
 	}
 
 	p := newTestProvisioner(Config{
-		ProjectID:  "shared-project",
-		GitHubOrgs: []string{"test-org"},
-		AgentPEMs:  nil,
+		ProjectID:   "shared-project",
+		GitHubOrgs:  []string{"test-org"},
+		AgentPEMs:   nil,
 		AgentAppIDs: singleRoleAppIDs(),
-		MintURL:    "https://fullsend-mint-shared.run.app",
+		MintURL:     "https://fullsend-mint-shared.run.app",
 	}, fake)
 
 	vars, err := p.Provision(context.Background())
@@ -1026,11 +1051,11 @@ func TestProvisioner_Provision_BundledMode_NoPEMs_SecretsMissing(t *testing.T) {
 	fake.errs["GetSecret"] = ErrSecretNotFound
 
 	p := newTestProvisioner(Config{
-		ProjectID:  "shared-project",
-		GitHubOrgs: []string{"test-org"},
-		AgentPEMs:  nil,
+		ProjectID:   "shared-project",
+		GitHubOrgs:  []string{"test-org"},
+		AgentPEMs:   nil,
 		AgentAppIDs: singleRoleAppIDs(),
-		MintURL:    "https://fullsend-mint-shared.run.app",
+		MintURL:     "https://fullsend-mint-shared.run.app",
 	}, fake)
 
 	_, err := p.Provision(context.Background())
@@ -1043,11 +1068,11 @@ func TestProvisioner_Provision_BundledMode_NoPEMs_APIError(t *testing.T) {
 	fake.errs["GetSecret"] = fmt.Errorf("permission denied")
 
 	p := newTestProvisioner(Config{
-		ProjectID:  "shared-project",
-		GitHubOrgs: []string{"test-org"},
-		AgentPEMs:  nil,
+		ProjectID:   "shared-project",
+		GitHubOrgs:  []string{"test-org"},
+		AgentPEMs:   nil,
 		AgentAppIDs: singleRoleAppIDs(),
-		MintURL:    "https://fullsend-mint-shared.run.app",
+		MintURL:     "https://fullsend-mint-shared.run.app",
 	}, fake)
 
 	_, err := p.Provision(context.Background())
@@ -2667,6 +2692,85 @@ func TestEnsureOrgInMint_PreservesExistingAllowedWorkflowFiles(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, ".github/workflows/ci.yml", fake.lastUpdateServiceEnvVars["ALLOWED_WORKFLOW_FILES"])
+}
+
+func TestEnsureOrgInMint_ReadsFromTrafficServingRevision(t *testing.T) {
+	// When the service template has diverged from the traffic-serving
+	// revision (e.g., template has empty ALLOWED_ORGS while the serving
+	// revision has 20 orgs), EnsureOrgInMint should read from the
+	// traffic-serving revision so the merge preserves existing orgs.
+	fake := newFakeGCFClient()
+	fake.functionInfo = &FunctionInfo{
+		URI: "https://mint.example.com",
+		// Service template (via GetFunction) — stale/empty.
+		EnvVars: map[string]string{
+			"ALLOWED_ORGS":  "",
+			"ROLE_APP_IDS":  `{}`,
+			"ALLOWED_ROLES": "",
+		},
+	}
+	// Traffic-serving revision has the real data.
+	fake.trafficEnvVars = map[string]string{
+		"ALLOWED_ORGS":  "org-a,org-b,org-c",
+		"ROLE_APP_IDS":  `{"org-a/coder":"100","org-b/coder":"200","org-c/coder":"300"}`,
+		"ALLOWED_ROLES": "coder",
+	}
+
+	p := NewProvisioner(Config{ProjectID: "proj1", Region: "us-central1"}, fake)
+	err := p.EnsureOrgInMint(context.Background(), "https://mint.example.com", "new-org", map[string]string{
+		"new-org/coder": "400",
+	})
+	require.NoError(t, err)
+	assert.Contains(t, fake.calls, "GetServiceTrafficEnvVars")
+	require.NotNil(t, fake.lastUpdateServiceEnvVars)
+
+	// All existing orgs must be preserved, not clobbered.
+	allowedOrgs := fake.lastUpdateServiceEnvVars["ALLOWED_ORGS"]
+	assert.Contains(t, allowedOrgs, "org-a")
+	assert.Contains(t, allowedOrgs, "org-b")
+	assert.Contains(t, allowedOrgs, "org-c")
+	assert.Contains(t, allowedOrgs, "new-org")
+
+	// Existing role app IDs must be preserved.
+	var roleAppIDs map[string]string
+	require.NoError(t, json.Unmarshal([]byte(fake.lastUpdateServiceEnvVars["ROLE_APP_IDS"]), &roleAppIDs))
+	assert.Equal(t, "100", roleAppIDs["org-a/coder"])
+	assert.Equal(t, "200", roleAppIDs["org-b/coder"])
+	assert.Equal(t, "300", roleAppIDs["org-c/coder"])
+	assert.Equal(t, "400", roleAppIDs["new-org/coder"])
+}
+
+func TestEnsureOrgInMint_TrafficEnvVarsError(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.functionInfo = &FunctionInfo{
+		URI:     "https://mint.example.com",
+		EnvVars: map[string]string{},
+	}
+	fake.errs["GetServiceTrafficEnvVars"] = fmt.Errorf("Cloud Run API unavailable")
+
+	p := NewProvisioner(Config{ProjectID: "proj1", Region: "us-central1"}, fake)
+	err := p.EnsureOrgInMint(context.Background(), "https://mint.example.com", "new-org", map[string]string{
+		"new-org/coder": "100",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading traffic-serving env vars")
+}
+
+func TestMergeAllowedOrgs_EmptyExisting(t *testing.T) {
+	// When existing ALLOWED_ORGS is empty (e.g., from a diverged template),
+	// the merge must still preserve the desired orgs rather than silently
+	// skipping.
+	existing := map[string]string{"ALLOWED_ORGS": ""}
+	desired := map[string]string{"ALLOWED_ORGS": "new-org"}
+	mergeAllowedOrgs(existing, desired)
+	assert.Equal(t, "new-org", desired["ALLOWED_ORGS"])
+}
+
+func TestMergeAllowedOrgs_BothEmpty(t *testing.T) {
+	existing := map[string]string{"ALLOWED_ORGS": ""}
+	desired := map[string]string{"ALLOWED_ORGS": ""}
+	mergeAllowedOrgs(existing, desired)
+	assert.Equal(t, "", desired["ALLOWED_ORGS"])
 }
 
 func TestRegisterPerRepoWIF_AddsNewRepo(t *testing.T) {

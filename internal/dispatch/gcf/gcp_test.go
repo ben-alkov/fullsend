@@ -1565,6 +1565,127 @@ func TestLiveGCFClient_UpdateServiceEnvVars(t *testing.T) {
 	})
 }
 
+// --- GetServiceTrafficEnvVars ---
+
+func TestLiveGCFClient_GetServiceTrafficEnvVars(t *testing.T) {
+	t.Run("reads_from_traffic_serving_revision", func(t *testing.T) {
+		callCount := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			callCount++
+			if callCount == 1 {
+				// GET service — template differs from traffic revision.
+				assert.Equal(t, http.MethodGet, r.Method)
+				assert.Contains(t, r.URL.Path, "/services/my-svc")
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"template": map[string]interface{}{
+						"containers": []interface{}{
+							map[string]interface{}{
+								"env": []interface{}{
+									map[string]string{"name": "ALLOWED_ORGS", "value": ""},
+								},
+							},
+						},
+					},
+					"traffic": []interface{}{
+						map[string]interface{}{
+							"type":     "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION",
+							"revision": "projects/proj/locations/us-central1/services/my-svc/revisions/my-svc-00001-abc",
+							"percent":  100,
+						},
+					},
+				})
+				return
+			}
+			// GET revision — has the real env vars.
+			assert.Equal(t, http.MethodGet, r.Method)
+			assert.Contains(t, r.URL.Path, "/revisions/my-svc-00001-abc")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"containers": []interface{}{
+					map[string]interface{}{
+						"env": []interface{}{
+							map[string]string{"name": "ALLOWED_ORGS", "value": "org-a,org-b"},
+							map[string]string{"name": "ROLE_APP_IDS", "value": `{"org-a/coder":"1"}`},
+						},
+					},
+				},
+			})
+		}))
+		defer srv.Close()
+
+		envVars, err := newTestClient(srv).GetServiceTrafficEnvVars(context.Background(), "proj", "us-central1", "my-svc")
+		require.NoError(t, err)
+		assert.Equal(t, "org-a,org-b", envVars["ALLOWED_ORGS"])
+		assert.Equal(t, `{"org-a/coder":"1"}`, envVars["ROLE_APP_IDS"])
+		assert.Equal(t, 2, callCount)
+	})
+
+	t.Run("falls_back_to_template_when_no_traffic_routing", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"template": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"env": []interface{}{
+								map[string]string{"name": "ALLOWED_ORGS", "value": "org-a"},
+							},
+						},
+					},
+				},
+				"traffic": []interface{}{},
+			})
+		}))
+		defer srv.Close()
+
+		envVars, err := newTestClient(srv).GetServiceTrafficEnvVars(context.Background(), "proj", "us-central1", "my-svc")
+		require.NoError(t, err)
+		assert.Equal(t, "org-a", envVars["ALLOWED_ORGS"])
+	})
+
+	t.Run("service_not_found", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprintln(w, `{"error":{"message":"not found"}}`)
+		}))
+		defer srv.Close()
+
+		_, err := newTestClient(srv).GetServiceTrafficEnvVars(context.Background(), "proj", "us-central1", "my-svc")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unexpected status 404")
+	})
+
+	t.Run("revision_fetch_error", func(t *testing.T) {
+		callCount := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			callCount++
+			if callCount == 1 {
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"template": map[string]interface{}{
+						"containers": []interface{}{map[string]interface{}{}},
+					},
+					"traffic": []interface{}{
+						map[string]interface{}{
+							"revision": "projects/proj/locations/us-central1/services/my-svc/revisions/rev-1",
+							"percent":  100,
+						},
+					},
+				})
+				return
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprintln(w, `{"error":{"message":"internal error"}}`)
+		}))
+		defer srv.Close()
+
+		_, err := newTestClient(srv).GetServiceTrafficEnvVars(context.Background(), "proj", "us-central1", "my-svc")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unexpected status 500")
+	})
+}
+
 // --- WaitForOperation ---
 
 func TestLiveGCFClient_WaitForOperation(t *testing.T) {

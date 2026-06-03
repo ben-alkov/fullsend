@@ -347,10 +347,20 @@ func (p *Provisioner) EnsureOrgInMint(ctx context.Context, expectedURL string, o
 		return fmt.Errorf("mint URL mismatch: expected %q but function has %q", expectedURL, fn.URI)
 	}
 
+	// Read env vars from the traffic-serving Cloud Run revision rather than
+	// the Cloud Functions service template. When UpdateServiceEnvVars creates
+	// a new revision without routing traffic, the template diverges from the
+	// revision actually serving requests, causing reads via GetFunction to
+	// return stale or incomplete data.
+	trafficEnvVars, err := p.gcpAPI.GetServiceTrafficEnvVars(ctx, p.cfg.ProjectID, p.cfg.Region, functionName)
+	if err != nil {
+		return fmt.Errorf("reading traffic-serving env vars: %w", err)
+	}
+
 	needsUpdate := false
 
 	// Check ALLOWED_ORGS.
-	allowedOrgs := fn.EnvVars["ALLOWED_ORGS"]
+	allowedOrgs := trafficEnvVars["ALLOWED_ORGS"]
 	orgPresent := false
 	for _, o := range strings.Split(allowedOrgs, ",") {
 		if strings.EqualFold(strings.TrimSpace(o), org) {
@@ -364,7 +374,7 @@ func (p *Provisioner) EnsureOrgInMint(ctx context.Context, expectedURL string, o
 
 	// Check ROLE_APP_IDS.
 	existingRoleAppIDs := make(map[string]string)
-	if raw := fn.EnvVars["ROLE_APP_IDS"]; raw != "" {
+	if raw := trafficEnvVars["ROLE_APP_IDS"]; raw != "" {
 		if err := json.Unmarshal([]byte(raw), &existingRoleAppIDs); err != nil {
 			return fmt.Errorf("parsing existing ROLE_APP_IDS: %w", err)
 		}
@@ -380,9 +390,9 @@ func (p *Provisioner) EnsureOrgInMint(ctx context.Context, expectedURL string, o
 		return nil
 	}
 
-	// Build updated env vars from existing function state.
-	updated := make(map[string]string, len(fn.EnvVars))
-	for k, v := range fn.EnvVars {
+	// Build updated env vars from the traffic-serving revision state.
+	updated := make(map[string]string, len(trafficEnvVars))
+	for k, v := range trafficEnvVars {
 		updated[k] = v
 	}
 
@@ -950,11 +960,11 @@ func (p *Provisioner) provisionSelfManaged(ctx context.Context) (map[string]stri
 
 // mergeAllowedOrgs reads ALLOWED_ORGS from existing env vars and unions
 // with the desired env vars. Result is sorted and deduplicated.
+// An empty existing value is treated as an empty set (not a skip) so that
+// the desired orgs are always preserved — silently returning on empty
+// existing data would mask data loss when the source has diverged.
 func mergeAllowedOrgs(existing, desired map[string]string) {
 	prev := existing["ALLOWED_ORGS"]
-	if prev == "" {
-		return
-	}
 	seen := make(map[string]bool)
 	var merged []string
 	for _, org := range strings.Split(desired["ALLOWED_ORGS"], ",") {
