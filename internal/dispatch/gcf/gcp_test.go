@@ -975,6 +975,59 @@ func TestLiveGCFClient_UpdateServiceEnvVars(t *testing.T) {
 		assert.Equal(t, 4, callCount)
 	})
 
+	t.Run("success_extracts_short_name_from_fq_latestCreatedRevision", func(t *testing.T) {
+		// When latestCreatedRevision returns a fully qualified name,
+		// the traffic PATCH must use the short name.
+		callCount := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			callCount++
+			switch callCount {
+			case 1:
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(serviceWithRevision("my-svc-00042-abc"))
+			case 2:
+				assert.Equal(t, http.MethodPatch, r.Method)
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]interface{}{"done": true})
+			case 3:
+				// GET returns FQ latestCreatedRevision
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"latestCreatedRevision": "projects/proj/locations/us-central1/services/my-svc/revisions/my-svc-00043-def",
+					"template": map[string]interface{}{
+						"revision": "my-svc-00043-def",
+						"containers": []interface{}{
+							map[string]interface{}{
+								"image": "gcr.io/proj/mint:latest",
+								"env":   []interface{}{},
+							},
+						},
+					},
+				})
+			case 4:
+				// Traffic PATCH must use short name, not FQ
+				assert.Equal(t, http.MethodPatch, r.Method)
+				var body map[string]interface{}
+				json.NewDecoder(r.Body).Decode(&body)
+				traffic := body["traffic"].([]interface{})
+				require.Len(t, traffic, 1)
+				entry := traffic[0].(map[string]interface{})
+				assert.Equal(t, "my-svc-00043-def", entry["revision"], "traffic PATCH must use short revision name")
+
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]interface{}{"done": true})
+			}
+		}))
+		defer srv.Close()
+
+		rev, err := newTestClient(srv).UpdateServiceEnvVars(context.Background(), "proj", "us-central1", "my-svc", map[string]string{
+			"ALLOWED_ORGS": "org1",
+		})
+		require.NoError(t, err)
+		assert.Equal(t, "projects/proj/locations/us-central1/services/my-svc/revisions/my-svc-00043-def", rev, "returns FQ name from latestCreatedRevision")
+		assert.Equal(t, 4, callCount)
+	})
+
 	t.Run("success_with_polling", func(t *testing.T) {
 		// Template PATCH returns a pending LRO that must be polled.
 		callCount := 0
@@ -1856,6 +1909,118 @@ func TestLiveGCFClient_GetServiceTrafficEnvVars(t *testing.T) {
 		_, err := newTestClient(srv).GetServiceTrafficEnvVars(context.Background(), "proj", "us-central1", "my-svc")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unexpected status 500")
+	})
+
+	t.Run("reads_from_short_revision_name_in_traffic", func(t *testing.T) {
+		callCount := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			callCount++
+			if callCount == 1 {
+				assert.Equal(t, http.MethodGet, r.Method)
+				assert.Contains(t, r.URL.Path, "/services/my-svc")
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"template": map[string]interface{}{
+						"containers": []interface{}{
+							map[string]interface{}{
+								"env": []interface{}{
+									map[string]string{"name": "ALLOWED_ORGS", "value": ""},
+								},
+							},
+						},
+					},
+					"trafficStatuses": []interface{}{
+						map[string]interface{}{
+							"type":     "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION",
+							"revision": "my-svc-00114-fm9",
+							"percent":  100,
+						},
+					},
+				})
+				return
+			}
+			// Verify the revision URL is properly constructed from the short name.
+			assert.Equal(t, http.MethodGet, r.Method)
+			assert.Contains(t, r.URL.Path, "/projects/proj/locations/us-central1/services/my-svc/revisions/my-svc-00114-fm9")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"containers": []interface{}{
+					map[string]interface{}{
+						"env": []interface{}{
+							map[string]string{"name": "ALLOWED_ORGS", "value": "org-short"},
+						},
+					},
+				},
+			})
+		}))
+		defer srv.Close()
+
+		envVars, err := newTestClient(srv).GetServiceTrafficEnvVars(context.Background(), "proj", "us-central1", "my-svc")
+		require.NoError(t, err)
+		assert.Equal(t, "org-short", envVars["ALLOWED_ORGS"])
+		assert.Equal(t, 2, callCount)
+	})
+}
+
+// --- GetServiceRevisionInfo (short revision names) ---
+
+func TestLiveGCFClient_GetServiceRevisionInfo_ShortRevisionName(t *testing.T) {
+	t.Run("constructs_revision_url_from_short_name", func(t *testing.T) {
+		callCount := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			callCount++
+			switch callCount {
+			case 1:
+				// GET service
+				assert.Equal(t, http.MethodGet, r.Method)
+				assert.Contains(t, r.URL.Path, "/services/my-svc")
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"template": map[string]interface{}{
+						"revision":  "my-svc-00042-abc",
+						"containers": []interface{}{map[string]interface{}{}},
+					},
+					"trafficStatuses": []interface{}{
+						map[string]interface{}{
+							"type":     "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION",
+							"revision": "my-svc-00042-abc",
+							"percent":  100,
+						},
+					},
+					"latestReadyRevision": "my-svc-00042-abc",
+				})
+			case 2:
+				// GET revisions list
+				assert.Equal(t, http.MethodGet, r.Method)
+				assert.Contains(t, r.URL.Path, "/revisions")
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"revisions": []interface{}{},
+				})
+			case 3:
+				// GET revision by short-name-constructed URL
+				assert.Equal(t, http.MethodGet, r.Method)
+				assert.Contains(t, r.URL.Path, "/projects/proj/locations/us-central1/services/my-svc/revisions/my-svc-00042-abc")
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"env": []interface{}{
+								map[string]string{"name": "ALLOWED_ORGS", "value": "org-x"},
+							},
+						},
+					},
+				})
+			}
+		}))
+		defer srv.Close()
+
+		info, err := newTestClient(srv).GetServiceRevisionInfo(context.Background(), "proj", "us-central1", "my-svc")
+		require.NoError(t, err)
+		require.NotNil(t, info)
+		assert.Equal(t, "my-svc-00042-abc", info.TrafficRevisionShort)
+		assert.Equal(t, "org-x", info.TrafficEnvVars["ALLOWED_ORGS"])
+		assert.Equal(t, 3, callCount)
 	})
 }
 

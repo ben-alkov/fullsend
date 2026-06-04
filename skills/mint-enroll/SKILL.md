@@ -49,7 +49,7 @@ Verify credentials and that the fullsend CLI is available:
 
 ```bash
 gcloud auth list --filter=status:ACTIVE --format="value(account)"
-fullsend version
+fullsend --version
 ```
 
 ## Constraints
