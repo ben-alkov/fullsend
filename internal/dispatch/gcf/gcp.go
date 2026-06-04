@@ -1308,12 +1308,24 @@ func (c *LiveGCFClient) UpdateServiceEnvVars(ctx context.Context, projectID, reg
 		return "", fmt.Errorf("Cloud Run service has no latestCreatedRevision after template update")
 	}
 
+	// The Cloud Run v2 API returns fully qualified revision names from GET
+	// (projects/P/locations/L/services/S/revisions/R) but the traffic PATCH
+	// expects short names (e.g., "fullsend-mint-00115-qp5"). Extract the
+	// short name for the traffic payload.
+	revisionShort := newRevision
+	if parts := strings.Split(newRevision, "/"); len(parts) > 1 {
+		revisionShort = parts[len(parts)-1]
+	}
+	if !revisionShortNamePattern.MatchString(revisionShort) {
+		return "", fmt.Errorf("unexpected revision name format in latestCreatedRevision: %q", newRevision)
+	}
+
 	// Step 4: PATCH traffic to pin 100% to the new revision.
 	trafficPayload, err := json.Marshal(map[string]interface{}{
 		"traffic": []map[string]interface{}{
 			{
 				"type":     "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION",
-				"revision": newRevision,
+				"revision": revisionShort,
 				"percent":  100,
 			},
 		},
@@ -1375,7 +1387,7 @@ var revisionNamePattern = regexp.MustCompile(`^projects/[^/]+/locations/[^/]+/se
 // revisionShortNamePattern validates short Cloud Run revision names
 // (e.g., "fullsend-mint-00114-fm9"). Used to sanitize revision names
 // from list responses before displaying in terminal output.
-var revisionShortNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
+var revisionShortNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
 // GetServiceTrafficEnvVars reads environment variables from the Cloud Run
 // revision that is currently serving traffic, rather than from the service
@@ -1452,13 +1464,22 @@ func (c *LiveGCFClient) GetServiceTrafficEnvVars(ctx context.Context, projectID,
 		return envVars, nil
 	}
 
-	// Validate revision resource name before URL construction.
-	if !revisionNamePattern.MatchString(trafficRevision) {
+	// The Cloud Run v2 API may return either a fully qualified resource name
+	// (projects/P/locations/L/services/S/revisions/R) or a short revision
+	// name (e.g., "fullsend-mint-00114-fm9"). Validate whichever format we
+	// receive and construct the full URL accordingly.
+	var revisionResourceName string
+	if revisionNamePattern.MatchString(trafficRevision) {
+		revisionResourceName = trafficRevision
+	} else if revisionShortNamePattern.MatchString(trafficRevision) {
+		revisionResourceName = fmt.Sprintf("projects/%s/locations/%s/services/%s/revisions/%s",
+			url.PathEscape(projectID), url.PathEscape(region), url.PathEscape(serviceName), url.PathEscape(trafficRevision))
+	} else {
 		return nil, fmt.Errorf("unexpected traffic revision name format: %q", trafficRevision)
 	}
 
 	// GET the specific traffic-serving revision.
-	revisionURL := fmt.Sprintf("https://run.googleapis.com/v2/%s", trafficRevision)
+	revisionURL := fmt.Sprintf("https://run.googleapis.com/v2/%s", revisionResourceName)
 	revResp, err := c.Client.DoRequest(ctx, http.MethodGet, revisionURL, "")
 	if err != nil {
 		return nil, fmt.Errorf("getting traffic-serving revision: %w", err)
@@ -1673,8 +1694,22 @@ func (c *LiveGCFClient) GetServiceRevisionInfo(ctx context.Context, projectID, r
 	}
 
 	// 3. Read traffic revision's env vars.
-	if info.TrafficRevision != "" && revisionNamePattern.MatchString(info.TrafficRevision) {
-		revisionURL := fmt.Sprintf("https://run.googleapis.com/v2/%s", info.TrafficRevision)
+	// Accept both fully qualified resource names and short revision names.
+	var revResourceName string
+	if info.TrafficRevision != "" {
+		if revisionNamePattern.MatchString(info.TrafficRevision) {
+			revResourceName = info.TrafficRevision
+		} else if revisionShortNamePattern.MatchString(info.TrafficRevision) {
+			revResourceName = fmt.Sprintf("projects/%s/locations/%s/services/%s/revisions/%s",
+				url.PathEscape(projectID), url.PathEscape(region), url.PathEscape(serviceName), url.PathEscape(info.TrafficRevision))
+		}
+		// When format matches neither pattern, revResourceName stays empty
+		// and the env var read below is skipped. This is intentional:
+		// GetServiceRevisionInfo returns partial data on non-fatal errors,
+		// matching the pattern at the revision list step above.
+	}
+	if revResourceName != "" {
+		revisionURL := fmt.Sprintf("https://run.googleapis.com/v2/%s", revResourceName)
 		revResp, err := c.Client.DoRequest(ctx, http.MethodGet, revisionURL, "")
 		if err == nil {
 			defer revResp.Body.Close()
