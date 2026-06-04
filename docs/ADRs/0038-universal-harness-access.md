@@ -75,7 +75,7 @@ When the runner encounters a URL, it fetches the resource, caches it locally (co
 
 **Note on URL immutability:** Example URLs in this ADR use GitHub `raw.githubusercontent.com` URLs with commit SHAs (e.g., `8cd3799...`) to ensure immutability. Branch-based URLs like `https://github.com/fullsend-ai/library/blob/main/agents/code.md` point to mutable content—the branch advances as commits are added. For production use, always use commit-pinned URLs or rely on the mandatory `#sha256=...` integrity hash to detect changes.
 
-**Transitive closure:** A URL-referenced skill that itself references `policy: https://example.com/policy.yaml` triggers a recursive fetch. The runner builds a complete dependency graph before sandbox creation.
+**Transitive closure:** A URL-referenced skill that itself references other skills via `dependencies:` in its frontmatter triggers a recursive fetch. The runner builds a complete dependency graph before sandbox creation. Skill-level `policy:` is deferred — the harness-level policy governs sandboxing, and there is no clear runtime semantic for a skill overriding or composing with the harness policy.
 
 **Trade-offs:**
 - **Pros:** Maximum flexibility. Enables community sharing, decentralized libraries, mix-and-match composition. Harnesses become portable.
