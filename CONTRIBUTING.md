@@ -55,9 +55,11 @@ GoReleaser groups changelog entries by type prefix (see `.goreleaser.yml`). Comm
 
 ## DCO (Developer Certificate of Origin)
 
-This project uses the [Probot DCO app](https://github.com/apps/dco) to enforce sign-off on human-authored commits. Add `Signed-off-by` to your commits with `git commit -s`.
+This project uses the [Probot DCO app](https://github.com/apps/dco) to enforce sign-off on commits. Add `Signed-off-by` to your commits with `git commit -s`.
 
-**Agent commits are exempt.** The DCO is a human attestation — it certifies personhood and legal authority to contribute. An agent cannot meaningfully provide that certification. The code and fix agents commit using the GitHub App's bot identity (`<id>+<slug>[bot]@users.noreply.github.com`), which GitHub recognizes as `author.type: "Bot"`. The Probot DCO app auto-skips bot-authored commits. The human who merges an agent PR accepts responsibility for the contribution.
+**Human-driven agent sessions** (e.g., using Claude Code locally) should sign off — the human directing the session is the one certifying the DCO, just as they would for any other commit.
+
+**Autonomous agent commits are exempt.** The fullsend code and fix agents run without a human in the loop at commit time. The DCO is a human attestation — it certifies personhood and legal authority to contribute. No one is present to make that certification in an autonomous session. These agents commit using the GitHub App's bot identity (`<id>+<slug>[bot]@users.noreply.github.com`), which GitHub recognizes as `author.type: "Bot"`. The Probot DCO app auto-skips bot-authored commits. The human who merges an agent PR accepts responsibility for the contribution.
 
 ## Pull request workflow
 
