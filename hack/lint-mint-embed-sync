@@ -18,6 +18,14 @@ for f in "$SRC"/*; do
     if [[ "$name" == *_test.go ]]; then
         continue
     fi
+
+    # "go.mod" is a special case since commit eecac658c
+    if [[ "$name" == "go.mod" ]]; then
+        ff="$( mktemp )"
+        sed 's| => ../mintcore$| => ./mintcore|' "$f" >"$ff"
+        f="$ff"
+    fi
+
     if ! cmp -s "$f" "$DST/$name.embed"; then
         echo "DESYNC: internal/mint/$name != internal/dispatch/gcf/mintsrc/$name.embed" >&2
         rc=1
