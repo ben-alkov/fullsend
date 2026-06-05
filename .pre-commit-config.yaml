@@ -94,7 +94,7 @@ repos:
         name: lint mint embed sync
         entry: ./hack/lint-mint-embed-sync
         language: script
-        files: ^(internal/mint/|internal/dispatch/gcf/mintsrc/)
+        files: ^(internal/mint/|internal/mintcore/|internal/dispatch/gcf/mintsrc/)
         pass_filenames: false
 
       - id: lint-adr-status
