@@ -4,7 +4,7 @@
 
 Phase 1 (MVP) of ADR-0038 is fully shipped (8 PRs merged). It added URL detection, SSRF-hardened fetching, content-addressed caching, audit logging, schema extensions, resource resolution, and CLI integration. Phase 1 treats all URL-referenced resources as **leaf nodes** — a fetched skill cannot itself reference other URL-based resources.
 
-Phase 2 removes this limitation. URL-referenced skills can declare `dependencies:` in their YAML frontmatter, and the resolver will recursively fetch and validate those transitive dependencies. This enables skill composition: a "rust-conventions" skill can depend on a "cargo-integration" skill and a "rust-sandbox" policy without requiring the harness author to enumerate every transitive dependency.
+Phase 2 removes this limitation. URL-referenced skills can declare `dependencies:` in their YAML frontmatter, and the resolver will recursively fetch and validate those transitive dependencies. This enables skill composition: a "rust-conventions" skill can depend on a "cargo-integration" skill without requiring the harness author to enumerate every transitive dependency.
 
 Design details are in `docs/plans/universal-harness-access.md` (sections "Transitive Closure", "Relative Path Resolution for URL-Referenced Resources", and "Dependency Graph and Resolution"). The ADR is at `docs/ADRs/0038-universal-harness-access.md`.
 
@@ -36,13 +36,12 @@ type SkillMeta struct {
     Name         string   `yaml:"name"`
     Description  string   `yaml:"description,omitempty"`
     Dependencies []string `yaml:"dependencies,omitempty"`
-    Policy       string   `yaml:"policy,omitempty"`
 }
 
 // ParseFrontmatter extracts the YAML frontmatter block (delimited by "---")
-// from SKILL.md content and unmarshals it into SkillMeta. Returns a zero-value
-// SkillMeta (no error) if the content has no frontmatter. Returns an error only
-// if frontmatter is present but malformed.
+// from SKILL.md content and unmarshals it into SkillMeta. Returns nil (no error)
+// if the content has no frontmatter. Returns an error only if frontmatter is
+// present but malformed.
 //
 // Frontmatter format:
 //   ---
@@ -50,28 +49,25 @@ type SkillMeta struct {
 //   dependencies:
 //     - ../common/cargo-integration/SKILL.md
 //     - https://github.com/fullsend-ai/skills/security-baseline/SKILL.md#sha256=abc123...
-//   policy: policies/rust-sandbox.yaml
 //   ---
-func ParseFrontmatter(content []byte) (SkillMeta, error)
+func ParseFrontmatter(content []byte) (*SkillMeta, error)
 ```
 
 Implementation notes:
 - Split content on `---` delimiters (first line must be `---`, find second `---`).
 - Use `gopkg.in/yaml.v3` to unmarshal the frontmatter block.
-- Return `SkillMeta{}` (no error) if the first line is not `---` — this handles plain Markdown skills with no frontmatter.
+- Return `nil` (no error) if the first line is not `---` — this handles plain Markdown skills with no frontmatter.
 - The `Dependencies` field holds raw reference strings (URLs or relative paths). Resolution is the caller's responsibility.
-- The `Policy` field is a single reference string for skill-level policy (also resolved by the caller).
 
 **Create `internal/skill/skill_test.go`:**
 
 Test cases:
 - **Valid frontmatter with dependencies:** Parse skill with `dependencies:` list, verify all entries extracted.
 - **Valid frontmatter without dependencies:** Parse skill with `name:` but no `dependencies:` — returns empty `Dependencies` slice.
-- **No frontmatter:** Plain Markdown content (no `---` delimiter) — returns zero-value `SkillMeta`, no error.
+- **No frontmatter:** Plain Markdown content (no `---` delimiter) — returns `nil`, no error.
 - **Malformed YAML in frontmatter:** Invalid YAML between `---` delimiters — returns error.
-- **Frontmatter with policy field:** Parse skill with `policy:` field, verify extracted.
 - **Mixed URL and relative dependencies:** Verify that raw strings are preserved as-is (no resolution at this stage).
-- **Empty frontmatter block:** `---\n---\n` with nothing between — returns zero-value `SkillMeta`, no error.
+- **Empty frontmatter block:** `---\n---\n` with nothing between — returns `&SkillMeta{}`, no error.
 - **Content after frontmatter:** Verify Markdown body after the closing `---` is ignored.
 - **Existing SKILL.md format compatibility:** Parse a real SKILL.md from the repo (e.g., `skills/merge-queue/SKILL.md`) — existing fields (`name`, `description`, `allowed-tools`) are parsed without error; existing fields not in `SkillMeta` (like `allowed-tools`, `disable-model-invocation`) are silently ignored by `yaml.v3`'s default behavior (no `KnownFields(true)` is set).
 
@@ -185,14 +181,12 @@ func resolveTransitiveDeps(ctx context.Context, parentURL string, content []byte
 
 Logic:
 1. **Depth check:** If `depth+1 > maxDepth`, return error: `"exceeded maximum dependency depth of %d at %s"`.
-2. **Parse frontmatter:** Call `skill.ParseFrontmatter(content)`. If error, return wrapped error. If no dependencies, return nil (leaf node).
+2. **Parse frontmatter:** Call `skill.ParseFrontmatter(content)`. If error, return wrapped error. If `nil` or no dependencies, return nil (leaf node).
 3. **Resolve each dependency reference:**
    - If the reference is an absolute URL (`harness.IsURL(ref)`): use as-is.
    - If the reference is a relative path: resolve relative to `parentURL` using `ResolveRelativeURL(parentURL, ref)` (defined in `relurl.go` below).
    - Recursively call `resolveURL(ctx, field, resolvedRef, h, opts, state, depth+1, maxDepth, maxResources)`.
-4. **Resolve policy reference:** If `meta.Policy != ""`, resolve it the same way (but do not recurse into it — policies are leaf nodes).
-
-**Backward compatibility:** For harnesses with no URL-referenced skills, `resolveTransitiveDeps` is never called. For URL-referenced skills whose content has no `dependencies:` frontmatter, `ParseFrontmatter` returns an empty `SkillMeta` and the function returns immediately. Phase 1 behavior is preserved exactly.
+**Backward compatibility:** For harnesses with no URL-referenced skills, `resolveTransitiveDeps` is never called. For URL-referenced skills whose content has no `dependencies:` frontmatter, `ParseFrontmatter` returns `nil` and the function returns immediately. Phase 1 behavior is preserved exactly.
 
 ### New file: `internal/resolve/relurl.go`
 
@@ -238,7 +232,7 @@ Test cases:
 New test cases (in addition to existing Phase 1 tests, which remain unchanged):
 
 - **Transitive dependency resolution:** Skill A depends on Skill B (via frontmatter). Verify both are fetched, both appear in `deps`, and harness skills list includes both resolved cache paths.
-- **Two-level transitive resolution:** Skill A depends on Skill B, Skill B depends on Policy C. Verify all three are fetched.
+- **Two-level transitive resolution:** Skill A depends on Skill B, Skill B depends on Skill C. Verify all three are fetched.
 - **Diamond dependency (no false positive):** Skill A depends on Skill B and Skill C; both B and C depend on Skill D. Verify D is fetched exactly once, no cycle error, and D's cache path appears only once in `h.Skills`.
 - **Cycle detection:** Skill A depends on Skill B, Skill B depends on Skill A. Verify error contains "circular dependency".
 - **Self-referencing skill:** Skill A depends on itself. Verify error contains "circular dependency".
@@ -249,7 +243,6 @@ New test cases (in addition to existing Phase 1 tests, which remain unchanged):
 - **Transitive dependency not in allowlist:** Skill A depends on Skill B at a URL outside `allowed_remote_resources`. Verify error contains "not in allowed_remote_resources".
 - **Transitive dependency hash mismatch:** Skill A depends on Skill B; Skill B's content doesn't match its declared hash. Verify error contains "integrity check failed".
 - **Mixed local and transitive:** Harness with local skills and one URL skill that has transitive deps. Verify local skills are untouched, URL skill and its transitive deps are all resolved.
-- **Policy in skill frontmatter:** Skill declares `policy:` in frontmatter. Verify the policy is fetched and resolved.
 - **Relative URL in dependency:** Skill at `https://example.com/skills/rust/SKILL.md` declares dependency `../common/SKILL.md`. Verify resolved to `https://example.com/skills/common/SKILL.md` and fetched.
 
 **Depends on:** PR 1 (imports `internal/skill`)
@@ -297,7 +290,7 @@ Two approaches (recommend Option A):
 **Option A: ResolveHarness appends transitive skills to `h.Skills`.**
 The resolver already modifies `h` in place (replacing URL fields with cache paths). Extend this: when a URL-fetched skill declares transitive skill dependencies, append the resolved cache paths to `h.Skills`. This way, the existing skill upload loop automatically handles transitive skills with no changes to `run.go`'s upload logic.
 
-In `resolveTransitiveDeps`, after resolving each skill dependency (from `meta.Dependencies`, not `meta.Policy`):
+In `resolveTransitiveDeps`, after resolving each skill dependency:
 ```go
 // Append transitively resolved skills to the harness Skills list
 // so the existing upload loop picks them up. The resolved check in
@@ -305,7 +298,7 @@ In `resolveTransitiveDeps`, after resolving each skill dependency (from `meta.De
 h.Skills = append(h.Skills, localPath)
 ```
 
-Policy references from `meta.Policy` are resolved and added to `state.deps` but are **not** appended to `h.Skills` — they are a different resource type. The `state.resolved` map ensures diamond dependencies (A→B→D, A→C→D) do not append D's cache path twice: `resolveURL` returns early for already-resolved URLs before reaching the append.
+The `state.resolved` map ensures diamond dependencies (A→B→D, A→C→D) do not append D's cache path twice: `resolveURL` returns early for already-resolved URLs before reaching the append.
 
 **Option B: Separate transitive deps in the upload loop.**
 Iterate `deps` separately and upload any transitive skill deps not already in `h.Skills`. This keeps the resolver from modifying `h.Skills` beyond what the user declared, but requires more changes to `run.go`.
@@ -351,16 +344,15 @@ name: rust-conventions
 dependencies:
   - ../cargo-integration/SKILL.md#sha256=def456...
   - https://raw.githubusercontent.com/fullsend-ai/library/8cd3799.../skills/common/formatting/SKILL.md#sha256=ghi789...
-policy: policies/rust-sandbox.yaml#sha256=jkl012...
 ---
 # Rust Conventions skill content...
 ```
 
 The resolver will:
 1. Fetch `rust-conventions/SKILL.md`, verify hash, cache it.
-2. Parse its frontmatter, discover 3 transitive dependencies.
+2. Parse its frontmatter, discover 2 transitive skill dependencies.
 3. Resolve `../cargo-integration/SKILL.md` relative to the parent URL.
-4. Fetch and cache all 3 transitive dependencies (each with hash verification and allowlist checks).
+4. Fetch and cache both transitive dependencies (each with hash verification and allowlist checks).
 5. Append all resolved cache paths to `h.Skills`.
 6. The sandbox upload loop uploads everything.
 
