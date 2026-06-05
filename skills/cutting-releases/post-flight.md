@@ -29,7 +29,7 @@ gh release view <tag>
 Check that the title, changelog, and binary assets look correct.
 Verify the release is not marked as a draft.
 
-## C. Note on fullsend-ai repos
+## C. Skip fullsend-ai repos
 
 The `fullsend-ai/.fullsend` repo references reusable workflows via
 `@main`, not `@v0`. Its runs do **not** exercise the `v0` tag and
@@ -63,7 +63,16 @@ check for recent failed runs that can be retriggered:
 gh run list --repo <org/repo> --status=failure --limit=3
 ```
 
-Present any candidate to the user for confirmation before retriggering.
+Present any candidate to the user for confirmation before retriggering:
+
+> I found run `<run-id>` (failed) in `<org/repo>`.
+> Retrigger it to verify `@v0` resolves?
+
+Once confirmed:
+
+```
+gh run rerun <run-id> --failed --repo <org/repo>
+```
 
 If blank, skip this step — not all admins have access to every
 enrolled org.
