@@ -365,8 +365,8 @@ Files over 64KB save fine if they contain only ASCII characters.`
 
 	// If the run failed, save logs and artifacts for debugging.
 	if finalRun.Conclusion != "success" {
-		saveWorkflowRunDebugInfo(t, env, "triage", finalRun)
-		t.Fatalf("Triage workflow run %d concluded with %q, expected success", finalRun.ID, finalRun.Conclusion)
+		debugDir := saveWorkflowRunDebugInfo(t, env, "triage", finalRun)
+		t.Fatalf("Triage workflow run %d concluded with %q, expected success. Debug artifacts saved to %s", finalRun.ID, finalRun.Conclusion, debugDir)
 	}
 
 	// Verify the triage agent posted a comment on the issue.
@@ -421,7 +421,7 @@ Files over 64KB save fine if they contain only ASCII characters.`
 // saveWorkflowRunDebugInfo fetches logs and artifacts for a workflow run and
 // saves them to the screenshot directory. Called unconditionally so that even
 // successful runs leave a log trail for diagnosing silent-skip problems.
-func saveWorkflowRunDebugInfo(t *testing.T, env *e2eEnv, label string, run *forge.WorkflowRun) {
+func saveWorkflowRunDebugInfo(t *testing.T, env *e2eEnv, label string, run *forge.WorkflowRun) string {
 	t.Helper()
 	ctx := context.Background()
 
@@ -449,6 +449,7 @@ func saveWorkflowRunDebugInfo(t *testing.T, env *e2eEnv, label string, run *forg
 	}
 
 	downloadRunArtifacts(ctx, env.token, env.org, forge.ConfigRepoName, run.ID, debugDir, t)
+	return debugDir
 }
 
 // downloadRunArtifacts fetches all artifacts from a workflow run and extracts
@@ -631,10 +632,13 @@ func runUnenrollmentTest(t *testing.T, env *e2eEnv) {
 		}
 		t.Logf("Attempt %d: removal PR not yet visible", attempt+1)
 	}
-	if removalPR == nil && repoMaintRun != nil && repoMaintRun.Conclusion != "success" {
-		t.Fatalf("removal PR not found for %s; repo-maintenance run %d concluded with %q (debug artifacts saved above)", testRepo, repoMaintRun.ID, repoMaintRun.Conclusion)
+	if removalPR == nil {
+		msg := fmt.Sprintf("removal PR should exist for %s", testRepo)
+		if repoMaintRun != nil {
+			msg += fmt.Sprintf("; repo-maintenance run %d concluded with %q", repoMaintRun.ID, repoMaintRun.Conclusion)
+		}
+		t.Fatal(msg)
 	}
-	require.NotNil(t, removalPR, "removal PR should exist for %s", testRepo)
 	t.Logf("Found removal PR #%d: %s", removalPR.Number, removalPR.URL)
 	err := env.client.MergeChangeProposal(ctx, env.org, testRepo, removalPR.Number)
 	require.NoError(t, err, "merging removal PR")

@@ -679,8 +679,8 @@ func TestRepoMaintenanceTokenCoversAllRepos(t *testing.T) {
 	// script can't check for or remove the shim workflow, and silently skips
 	// unenrollment (gh api fails, 2>/dev/null hides it, script thinks "already
 	// unenrolled").
-	assert.Contains(t, s, "select(.value.enabled == false)",
-		"repo-list step must extract disabled repos so the minted token covers them for unenrollment")
+	assert.Contains(t, s, "select(.value.enabled == true or .value.enabled == false)",
+		"repo-list step must extract both enabled and disabled repos so the minted token covers them for unenrollment")
 }
 
 func TestMintTokenActionContent(t *testing.T) {

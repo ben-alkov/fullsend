@@ -22,25 +22,16 @@ jobs:
       - name: Checkout .fullsend
         uses: actions/checkout@v6
 
-      - name: Extract repo names from config
+      - name: Extract all repo names from config
         id: repo-list
         run: |
           # Collect ALL repos (enabled + disabled) so the minted token has
           # access to disabled repos too. Without this, the reconcile script
           # silently skips unenrollment because API calls to repos outside
           # the token scope fail and get swallowed by error suppression.
-          ENABLED=$(yq '[.repos | to_entries[] | select(.value.enabled == true) | .key] | join(",")' config.yaml)
-          DISABLED=$(yq '[.repos | to_entries[] | select(.value.enabled == false) | .key] | join(",")' config.yaml)
-          ALL=""
-          if [[ -n "$ENABLED" && -n "$DISABLED" ]]; then
-            ALL="$ENABLED,$DISABLED"
-          elif [[ -n "$ENABLED" ]]; then
-            ALL="$ENABLED"
-          elif [[ -n "$DISABLED" ]]; then
-            ALL="$DISABLED"
-          fi
+          ALL=$(yq '[.repos | to_entries[] | select(.value.enabled == true or .value.enabled == false) | .key] | join(",")' config.yaml)
           if [[ -z "$ALL" ]]; then
-            echo "::notice::No repos found in config.yaml — nothing to do"
+            echo "::notice::No enabled or disabled repos found in config.yaml — nothing to do"
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
