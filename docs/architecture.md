@@ -4,8 +4,8 @@ What are the components of the agent execution stack?
 
 > **This is a living document.** It must always reflect the current state of
 > architectural decisions. When an ADR is accepted (or superseded), this
-> document is updated to match. ADRs are point-in-time records and are not
-> modified after acceptance; this document is where the *current* truth lives.
+> document is updated to match. ADRs are point-in-time records that may receive minor annotations
+> but are not substantially rewritten; this document is where the *current* truth lives.
 > A reader should be able to understand the system's architecture from this
 > document alone, without tracing a chain of ADRs.
 

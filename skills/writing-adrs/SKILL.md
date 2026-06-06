@@ -217,7 +217,7 @@ If the ADR partially answers a question, add a parenthetical:
 | Skipping linters | Run `make lint` before committing |
 | Wrong ADR number | Check existing files in `docs/ADRs/` first |
 | Substantially rewriting an accepted ADR | Write a new ADR that supersedes it |
-| Not adding cross-references to related ADRs | Link older ADRs to newer related decisions |
-| Using old ADRs as evolving design docs | Use `docs/architecture.md` for living narrative |
+| Omitting cross-references to related ADRs | Link older ADRs to newer related decisions |
+| Treating old ADRs as evolving design docs | Use `docs/architecture.md` for living narrative |
 | Forgetting to update architecture.md | It must always reflect current decisions |
 | Leading zeros in title number | Use `"1. Title"` not `"0001. Title"` — zero-padded numbers are only for filenames |

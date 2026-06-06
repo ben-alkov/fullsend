@@ -81,7 +81,7 @@ This project uses the [Probot DCO app](https://github.com/apps/dco) to enforce s
 - PRs require approval from a [CODEOWNERS](CODEOWNERS) member before merging.
 ## Working with ADRs
 
-ADRs (Architecture Decision Records) are **point-in-time records**. Once accepted, their content is frozen — do not edit the Context, Decision, or Consequences sections. If a decision needs to change, write a new ADR that supersedes the old one. See the [ADR template](docs/ADRs/0000-adr-template.md) and [ADR 0001](docs/ADRs/0001-use-adrs-for-decision-making.md) for full details.
+ADRs (Architecture Decision Records) are **point-in-time records**. Once accepted, do not substantially rewrite their Context, Decision, or Consequences sections — if a decision needs to change, write a new ADR that supersedes the old one. Minor annotations are welcome: cross-references to related ADRs, short notes linking to newer decisions, and typo fixes. See the [ADR template](docs/ADRs/0000-adr-template.md) and [ADR 0001](docs/ADRs/0001-use-adrs-for-decision-making.md) for full details.
 
 ### ADR numbering
 
