@@ -109,6 +109,8 @@ func TestShimWorkflowCallTemplateContent(t *testing.T) {
 	content, err := FullsendRepoFile("templates/shim-workflow-call.yaml")
 	require.NoError(t, err)
 	s := string(content)
+	// yamllint document-start rule requires --- at the top
+	assert.True(t, strings.HasPrefix(s, "---\n"), "shim workflow must start with YAML document start marker")
 	// ADR 34: shim has 2 jobs (dispatch + stop-fix), not per-stage jobs
 	assert.Contains(t, s, "dispatch:")
 	assert.Contains(t, s, "stop-fix:")
@@ -855,6 +857,23 @@ func TestPrioritizeHarnessContent(t *testing.T) {
 	assert.Contains(t, s, "post_script")
 	assert.Contains(t, s, "runner_env")
 	assert.Contains(t, s, "PROJECT_NUMBER")
+}
+
+func TestAllScaffoldYAMLDocumentStartMarker(t *testing.T) {
+	// yamllint document-start rule requires --- at the top of every YAML file.
+	// Walk embedded scaffold YAML/YML files and verify each starts with "---\n".
+	var checked int
+	err := WalkFullsendRepoAll(func(path string, content []byte) error {
+		if !strings.HasSuffix(path, ".yaml") && !strings.HasSuffix(path, ".yml") {
+			return nil
+		}
+		assert.True(t, strings.HasPrefix(string(content), "---\n"),
+			"%s must start with YAML document start marker (---)", path)
+		checked++
+		return nil
+	})
+	require.NoError(t, err)
+	assert.True(t, checked >= 20, "expected at least 20 YAML files, got %d", checked)
 }
 
 func TestValidateTriageDeleted(t *testing.T) {
