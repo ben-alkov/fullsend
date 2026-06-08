@@ -105,6 +105,23 @@ func TestDownloadChecksumForAsset_AssetNotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "not found in checksums.txt")
 }
 
+func TestDownloadChecksumForAsset_InvalidHex(t *testing.T) {
+	body := "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ  fullsend_1.0.0_linux_amd64.tar.gz\n"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, body)
+	}))
+	defer srv.Close()
+
+	origBaseURL := ReleaseBaseURL
+	ReleaseBaseURL = srv.URL
+	defer func() { ReleaseBaseURL = origBaseURL }()
+
+	_, err := downloadChecksumForAsset("1.0.0", "fullsend_1.0.0_linux_amd64.tar.gz")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid hex hash")
+}
+
 func TestDownloadReleaseBinary_ChecksumMismatch(t *testing.T) {
 	var tarBuf bytes.Buffer
 	gw := gzip.NewWriter(&tarBuf)

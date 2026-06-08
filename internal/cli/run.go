@@ -1233,6 +1233,8 @@ func runOIDCRefresh(ctx context.Context, sandboxName, oidcURL, oidcAuth string, 
 	}
 }
 
+var oidcHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
 func refreshOIDCToken(ctx context.Context, sandboxName, oidcURL, oidcAuth string) error {
 	req, err := http.NewRequestWithContext(ctx, "GET", oidcURL, nil)
 	if err != nil {
@@ -1240,7 +1242,7 @@ func refreshOIDCToken(ctx context.Context, sandboxName, oidcURL, oidcAuth string
 	}
 	req.Header.Set("Authorization", oidcAuth)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := oidcHTTPClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("fetching OIDC token: %w", err)
 	}
