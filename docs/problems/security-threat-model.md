@@ -423,7 +423,7 @@ This is distinct from hallucination (generating incorrect facts). Self-report un
 
 ## Cross-cutting concern: audit log integrity
 
-The security architecture depends on auditability (principle 4 below): every agent action is logged, attributable, and reviewable. But the audit log itself is a security-critical artifact. If an attacker (or a compromised agent) can modify the log after the fact, auditability is an illusion.
+The security architecture depends on auditability (principle 4 below): every agent action is logged, attributable, and reviewable. But the audit log itself is a security-critical artifact. If an attacker (or a compromised agent) can modify the log after the fact, auditability is an illusion. This concern compounds with [agent self-report unreliability](#cross-cutting-concern-agent-self-report-unreliability): if an agent can both misrepresent its own actions and tamper with the log that would catch the misrepresentation, the combination defeats both controls.
 
 ### The problem
 
@@ -440,7 +440,7 @@ This matters most for forensics. When investigating a security incident, the fir
 
 ### Defense considerations
 
-- **Cryptographic hash chaining.** Each log entry includes a hash of the previous entry, creating a tamper-evident chain. Modifying or deleting any entry breaks the chain from that point forward. Verification is O(n) and requires no external infrastructure. This does not prevent tampering, but it makes tampering detectable.
+- **Cryptographic hash chaining.** Each log entry includes a hash of the previous entry, creating a tamper-evident chain. Modifying or deleting any entry breaks the chain from that point forward. Verification is O(n) and requires no external infrastructure. This does not prevent tampering, but it makes tampering detectable. **Limitation:** hash chaining does not detect tail truncation (removing the last N entries). The remaining chain is internally consistent; it just ends earlier. Detecting tail truncation requires an external record of the expected chain length or latest hash.
 - **Write-once external sink.** Stream audit events to an append-only external store (object storage with retention policies, a log aggregation service, or a separate write-only endpoint) that the sandbox cannot modify. This prevents tampering entirely but adds infrastructure complexity and a network dependency.
 - **Post-run verification.** After each agent run, a harness-level step (outside the sandbox) verifies the audit log's integrity before the run is considered complete. If verification fails, the run is flagged for investigation regardless of whether the agent's output otherwise looks clean.
 - **Signed entries.** Each audit entry is signed with a key the agent does not control (e.g., the harness signs entries before writing, or the trace system uses a key injected at sandbox creation and revoked at sandbox teardown). This is stronger than hash chaining but more complex to implement.
