@@ -889,10 +889,10 @@ func bootstrapEnv(sandboxName, repoDir string, h *harness.Harness, runtimeEnvExp
 
 	// Infrastructure vars.
 	pathExport := fmt.Sprintf("export PATH=%s/bin", sandbox.SandboxWorkspace)
-	if len(h.Plugins) > 0 {
-		pathExport += ":/usr/local/go/bin"
-	}
+	pathExport += ":/usr/local/go/bin"
+	pathExport += ":$HOME/go/bin"
 	pathExport += ":$PATH"
+
 	lines = append(lines, pathExport)
 	lines = append(lines, runtimeEnvExports...)
 	lines = append(lines, fmt.Sprintf("export FULLSEND_OUTPUT_DIR=%s", outputDir))
