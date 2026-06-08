@@ -216,9 +216,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("minted: org=%s role=%s requested_repos=%v source_repo=%s workflow_ref=%s",
-		org, req.Role, req.Repos, claims.Repository, claims.JobWorkflowRef)
 	if granted != nil {
+		log.Printf("minted: org=%s role=%s app_id=%s installation_id=%d requested_repos=%v source_repo=%s workflow_ref=%s",
+			org, req.Role, granted.AppID, granted.InstallationID, req.Repos, claims.Repository, claims.JobWorkflowRef)
 		log.Printf("granted scope: repos=%v permissions=%v repo_selection=%s",
 			granted.Repos, granted.Permissions, granted.RepoSelection)
 		if granted.RepoSelection == "all" {
@@ -308,6 +308,11 @@ func (h *Handler) mintToken(ctx context.Context, org, role string, repos []strin
 	token, expiresAt, granted, err := CreateInstallationToken(ctx, h.httpClient, h.githubBaseURL, jwt, installationID, role, repos)
 	if err != nil {
 		return "", "", nil, &mintError{status: http.StatusBadGateway, msg: err.Error()}
+	}
+
+	if granted != nil {
+		granted.AppID = appID
+		granted.InstallationID = installationID
 	}
 
 	return token, expiresAt, granted, nil

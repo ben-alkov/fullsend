@@ -45,9 +45,11 @@ type installationTokenRepository struct {
 
 // GrantedScope holds the actual scope GitHub granted for the installation token.
 type GrantedScope struct {
-	Repos         []string
-	Permissions   map[string]string
-	RepoSelection string
+	Repos          []string
+	Permissions    map[string]string
+	RepoSelection  string
+	AppID          string
+	InstallationID int64
 }
 
 // canonicalRolePermissions defines the minimum GitHub App permissions per agent role.
