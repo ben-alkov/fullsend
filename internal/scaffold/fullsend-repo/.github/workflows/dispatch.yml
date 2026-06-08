@@ -1,4 +1,5 @@
-# lint-workflow-size: max-lines=391
+---
+# lint-workflow-size: max-lines=392
 # Dispatcher workflow that routes events to agent workflows based on stage.
 # Routing logic determines the stage from event context — the shim only
 # forwards the raw event.  Adding a new stage requires only a case branch
