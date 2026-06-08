@@ -912,3 +912,23 @@ func TestDownloadReleaseBinary_ChecksumMatch(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "good binary", string(data))
 }
+
+func TestValidationFailMessage_UsesOutputWhenPresent(t *testing.T) {
+	msg := validationFailMessage([]byte("check failed: lint errors"), fmt.Errorf("exit status 1"))
+	assert.Equal(t, "check failed: lint errors", msg)
+}
+
+func TestValidationFailMessage_FallsBackToError(t *testing.T) {
+	msg := validationFailMessage([]byte(""), fmt.Errorf("exec: \"missing-script\": executable file not found in $PATH"))
+	assert.Equal(t, "exec: \"missing-script\": executable file not found in $PATH", msg)
+}
+
+func TestValidationFailMessage_FallsBackWhenWhitespaceOnly(t *testing.T) {
+	msg := validationFailMessage([]byte("  \n\t  "), fmt.Errorf("exit status 127"))
+	assert.Equal(t, "exit status 127", msg)
+}
+
+func TestValidationFailMessage_TrimsOutput(t *testing.T) {
+	msg := validationFailMessage([]byte("  some output\n"), fmt.Errorf("exit status 1"))
+	assert.Equal(t, "some output", msg)
+}

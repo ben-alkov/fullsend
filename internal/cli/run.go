@@ -694,7 +694,7 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 			break
 		}
 
-		printer.StepFail("Validation failed: " + strings.TrimSpace(string(valOut)))
+		printer.StepFail("Validation failed: " + validationFailMessage(valOut, valErr))
 		if iteration < maxIterations {
 			printer.StepInfo(fmt.Sprintf("Will retry (%d iterations remaining)", maxIterations-iteration))
 		}
@@ -1010,6 +1010,16 @@ func escapeForDoubleQuotes(s string) string {
 	s = strings.ReplaceAll(s, `$`, `\$`)
 	s = strings.ReplaceAll(s, "`", "\\`")
 	return s
+}
+
+// validationFailMessage returns a human-readable message for a validation
+// script failure. When the script produces output, that output is used;
+// otherwise it falls back to the exec error string (e.g. ENOENT / EACCES).
+func validationFailMessage(output []byte, execErr error) string {
+	if msg := strings.TrimSpace(string(output)); msg != "" {
+		return msg
+	}
+	return execErr.Error()
 }
 
 // envToList converts a map of env vars to a sorted list of KEY=VALUE strings.
