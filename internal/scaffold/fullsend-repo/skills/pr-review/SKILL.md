@@ -360,7 +360,7 @@ For each selected sub-agent:
 4. Spawn via Agent tool with:
    - `model`: from the sub-agent frontmatter (any value accepted by
      the Agent tool's `model` parameter)
-   - `subagent_type`: `Explore` (read-only — sub-agents do not write)
+   - `subagent_type`: `general-purpose` (Explore only reads excerpts - not whole files)
    - `run_in_background`: `true`
    - `prompt`: composed from parts 1–5
 
@@ -494,7 +494,7 @@ isolation.
 
 3. Spawn via Agent tool with:
    - `model`: from the challenger sub-agent frontmatter (`opus`)
-   - `subagent_type`: `Explore` (read-only)
+   - `subagent_type`: `general-purpose` (Explore only reads excerpts - not whole files)
    - `prompt`: composed from parts 1–4
 
    **Prompt size guard:** If the combined context package (findings

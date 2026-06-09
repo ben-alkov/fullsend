@@ -94,7 +94,7 @@ This agent has three skills. Select based on invocation context:
   paths, scope authorization, PR body injection defense), and
   produces a structured review result. Sub-agent definitions live in
   `skills/pr-review/sub-agents/`. Each sub-agent is dispatched with
-  `model` from its frontmatter and `subagent_type: Explore`.
+  `model` from its frontmatter and `subagent_type: general-purpose`.
 - **`code-review`** — the prompt is about a local branch diff with
   no PR, or another skill is delegating code evaluation. This skill
   evaluates the diff and source files directly across the original
