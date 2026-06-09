@@ -89,11 +89,12 @@ def check_command(command: str) -> tuple[bool, str]:
     if result.returncode == 0:
         return False, ""
 
-    # Parse tirith JSON output
+    # Parse tirith JSON output.
+    # v0.3.x returns {"action": "block", "findings": [...], ...}
+    # v0.2.x returned a flat list of findings.
     try:
-        findings = json.loads(result.stdout)
+        raw = json.loads(result.stdout)
     except (json.JSONDecodeError, Exception):
-        # Can't parse output — treat any non-zero exit as a block.
         if result.returncode != 0:
             reason = (
                 f"Tirith blocked command (exit code {result.returncode}): {result.stderr.strip()}"
@@ -102,20 +103,23 @@ def check_command(command: str) -> tuple[bool, str]:
             return True, reason
         return False, ""
 
-    # Check findings against threshold
-    if isinstance(findings, list):
-        for finding in findings:
-            severity = finding.get("severity", "medium")
-            if severity_meets_threshold(severity, TIRITH_FAIL_ON):
-                rule = finding.get("rule", "unknown")
-                detail = finding.get("message", finding.get("detail", ""))
-                reason = f"Tirith [{severity}] {rule}: {detail}"
-                log_finding(rule, severity, reason, "block")
-                return True, reason
-            else:
-                rule = finding.get("rule", "unknown")
-                detail = finding.get("message", finding.get("detail", ""))
-                log_finding(rule, severity, f"Tirith [{severity}] {rule}: {detail}", "warn")
+    if isinstance(raw, dict):
+        findings = raw.get("findings", [])
+    elif isinstance(raw, list):
+        findings = raw
+    else:
+        findings = []
+
+    for finding in findings:
+        severity = finding.get("severity", "medium")
+        rule = finding.get("rule_id", finding.get("rule", "unknown"))
+        detail = finding.get("title", finding.get("message", finding.get("detail", "")))
+        if severity_meets_threshold(severity, TIRITH_FAIL_ON):
+            reason = f"Tirith [{severity}] {rule}: {detail}"
+            log_finding(rule, severity, reason, "block")
+            return True, reason
+        else:
+            log_finding(rule, severity, f"Tirith [{severity}] {rule}: {detail}", "warn")
 
     return False, ""
 
