@@ -38,6 +38,14 @@ jobs:
 
       - run: make test
 
+      - name: Generate coverage profile
+        run: GH_TOKEN= GITHUB_TOKEN= go test -race -coverprofile=coverage.out ./...
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.out
+
   commit-lint:
     # On pull_request: lint the PR title (which becomes the merge commit
     # subject on squash-merge). On push/merge_group: lint each commit.

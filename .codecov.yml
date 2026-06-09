@@ -17,7 +17,7 @@ coverage:
 
 ignore:
   - "**/*_test.go"
-  - "**/*__data__*/*.ts"
+  - "**/testdata/**"
   - "docs/**"
   - "hack/**"
   - "experiments/**"
