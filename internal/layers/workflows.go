@@ -41,6 +41,8 @@ func (l *WorkflowsLayer) Name() string { return "workflows" }
 func (l *WorkflowsLayer) RequiredScopes(op Operation) []string {
 	switch op {
 	case OpInstall:
+		// Writing to .github/workflows/ paths requires the workflow scope.
+		// Without it, GitHub returns 404 (not 403), which is deeply confusing.
 		return []string{"repo", "workflow"}
 	case OpUninstall:
 		return nil

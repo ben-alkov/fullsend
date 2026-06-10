@@ -13,8 +13,8 @@ const defaultsVendoredPrefix = ".defaults/"
 // CollectVendoredAssets gathers files for --vendor installs.
 // Upstream mirror content lives under .defaults/ (same layout as runtime sparse checkout).
 // Reusable workflows are written under workflowPrefix (.fullsend/ for per-repo, "" for per-org).
-func CollectVendoredAssets(root, workflowPrefix string) ([]InstallFile, error) {
-	var files []InstallFile
+func CollectVendoredAssets(root, workflowPrefix string) (InstallFiles, error) {
+	var files InstallFiles
 
 	if err := walkVendoredUpstreamFromRoot(root, func(path string, content []byte) error {
 		if isVendoredReusableWorkflow(path) {

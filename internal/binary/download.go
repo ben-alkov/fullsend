@@ -231,9 +231,14 @@ func extractSourceTree(r io.Reader, destDir string) error {
 			if err != nil {
 				return fmt.Errorf("creating file %s: %w", rel, err)
 			}
-			if _, err := io.Copy(f, io.LimitReader(tr, int64(maxDownloadSize)+1)); err != nil {
+			n, err := io.Copy(f, io.LimitReader(tr, int64(maxDownloadSize)+1))
+			if err != nil {
 				f.Close()
 				return fmt.Errorf("extracting %s: %w", rel, err)
+			}
+			if n > int64(maxDownloadSize) {
+				f.Close()
+				return fmt.Errorf("extracted file %s exceeds maximum size (%d bytes)", rel, maxDownloadSize)
 			}
 			if err := f.Close(); err != nil {
 				return fmt.Errorf("closing %s: %w", rel, err)

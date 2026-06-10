@@ -229,7 +229,7 @@ func ResolveVendoredCleanupPaths(ctx context.Context, client forge.Client, owner
 }
 
 // PathsFromInstallFiles extracts relative paths from install files.
-func PathsFromInstallFiles(files []InstallFile) []string {
+func PathsFromInstallFiles(files InstallFiles) []string {
 	paths := make([]string, len(files))
 	for i, f := range files {
 		paths[i] = f.Path

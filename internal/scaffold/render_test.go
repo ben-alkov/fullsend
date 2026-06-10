@@ -118,3 +118,27 @@ func TestRenderDispatchPerRepoStagePathsIgnoresOtherRepos(t *testing.T) {
 	rendered := RenderDispatchPerRepoStagePaths(input)
 	assert.Equal(t, string(input), string(rendered))
 }
+
+func TestThinStageWorkflowRegistryMatchesTemplates(t *testing.T) {
+	for _, w := range thinStageWorkflows {
+		raw, err := FullsendRepoFile(w.path)
+		require.NoError(t, err, w.path)
+		assert.Contains(t, string(raw), "# fullsend-stage: "+w.stage, w.path)
+		assert.True(t, isThinStageCaller(w.path), w.path)
+		stage, err := thinStageName(string(raw))
+		require.NoError(t, err, w.path)
+		assert.Equal(t, w.stage, stage, w.path)
+	}
+}
+
+func TestRenderAllThinCallersFreeOfPlaceholders(t *testing.T) {
+	for _, w := range thinStageWorkflows {
+		raw, err := FullsendRepoFile(w.path)
+		require.NoError(t, err, w.path)
+		for _, vendored := range []bool{false, true} {
+			rendered, err := RenderTemplate(w.path, raw, RenderOptions{Vendored: vendored})
+			require.NoError(t, err, w.path)
+			assertFreeOfRenderPlaceholders(t, string(rendered))
+		}
+	}
+}

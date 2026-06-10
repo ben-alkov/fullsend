@@ -76,7 +76,7 @@ func acquireAndVendor(ctx context.Context, client forge.Client, printer *ui.Prin
 		printer.StepDone("Validated linux/amd64 ELF binary")
 	} else {
 		result, err := binary.ResolveForVendor(binary.VendorOpts{
-			SourceDir: fullsendSource,
+			SourceDir: root.Path,
 			Version:   version,
 			Arch:      vendorArch,
 		})

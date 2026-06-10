@@ -19,7 +19,23 @@ func RenderOptionsForInstall(vendored, perRepo bool) RenderOptions {
 	return RenderOptions{Vendored: vendored, PerRepo: perRepo}
 }
 
+// thinStageWorkflows lists thin caller paths and their stage markers. Keep in sync
+// with the # fullsend-stage comments embedded in each workflow template.
+var thinStageWorkflows = []struct {
+	stage string
+	path  string
+}{
+	{"triage", ".github/workflows/triage.yml"},
+	{"code", ".github/workflows/code.yml"},
+	{"review", ".github/workflows/review.yml"},
+	{"fix", ".github/workflows/fix.yml"},
+	{"retro", ".github/workflows/retro.yml"},
+	{"prioritize", ".github/workflows/prioritize.yml"},
+}
+
 // RenderTemplate applies vendoring-aware substitutions to scaffold templates.
+// Substitutions are fixed string replacements (not text/template), so only
+// compile-time constants are injected into workflow YAML.
 func RenderTemplate(path string, content []byte, opts RenderOptions) ([]byte, error) {
 	out := string(content)
 
@@ -38,23 +54,18 @@ func RenderTemplate(path string, content []byte, opts RenderOptions) ([]byte, er
 }
 
 func isThinStageCaller(path string) bool {
-	switch path {
-	case ".github/workflows/triage.yml",
-		".github/workflows/code.yml",
-		".github/workflows/review.yml",
-		".github/workflows/fix.yml",
-		".github/workflows/retro.yml",
-		".github/workflows/prioritize.yml":
-		return true
-	default:
-		return false
+	for _, w := range thinStageWorkflows {
+		if path == w.path {
+			return true
+		}
 	}
+	return false
 }
 
 func thinStageName(content string) (string, error) {
-	for _, stage := range []string{"triage", "code", "review", "fix", "retro", "prioritize"} {
-		if strings.Contains(content, "# fullsend-stage: "+stage) {
-			return stage, nil
+	for _, w := range thinStageWorkflows {
+		if strings.Contains(content, "# fullsend-stage: "+w.stage) {
+			return w.stage, nil
 		}
 	}
 	return "", fmt.Errorf("could not determine thin caller stage")

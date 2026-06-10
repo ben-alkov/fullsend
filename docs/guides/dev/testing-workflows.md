@@ -22,11 +22,10 @@ E2e uses `--vendor` so CI exercises the commit under test, not upstream `@v0`.
 After changing reusable workflows or agent content, re-run install (or
 `fullsend github setup`) with `--vendor` to refresh vendored files.
 `fullsend github sync-scaffold` updates thin caller templates and auto-detects
-vendored vs layered mode from `action.yml` presence.
+vendored vs layered mode from `.defaults/action.yml` presence.
 
-Runtime detects vendored installs by `action.yml` presence (config repo root for
-Runtime skips the upstream sparse checkout when `.defaults/action.yml` is present (vendored install) and stages content from `.defaults/` instead.
-of sparse-checkouting upstream.
+Runtime skips the upstream sparse checkout when `.defaults/action.yml` is
+present (vendored install) and stages content from `.defaults/` instead.
 
 ## Layered installs: pin upstream ref
 

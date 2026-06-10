@@ -11,6 +11,9 @@ type InstallFile struct {
 	Mode    string
 }
 
+// InstallFiles is the slice type returned by install collectors.
+type InstallFiles []InstallFile
+
 // CollectInstallFilesOptions controls which scaffold files are collected.
 type CollectInstallFilesOptions struct {
 	RenderOptions
@@ -18,8 +21,8 @@ type CollectInstallFilesOptions struct {
 }
 
 // CollectInstallFiles gathers scaffold files for org or per-repo installation.
-func CollectInstallFiles(opts CollectInstallFilesOptions) ([]InstallFile, error) {
-	var files []InstallFile
+func CollectInstallFiles(opts CollectInstallFilesOptions) (InstallFiles, error) {
+	var files InstallFiles
 	err := WalkFullsendRepo(func(path string, content []byte) error {
 		rendered, renderErr := RenderTemplate(path, content, opts.RenderOptions)
 		if renderErr != nil {
@@ -55,7 +58,7 @@ func customizedDirsForPrefix(prefix string) []string {
 }
 
 // CollectPerRepoInstallFiles gathers files for per-repo installation.
-func CollectPerRepoInstallFiles(vendored bool) ([]InstallFile, error) {
+func CollectPerRepoInstallFiles(vendored bool) (InstallFiles, error) {
 	opts := RenderOptionsForInstall(vendored, true)
 
 	shimRaw, err := PerRepoShimTemplate()
@@ -67,7 +70,7 @@ func CollectPerRepoInstallFiles(vendored bool) ([]InstallFile, error) {
 		return nil, fmt.Errorf("rendering per-repo shim: %w", err)
 	}
 
-	files := []InstallFile{{
+	files := InstallFiles{{
 		Path:    ".github/workflows/fullsend.yaml",
 		Content: shimRendered,
 		Mode:    "100644",
