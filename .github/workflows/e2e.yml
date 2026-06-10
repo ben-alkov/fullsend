@@ -45,7 +45,9 @@ concurrency:
     ${{ github.event_name == 'pull_request_target'
         && format('e2e-{0}', github.event.pull_request.number)
         || format('{0}-{1}', github.workflow, github.ref) }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: >-
+    ${{ github.event_name == 'pull_request_target'
+        || github.ref != 'refs/heads/main' }}
 
 jobs:
   gate:

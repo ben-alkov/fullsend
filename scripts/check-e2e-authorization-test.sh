@@ -172,15 +172,13 @@ run_case "backdated committer date does not bypass timeline push time" "false" "
 
 write_pr "NONE" '[]'
 write_timeline '[]'
-write_commits '["2026-06-01T10:00:00Z"]'
 write_events '[]'
-run_case "commits api fallback when timeline has no push events" "false" "unauthorized" "false"
+run_case "empty timeline without label is unauthorized" "false" "unauthorized" "false"
 
 write_pr "NONE" '[{"name":"ok-to-test"}]'
 write_timeline '[]'
-write_commits '["2026-06-01T10:00:00Z"]'
 write_events '[{"event":"labeled","label":{"name":"ok-to-test"},"created_at":"2026-06-01T11:00:00Z"}]'
-run_case "commits api fallback with fresh ok-to-test label" "true" "ok_to_test" "false"
+run_case "empty timeline treats ok-to-test as stale" "false" "stale_ok_to_test" "true"
 
 GH_FAIL="true"
 write_pr "NONE" '[]'

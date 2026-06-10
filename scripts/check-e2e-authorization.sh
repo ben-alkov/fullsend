@@ -4,7 +4,8 @@
 # Authorized when the PR author is OWNER/MEMBER/COLLABORATOR, or when a fresh
 # ok-to-test label was applied after the latest commit on the PR head.
 # Push time uses GitHub issue timeline committed/force-push event timestamps
-# (server-side), falling back to committer.date only when timeline is empty.
+# (server-side). When timeline has no push events, freshness cannot be verified
+# and ok-to-test is treated as stale (fail-closed; no commits API fallback).
 # Removes stale ok-to-test labels (applied at or before the latest push).
 #
 # Usage: check-e2e-authorization.sh PR_NUMBER OWNER/REPO
@@ -51,10 +52,6 @@ timeline_json="$(gh api "repos/${REPOSITORY}/issues/${PR_NUMBER}/timeline" --pag
 last_push_at="$(jq -r '
   [.[] | select(.event == "committed" or .event == "head_ref_force_pushed") | .created_at] | max // empty
 ' <<<"${timeline_json}")"
-if [[ -z "${last_push_at}" ]]; then
-  commits_json="$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}/commits" --paginate | jq -s 'add')"
-  last_push_at="$(jq -r '[.[] | .commit.committer.date] | max // empty' <<<"${commits_json}")"
-fi
 
 events_json="$(gh api "repos/${REPOSITORY}/issues/${PR_NUMBER}/events" --paginate | jq -s 'add')"
 ok_to_test_at="$(jq -r --arg label "${OK_TO_TEST_LABEL}" '
