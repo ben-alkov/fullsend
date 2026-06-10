@@ -24,7 +24,7 @@ func newVendorBinaryLayer(t *testing.T, client *forge.FakeClient, enabled bool, 
 
 func TestVendorBinaryLayer_Name(t *testing.T) {
 	layer, _ := newVendorBinaryLayer(t, &forge.FakeClient{}, false, nil)
-	assert.Equal(t, "vendor-binary", layer.Name())
+	assert.Equal(t, "vendor", layer.Name())
 }
 
 func TestVendorBinaryLayer_RequiredScopes(t *testing.T) {
@@ -144,7 +144,7 @@ func TestVendorBinaryLayer_Analyze_EnabledPresent(t *testing.T) {
 
 	report, err := layer.Analyze(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, "vendor-binary", report.Name)
+	assert.Equal(t, "vendor", report.Name)
 	assert.Equal(t, StatusInstalled, report.Status)
 	assert.True(t, strings.Contains(strings.Join(report.Details, " "), "vendored binary present at"))
 }
@@ -158,7 +158,7 @@ func TestVendorBinaryLayer_Analyze_EnabledAbsent(t *testing.T) {
 	report, err := layer.Analyze(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, StatusNotInstalled, report.Status)
-	assert.Contains(t, report.WouldInstall, "upload vendored binary")
+	assert.Contains(t, report.WouldInstall, "upload vendored binary and content")
 }
 
 func TestVendorBinaryLayer_Analyze_DisabledPresent(t *testing.T) {
@@ -172,7 +172,7 @@ func TestVendorBinaryLayer_Analyze_DisabledPresent(t *testing.T) {
 	report, err := layer.Analyze(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, StatusDegraded, report.Status)
-	assert.True(t, strings.Contains(strings.Join(report.Details, " "), "stale vendored binary present at"))
+	assert.True(t, strings.Contains(strings.Join(report.Details, " "), "stale vendored binary at"))
 	assert.Contains(t, report.WouldFix, "delete vendored binary")
 }
 
@@ -185,10 +185,10 @@ func TestVendorBinaryLayer_Analyze_DisabledAbsent(t *testing.T) {
 	report, err := layer.Analyze(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, StatusInstalled, report.Status)
-	assert.Contains(t, report.Details, "no vendored binary present")
+	assert.Contains(t, report.Details, "no vendored assets present")
 }
 
-func TestVendorBinaryLayer_Analyze_Error(t *testing.T) {
+func TestVendorBinaryLayer_Analyze_GetFileContentError(t *testing.T) {
 	client := &forge.FakeClient{
 		Errors: map[string]error{
 			"GetFileContent": errors.New("network error"),
@@ -198,7 +198,7 @@ func TestVendorBinaryLayer_Analyze_Error(t *testing.T) {
 
 	_, err := layer.Analyze(context.Background())
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "checking for vendored binary")
+	assert.Contains(t, err.Error(), "checking vendored marker")
 }
 
 // binaryPath tests — per-org vs per-repo path selection.
@@ -264,7 +264,7 @@ func TestVendorBinaryLayer_PerRepo_Analyze_DisabledPresent(t *testing.T) {
 	report, err := layer.Analyze(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, StatusDegraded, report.Status)
-	assert.True(t, strings.Contains(strings.Join(report.Details, " "), "stale vendored binary present at"))
+	assert.True(t, strings.Contains(strings.Join(report.Details, " "), "stale vendored binary at"))
 }
 
 func TestVendorBinaryLayer_PerRepo_EnabledCallsVendorFn(t *testing.T) {

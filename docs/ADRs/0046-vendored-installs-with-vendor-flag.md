@@ -1,0 +1,83 @@
+---
+title: "46. Vendored installs with --vendor"
+status: Accepted
+relates_to:
+  - testing-agents
+topics:
+  - vendor
+  - layered-content
+  - workflows
+---
+
+# ADR 0046: Vendored installs with `--vendor`
+
+## Status
+
+Accepted
+
+## Context
+
+Layered installs (the default) fetch reusable workflows and agent content from
+`fullsend-ai/fullsend@v0` at runtime via sparse checkout. That keeps config repos
+small and picks up upstream fixes automatically.
+
+Some workflows need to run unreleased fullsend changes (forks, local workflow
+edits, pre-release CI) without publishing tags. A single install flag should
+vendor binary + workflow/agent assets at install time; runtime should detect
+vendored files without `config.yaml` distribution settings.
+
+## Decision
+
+### Install-time: `--vendor`
+
+`fullsend admin install`, `fullsend github setup`, and
+`fullsend github sync-scaffold` accept:
+
+| Flag | Purpose |
+|------|---------|
+| `--vendor` | Vendor linux/amd64 binary, reusable workflows, composite actions, and agent content |
+| `--fullsend-source <dir>` | Explicit fullsend checkout for content walks and binary cross-compile |
+| `--fullsend-binary <path>` | Explicit Linux ELF; skips cross-compile (requires `--vendor`) |
+
+Source resolution (shared by binary and content) in `internal/binary`:
+
+1. `--fullsend-source` (validated checkout: `go.mod`, `cmd/fullsend/`)
+2. `ModuleRoot()` when CWD is inside a checkout
+3. GitHub source fetch at CLI version (released CLI only)
+
+Without `--vendor`, install removes stale vendored binary and content paths and
+renders thin callers with upstream `uses: fullsend-ai/fullsend/.../reusable-*.yml@v0`.
+
+### Runtime: file-presence detection
+
+Reusable workflows detect vendored installs before sparse checkout:
+
+- **All modes:** `.defaults/action.yml` in the checked-out repo (committed by `--vendor`, or populated by sparse checkout at runtime)
+
+When present, upstream sparse checkout is skipped. Infra is referenced from
+`.defaults/` (`uses: ./.defaults/.github/actions/...`, `uses: ./.defaults/`).
+Layered agent content is copied from `.defaults/internal/scaffold/fullsend-repo/`
+onto the workspace root at job start (inline prepare step).
+
+Thin caller `uses:` paths are rendered at install/sync time (local `./...` when
+`--vendor`, upstream `@v0` when layered).
+
+### What was removed
+
+- `distribution.mode` / `distribution.upstream.ref` in org and per-repo config
+- `--distribution-mode`, `--upstream-ref` CLI flags
+- `distribution_mode` workflow input
+- `upstreamembed.go` (content read from resolved source tree instead)
+
+## Consequences
+
+- **Positive:** One flag, no config block, runtime auto-detect; dev/CI can test unreleased workflow changes.
+- **Negative:** Deleting vendored files without re-install leaves broken local `uses:` paths until sync-scaffold or re-install.
+- **Neutral:** Default layered behavior unchanged for installs without `--vendor`.
+
+## References
+
+- [Installation guide](../guides/getting-started/installation.md)
+- [Testing workflows](../guides/dev/testing-workflows.md)
+- ADR 0031 (reusable workflows for distribution)
+- ADR 0033 (per-repo installation mode)

@@ -9,6 +9,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	// DefaultUpstreamRepo is the canonical fullsend repository for layered workflow calls.
+	DefaultUpstreamRepo = "fullsend-ai/fullsend"
+	// DefaultUpstreamRef is the default tag for layered upstream workflow calls.
+	DefaultUpstreamRef = "v0"
+)
+
 // AgentEntry represents a configured agent with its role and app identity.
 type AgentEntry struct {
 	Role string `yaml:"role"`

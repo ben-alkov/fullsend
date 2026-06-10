@@ -11,64 +11,39 @@ import (
 
 const codeownersPath = "CODEOWNERS"
 
-// managedFiles lists every file this layer manages.
-// Populated at init from the scaffold plus the CODEOWNERS sentinel.
-var managedFiles []string
-
-func init() {
-	if err := scaffold.WalkFullsendRepo(func(path string, _ []byte) error {
-		managedFiles = append(managedFiles, path)
-		return nil
-	}); err != nil {
-		panic(fmt.Sprintf("walking scaffold: %v", err))
-	}
-	for _, dir := range scaffold.CustomizedDirs() {
-		managedFiles = append(managedFiles, dir+"/.gitkeep")
-	}
-	managedFiles = append(managedFiles, codeownersPath)
-}
-
 // WorkflowsLayer manages workflow files and CODEOWNERS in the .fullsend
-// config repo. It writes the thin caller workflows, composite actions,
-// and a CODEOWNERS file that grants the installing user ownership of all
-// config-repo contents.
+// config repo.
 type WorkflowsLayer struct {
 	org               string
 	client            forge.Client
 	ui                *ui.Printer
 	authenticatedUser string
 	version           string
+	vendored          bool
 }
 
-// Compile-time check that WorkflowsLayer implements Layer.
 var _ Layer = (*WorkflowsLayer)(nil)
 
 // NewWorkflowsLayer creates a new WorkflowsLayer.
-// user is the authenticated user who will own CODEOWNERS entries.
-// version is the fullsend CLI version that generated the scaffold.
-func NewWorkflowsLayer(org string, client forge.Client, printer *ui.Printer, user, version string) *WorkflowsLayer {
+func NewWorkflowsLayer(org string, client forge.Client, printer *ui.Printer, user, version string, vendored bool) *WorkflowsLayer {
 	return &WorkflowsLayer{
 		org:               org,
 		client:            client,
 		ui:                printer,
 		authenticatedUser: user,
 		version:           version,
+		vendored:          vendored,
 	}
 }
 
-func (l *WorkflowsLayer) Name() string {
-	return "workflows"
-}
+func (l *WorkflowsLayer) Name() string { return "workflows" }
 
-// RequiredScopes returns the scopes needed for the given operation.
 func (l *WorkflowsLayer) RequiredScopes(op Operation) []string {
 	switch op {
 	case OpInstall:
-		// Writing to .github/workflows/ paths requires the workflow scope.
-		// Without it, GitHub returns 404 (not 403), which is deeply confusing.
 		return []string{"repo", "workflow"}
 	case OpUninstall:
-		return nil // no-op
+		return nil
 	case OpAnalyze:
 		return []string{"repo"}
 	default:
@@ -76,28 +51,21 @@ func (l *WorkflowsLayer) RequiredScopes(op Operation) []string {
 	}
 }
 
-// Install writes the workflow files and CODEOWNERS to the .fullsend repo
-// in a single atomic commit using the Git Trees API. If all files already
-// match the current tree, no commit is created (idempotent).
 func (l *WorkflowsLayer) Install(ctx context.Context) error {
-	var files []forge.TreeFile
-	err := scaffold.WalkFullsendRepo(func(path string, content []byte) error {
-		files = append(files, forge.TreeFile{
-			Path:    path,
-			Content: content,
-			Mode:    scaffold.FileMode(path),
-		})
-		return nil
+	installFiles, err := scaffold.CollectInstallFiles(scaffold.CollectInstallFilesOptions{
+		RenderOptions: scaffold.RenderOptionsForInstall(l.vendored, false),
+		PathPrefix:    "",
 	})
 	if err != nil {
 		return fmt.Errorf("collecting scaffold files: %w", err)
 	}
 
-	for _, dir := range scaffold.CustomizedDirs() {
+	var files []forge.TreeFile
+	for _, f := range installFiles {
 		files = append(files, forge.TreeFile{
-			Path:    dir + "/.gitkeep",
-			Content: []byte(""),
-			Mode:    "100644",
+			Path:    f.Path,
+			Content: f.Content,
+			Mode:    f.Mode,
 		})
 	}
 
@@ -123,18 +91,26 @@ func (l *WorkflowsLayer) Install(ctx context.Context) error {
 	return nil
 }
 
-// Uninstall is a no-op. Workflow files are removed when the config repo
-// is deleted by the ConfigRepoLayer.
-func (l *WorkflowsLayer) Uninstall(_ context.Context) error {
-	return nil
-}
+func (l *WorkflowsLayer) Uninstall(_ context.Context) error { return nil }
 
-// Analyze checks which managed files exist in the config repo.
 func (l *WorkflowsLayer) Analyze(ctx context.Context) (*LayerReport, error) {
 	report := &LayerReport{Name: l.Name()}
 
+	vendored := l.vendored
+	if marker, err := l.client.GetFileContent(ctx, l.org, forge.ConfigRepoName, scaffold.VendoredMarkerPath()); err == nil && len(marker) > 0 {
+		vendored = true
+	} else if !forge.IsNotFound(err) {
+		return nil, fmt.Errorf("checking vendored marker: %w", err)
+	}
+
+	managed, err := scaffold.ManagedPaths(vendored, "")
+	if err != nil {
+		return nil, err
+	}
+	managed = append(managed, codeownersPath)
+
 	var present, missing []string
-	for _, path := range managedFiles {
+	for _, path := range managed {
 		_, err := l.client.GetFileContent(ctx, l.org, forge.ConfigRepoName, path)
 		if err != nil {
 			if forge.IsNotFound(err) {

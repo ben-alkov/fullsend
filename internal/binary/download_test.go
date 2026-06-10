@@ -305,7 +305,7 @@ func TestResolveForVendor_DevNoCheckoutFails(t *testing.T) {
 	require.NoError(t, os.Chdir(tmpDir))
 	t.Cleanup(func() { _ = os.Chdir(origDir) })
 
-	_, err = ResolveForVendor("dev", "amd64")
+	_, err = ResolveForVendor(VendorOpts{Version: "dev", Arch: "amd64"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "dev build")
 }
@@ -335,7 +335,7 @@ func TestResolveForVendor_NoLatestFallback(t *testing.T) {
 	require.NoError(t, os.Chdir(tmpDir))
 	t.Cleanup(func() { _ = os.Chdir(origDir) })
 
-	_, err = ResolveForVendor("0.4.0", "amd64")
+	_, err = ResolveForVendor(VendorOpts{Version: "0.4.0", Arch: "amd64"})
 	require.Error(t, err)
 	assert.Equal(t, int32(0), latestCalls.Load(), "vendor path must not call latest release API")
 	assert.NotContains(t, err.Error(), "latest")
@@ -383,7 +383,7 @@ func TestResolveForVendor_ReleaseFallback(t *testing.T) {
 	require.NoError(t, os.Chdir(tmpDir))
 	t.Cleanup(func() { _ = os.Chdir(origDir) })
 
-	result, err := ResolveForVendor("0.4.0", "amd64")
+	result, err := ResolveForVendor(VendorOpts{Version: "0.4.0", Arch: "amd64"})
 	require.NoError(t, err)
 	t.Cleanup(func() { os.RemoveAll(result.TmpDir) })
 	assert.Equal(t, SourceReleaseDownload, result.Source)

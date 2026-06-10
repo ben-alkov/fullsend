@@ -89,9 +89,31 @@ func VendorCommitMessage(source binary.Source, version, destPath string, sizeByt
 func RemoveStaleBinaryCommitMessage(destPath string) string {
 	title := "chore: remove vendored fullsend binary"
 	body := strings.Join([]string{
-		"Reason: --vendor-fullsend-binary not set; removing stale binary so CI uses released versions",
+		"Reason: --vendor not set; removing stale binary so CI uses released versions",
 		fmt.Sprintf("Path: %s", destPath),
-		"Note: re-run install with --vendor-fullsend-binary to upload again",
+		"Note: re-run install with --vendor to upload again",
+	}, "\n")
+	return title + "\n\n" + body
+}
+
+// VendorContentCommitMessage returns a commit message for vendored content upload.
+func VendorContentCommitMessage(version, pathPrefix string, fileCount int) string {
+	title := "chore: vendor fullsend workflow and agent content"
+	body := strings.Join([]string{
+		fmt.Sprintf("CLI version: %s", version),
+		fmt.Sprintf("Prefix: %s", pathPrefix),
+		fmt.Sprintf("Files: %d", fileCount),
+		"Source: --vendor install",
+	}, "\n")
+	return title + "\n\n" + body
+}
+
+// RemoveStaleContentCommitMessage returns title + body for stale content deletion.
+func RemoveStaleContentCommitMessage(path string) string {
+	title := "chore: remove stale vendored fullsend content"
+	body := strings.Join([]string{
+		"Reason: --vendor not set; removing stale vendored content",
+		fmt.Sprintf("Path: %s", path),
 	}, "\n")
 	return title + "\n\n" + body
 }

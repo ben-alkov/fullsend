@@ -60,7 +60,7 @@ func TestRemoveStaleBinaryCommitMessage_HasTitleAndBody(t *testing.T) {
 	require.Contains(t, msg, "\n\n")
 	assert.Contains(t, msg, "chore: remove vendored fullsend binary")
 	assert.Contains(t, msg, "Path: .fullsend/bin/fullsend")
-	assert.Contains(t, msg, "--vendor-fullsend-binary not set")
+	assert.Contains(t, msg, "--vendor not set")
 }
 
 func TestVendorCommitMessage_ReleaseTitle(t *testing.T) {

@@ -55,9 +55,9 @@ func TestInstallCmd_Flags(t *testing.T) {
 	skipAppSetupFlag := cmd.Flags().Lookup("skip-app-setup")
 	require.NotNil(t, skipAppSetupFlag, "expected --skip-app-setup flag")
 
-	vendorBinaryFlag := cmd.Flags().Lookup("vendor-fullsend-binary")
-	require.NotNil(t, vendorBinaryFlag, "expected --vendor-fullsend-binary flag")
-	assert.Equal(t, "false", vendorBinaryFlag.DefValue)
+	vendorFlag := cmd.Flags().Lookup("vendor")
+	require.NotNil(t, vendorFlag, "expected --vendor flag")
+	assert.Equal(t, "false", vendorFlag.DefValue)
 
 	inferenceProjectFlag := cmd.Flags().Lookup("inference-project")
 	require.NotNil(t, inferenceProjectFlag, "expected --inference-project flag")
@@ -228,7 +228,7 @@ func TestInstallCmd_PerRepoAcceptsSharedFlags(t *testing.T) {
 		{"mint-source-dir", "/tmp/src"},
 		{"skip-mint-deploy", ""},
 		{"app-set", "custom-prefix"},
-		{"vendor-fullsend-binary", ""},
+		{"vendor", ""},
 	}
 	for _, tc := range sharedFlags {
 		t.Run(tc.flag, func(t *testing.T) {
@@ -1210,7 +1210,7 @@ func TestCheckInstallScopes_SyncWithLayers(t *testing.T) {
 	emptyCfg := &config.OrgConfig{}
 	stack := layers.NewStack(
 		layers.NewConfigRepoLayer("test-org", nil, emptyCfg, ui.New(&discardWriter{}), false),
-		layers.NewWorkflowsLayer("test-org", nil, ui.New(&discardWriter{}), "", "test-version"),
+		layers.NewWorkflowsLayer("test-org", nil, ui.New(&discardWriter{}), "", "test-version", false),
 		layers.NewSecretsLayer("test-org", nil, nil, ui.New(&discardWriter{})),
 		layers.NewInferenceLayer("test-org", nil, nil, ui.New(&discardWriter{})),
 		layers.NewOIDCDispatchLayer("test-org", nil, nil, nil, ui.New(&discardWriter{})),

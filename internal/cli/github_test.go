@@ -80,8 +80,8 @@ func TestGitHubSetupCmd_Flags(t *testing.T) {
 	enrollNoneFlag := cmd.Flags().Lookup("enroll-none")
 	require.NotNil(t, enrollNoneFlag, "expected --enroll-none flag")
 
-	vendorBinaryFlag := cmd.Flags().Lookup("vendor-fullsend-binary")
-	require.NotNil(t, vendorBinaryFlag, "expected --vendor-fullsend-binary flag")
+	vendorFlag := cmd.Flags().Lookup("vendor")
+	require.NotNil(t, vendorFlag, "expected --vendor flag")
 
 	inferenceProjectFlag := cmd.Flags().Lookup("inference-project")
 	require.NotNil(t, inferenceProjectFlag, "expected --inference-project flag")

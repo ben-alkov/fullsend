@@ -235,7 +235,7 @@ Install:      process 1→7 (forward)
 Uninstall:    process 7→1 (reverse)
 ```
 
-Per-repo mode does not use the layer stack — it runs the same phases inline in `runPerRepoInstall()` and `runGitHubSetupPerRepo()` since there's no need for composable uninstall ordering with a single repo. Binary vendoring (when `--vendor-fullsend-binary` is set) and stale binary cleanup are handled inline or via shared helpers; per-org mode uses `VendorBinaryLayer`.
+Per-repo mode does not use the layer stack — it runs the same phases inline in `runPerRepoInstall()` and `runGitHubSetupPerRepo()` since there's no need for composable uninstall ordering with a single repo. Vendoring (when `--vendor` is set) and stale asset cleanup are handled inline or via shared helpers; per-org mode uses `VendorBinaryLayer`.
 
 ### Binary acquisition (`internal/binary`)
 
@@ -427,8 +427,10 @@ fullsend-repo/                      (embedded template)
 | Category | Installed? | Source | Purpose |
 |----------|-----------|--------|---------|
 | **Installed** | Yes | Scaffold → `.fullsend` repo | Workflows, configs, static files |
-| **Layered** | No (runtime) | Upstream reusable workflows | agents/, skills/, harness/, plugins/, policies/, scripts/, schemas/, env/ |
-| **Upstream-only** | No | Referenced directly | .github/actions/, .github/scripts/ |
+| **Layered** | No (runtime) or yes with `--vendor` | Upstream `@v0` sparse checkout, or vendored at install | agents/, skills/, harness/, plugins/, policies/, scripts/, schemas/, env/ |
+| **Upstream-only** | No (layered) or yes with `--vendor` | Referenced directly or vendored at install | .github/actions/, .github/scripts/ |
+
+Runtime skips upstream fetch when `.defaults/action.yml` is present (vendored); layered installs sparse-checkout `fullsend-ai/fullsend@v0` into `.defaults/`.
 
 ### File Mode Tracking
 
