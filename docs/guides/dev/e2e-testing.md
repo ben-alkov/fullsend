@@ -4,7 +4,8 @@ Guide for running and debugging fullsend admin e2e tests locally and in CI.
 
 Related ADRs: [0010](../../ADRs/0010-stored-session-for-e2e-browser-auth.md) (browser
 session), [0039](../../ADRs/0039-totp-automation-for-e2e-2fa.md) (2FA),
-[0040](../../ADRs/0040-org-pool-for-parallel-e2e-tests.md) (org pool).
+[0040](../../ADRs/0040-org-pool-for-parallel-e2e-tests.md) (org pool),
+[0009](../../ADRs/0009-pull-request-target-in-shim-workflows.md) (pull_request_target security model for shims; e2e uses a separate gate pattern documented below).
 
 ## Local runs
 
