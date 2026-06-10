@@ -71,7 +71,7 @@ The `admin install` command performs all setup in a single invocation. The `mint
 | Phase 4: WIF provisioning | `fullsend inference provision` | GCP project (inference): `roles/iam.workloadIdentityPoolAdmin`, `roles/resourcemanager.projectIamAdmin` |
 | Phases 5-7: GitHub setup + enrollment | `fullsend github setup` | GitHub only |
 
-The typical handoff: a GCP admin runs `mint deploy`, `mint enroll`, and `inference provision`, then passes the mint URL and WIF provider resource name to a GitHub maintainer who runs `github setup --mint-url=... --inference-wif-provider=...`. See [Setting up with pre-provisioned infrastructure](../getting-started/github-setup.md).
+The typical handoff: a GCP admin runs `mint deploy`, `mint enroll`, and `inference provision`, then passes the mint URL and WIF provider resource name to a GitHub maintainer who runs `github setup --mint-url=... --inference-wif-provider=...`. See [Setting up with pre-provisioned infrastructure](../../reference/github-setup.md).
 
 ### Token Resolution Chain
 
@@ -530,8 +530,8 @@ var executableFiles = map[string]struct{}{
 ## See Also
 
 - [Local Development](local-dev.md) — Development environment setup
-- [Installing fullsend](../getting-started/installation.md) — End-user setup and all-in-one admin install
-- [Setting up with pre-provisioned infrastructure](../getting-started/github-setup.md) — GitHub-only setup guide
+- [Installing fullsend](../../reference/installation.md) — End-user setup and all-in-one admin install
+- [Setting up with pre-provisioned infrastructure](../../reference/github-setup.md) — GitHub-only setup guide
 - [Mint service administration](../infrastructure/mint-administration.md) — Deploying and managing the token mint
 - [Infrastructure Reference](../infrastructure/infrastructure-reference.md) — Infrastructure details
 - [Customizing Agents](../user/customizing-agents.md) — User customization guide

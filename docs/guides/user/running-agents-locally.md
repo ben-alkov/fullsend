@@ -240,7 +240,7 @@ fullsend run triage \
 ```
 
 Status comment behavior is configured via `status_notifications` in
-`config.yaml`. See the [installation guide](../getting-started/installation.md#status-notifications).
+`config.yaml`. See the [installation guide](../../reference/installation.md#status-notifications).
 
 ## Simulating Fullsend's real customization layers
 

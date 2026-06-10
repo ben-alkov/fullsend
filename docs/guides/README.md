@@ -2,18 +2,17 @@
 
 Practical how-to documentation for fullsend, organized by audience. For design documents and architectural context, see [docs/problems/](../problems/), [docs/ADRs/](../ADRs/), and [docs/architecture.md](../architecture.md).
 
-Structure decided in [ADR 0023](../ADRs/0023-user-documentation-structure.md).
-
 ## Getting started
 
 Guides for onboarding organizations and configuring GitHub — the first thing most users need.
 
-- [Installing fullsend](getting-started/installation.md) — End-user setup (inference + GitHub) and all-in-one admin install
-- [Setting up with pre-provisioned infrastructure](getting-started/github-setup.md) — GitHub-only setup when GCP infrastructure is already provisioned
+- [Getting Inference](getting-started/getting-inference.md)
+- [Configuring GitHub](getting-started/configuring-github.md)
+- [Organization Mode](getting-started/org-mode.md)
 
 ## Infrastructure
 
-Guides for platform operators who deploy and manage the GCP-side infrastructure (token mint, WIF, secrets).
+Advanced guides for platform operators who deploy and manage the GCP-side infrastructure (token mint, WIF, secrets).
 
 - [Mint service administration](infrastructure/mint-administration.md) — Deploying and managing the token mint Cloud Function
 - [Infrastructure reference](infrastructure/infrastructure-reference.md) — Token mint, WIF, and secrets deployment details
