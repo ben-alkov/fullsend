@@ -16,6 +16,9 @@ var (
 	validAgentName  = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 	validModelName  = regexp.MustCompile(`^[a-zA-Z0-9_.@-]+$`)
 	validPluginName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+	// validRoleName mirrors mintcore.RolePattern — duplicated to avoid coupling harness→mintcore.
+	validRoleName   = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
+	validSlugName   = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 	envVarRef      = regexp.MustCompile(`\$\{([^}]+)\}`)
 )
 
@@ -193,6 +196,8 @@ type Harness struct {
 	Agent          string            `yaml:"agent"`
 	Doc            string            `yaml:"doc,omitempty"` // source-repo-only; not resolved at runtime, used by lint-agent-docs
 	Description    string            `yaml:"description,omitempty"`
+	Role           string            `yaml:"role,omitempty"`
+	Slug           string            `yaml:"slug,omitempty"`
 	Image          string            `yaml:"image,omitempty"`
 	Policy         string            `yaml:"policy,omitempty"`
 	Skills         []string          `yaml:"skills,omitempty"`
@@ -247,6 +252,17 @@ func (h *Harness) Validate() error {
 	}
 	if h.Model != "" && !validModelName.MatchString(h.Model) {
 		return fmt.Errorf("model %q contains invalid characters (allowed: a-z, A-Z, 0-9, _, -, ., @)", h.Model)
+	}
+	if h.Role != "" {
+		if !validRoleName.MatchString(h.Role) {
+			return fmt.Errorf("role %q contains invalid characters (allowed: a-z, 0-9, _, -; must start with a lowercase letter)", h.Role)
+		}
+		if strings.Contains(h.Role, "--") {
+			return fmt.Errorf("role %q must not contain double hyphens", h.Role)
+		}
+	}
+	if h.Slug != "" && !validSlugName.MatchString(h.Slug) {
+		return fmt.Errorf("slug %q contains invalid characters (allowed: a-z, A-Z, 0-9, _, -; must start with a letter or digit)", h.Slug)
 	}
 	for i, p := range h.Plugins {
 		pluginBase := filepath.Base(p)
