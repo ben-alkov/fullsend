@@ -200,6 +200,7 @@ type Harness struct {
 	Description    string            `yaml:"description,omitempty"`
 	Role           string            `yaml:"role,omitempty"`
 	Slug           string            `yaml:"slug,omitempty"`
+	Base           string            `yaml:"base,omitempty"`
 	Image          string            `yaml:"image,omitempty"`
 	Policy         string            `yaml:"policy,omitempty"`
 	Skills         []string          `yaml:"skills,omitempty"`
@@ -290,6 +291,12 @@ func LoadRaw(path string) (*Harness, error) {
 
 // Validate checks that required fields are present.
 func (h *Harness) Validate() error {
+	// Base field must be consumed by LoadWithBase before validation.
+	// If it's still set, the harness was loaded via Load/LoadWithOpts which
+	// don't process base composition — a silent misconfiguration.
+	if h.Base != "" {
+		return fmt.Errorf("base field is set but harness was not loaded with LoadWithBase; use LoadWithBase to enable base composition")
+	}
 	if h.Agent == "" {
 		return fmt.Errorf("agent field is required")
 	}
@@ -658,12 +665,18 @@ func (h *Harness) ValidateResourceTypes() error {
 	}
 
 	// Declarative fields: if a URL, must include integrity hash.
+	// Check URL fields require integrity hashes.
+	// Note: "base" is included as defense-in-depth. In normal flow, Validate()
+	// rejects non-empty base before reaching here, and LoadWithBase clears base
+	// before calling Validate. This check catches edge cases where
+	// ValidateResourceTypes is called standalone.
 	declFields := []struct {
 		name  string
 		value string
 	}{
 		{"agent", h.Agent},
 		{"policy", h.Policy},
+		{"base", h.Base},
 	}
 	for _, f := range declFields {
 		if f.value != "" && IsURL(f.value) {
@@ -736,6 +749,29 @@ func (h *Harness) MatchingAllowedPrefix(rawURL string) string {
 		return ""
 	}
 	for _, prefix := range h.AllowedRemoteResources {
+		normPrefix, prefixOK := normalizeURLPath(strings.ToLower(prefix))
+		if !prefixOK {
+			continue
+		}
+		if strings.HasPrefix(normalized, normPrefix) {
+			return prefix
+		}
+	}
+	return ""
+}
+
+// MatchingAllowedPrefixInList checks if a URL matches any prefix in the given allowlist.
+// Returns the matching prefix or "" if none match. Standalone version of MatchingAllowedPrefix.
+func MatchingAllowedPrefixInList(rawURL string, allowlist []string) string {
+	lower := strings.ToLower(rawURL)
+	if strings.Contains(lower, "%25") {
+		return ""
+	}
+	normalized, ok := normalizeURLPath(lower)
+	if !ok {
+		return ""
+	}
+	for _, prefix := range allowlist {
 		normPrefix, prefixOK := normalizeURLPath(strings.ToLower(prefix))
 		if !prefixOK {
 			continue
