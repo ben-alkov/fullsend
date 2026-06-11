@@ -281,7 +281,19 @@ func runGitHubSetupPerRepo(ctx context.Context, client forge.Client, printer *ui
 	}
 	printer.Blank()
 
-	printer.StepStart("Writing per-repo scaffold files")
+	var vendorAssetCount int
+	if cfg.vendor {
+		var vendorErr error
+		files, vendorAssetCount, vendorErr = appendVendorTreeFiles(printer, owner, repo, files, cfg.vendor, cfg.fullsendBinary, cfg.fullsendSource)
+		if vendorErr != nil {
+			return fmt.Errorf("collecting vendored assets: %w", vendorErr)
+		}
+	}
+	if vendorAssetCount > 0 {
+		printer.StepStart(fmt.Sprintf("Writing per-repo scaffold and vendored assets (%d content files)", vendorAssetCount))
+	} else {
+		printer.StepStart("Writing per-repo scaffold files")
+	}
 	committed, err := client.CommitFiles(ctx, owner, repo,
 		fmt.Sprintf("chore: initialize fullsend-%s per-repo installation", version), files)
 	if err != nil {
@@ -289,7 +301,11 @@ func runGitHubSetupPerRepo(ctx context.Context, client forge.Client, printer *ui
 		return fmt.Errorf("committing scaffold files: %w", err)
 	}
 	if committed {
-		printer.StepDone(fmt.Sprintf("Wrote %d files", len(files)))
+		if vendorAssetCount > 0 {
+			printer.StepDone(fmt.Sprintf("Wrote %d scaffold files and vendored binary (%d content files)", len(files), vendorAssetCount))
+		} else {
+			printer.StepDone(fmt.Sprintf("Wrote %d files", len(files)))
+		}
 	} else {
 		printer.StepDone("Scaffold up to date")
 	}
@@ -312,11 +328,7 @@ func runGitHubSetupPerRepo(ctx context.Context, client forge.Client, printer *ui
 	}
 	printer.StepDone(fmt.Sprintf("Set %d repository secrets", len(repoSecrets)))
 
-	if cfg.vendor {
-		if err := acquireAndVendor(ctx, client, printer, owner, repo, cfg.fullsendBinary, cfg.fullsendSource); err != nil {
-			return fmt.Errorf("vendoring assets: %w", err)
-		}
-	} else {
+	if !cfg.vendor {
 		if err := removeStaleVendoredAssets(ctx, client, printer, owner, repo, true); err != nil {
 			return err
 		}
@@ -468,11 +480,12 @@ func runGitHubSetupPerOrg(ctx context.Context, client forge.Client, printer *ui.
 	dispatcher := &skipMintDispatcher{mintURL: cfg.mintURL}
 
 	var vendorFn layers.VendorFunc
+	var vendorCollect layers.VendorCollectFunc
 	if cfg.vendor {
-		vendorFn = makeVendorFunc(cfg.fullsendBinary, cfg.fullsendSource)
+		vendorFn, vendorCollect = vendorStackArgs(true, cfg.fullsendBinary, cfg.fullsendSource)
 	}
 
-	stack := buildLayerStack(org, client, orgCfg, printer, user, privateRepo, enabledRepos, agentCreds, enrolledRepoIDs, inferenceProvider, cfg.vendor, vendorFn, "", dispatcher)
+	stack := buildLayerStack(org, client, orgCfg, printer, user, privateRepo, enabledRepos, agentCreds, enrolledRepoIDs, inferenceProvider, cfg.vendor, vendorFn, vendorCollect, "", dispatcher)
 
 	if cfg.dryRun {
 		printer.Header("Dry run — analyzing what setup would do")
@@ -508,7 +521,7 @@ func runGitHubSetupPerOrg(ctx context.Context, client forge.Client, printer *ui.
 		orgCfg = config.NewOrgConfig(repoNames, enabledRepos, roles, agents, inferenceProviderName)
 		orgCfg.Dispatch.Mode = "oidc-mint"
 
-		stack = buildLayerStack(org, client, orgCfg, printer, user, privateRepo, enabledRepos, agentCreds, enrolledRepoIDs, inferenceProvider, cfg.vendor, vendorFn, "", dispatcher)
+		stack = buildLayerStack(org, client, orgCfg, printer, user, privateRepo, enabledRepos, agentCreds, enrolledRepoIDs, inferenceProvider, cfg.vendor, vendorFn, vendorCollect, "", dispatcher)
 	}
 
 	if err := runPreflight(ctx, stack, layers.OpInstall, client, printer); err != nil {

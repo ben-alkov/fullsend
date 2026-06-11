@@ -36,6 +36,22 @@ func TestVendorBinaryLayer_RequiredScopes(t *testing.T) {
 	assert.Nil(t, layer.RequiredScopes(OpAnalyze))
 }
 
+func TestVendorBinaryLayer_CombinedWithScaffold_SkipsVendorFn(t *testing.T) {
+	client := &forge.FakeClient{}
+	called := false
+	vendorFn := func(ctx context.Context, c forge.Client, p *ui.Printer, owner, repo string) error {
+		called = true
+		return nil
+	}
+
+	layer, _ := newVendorBinaryLayer(t, client, true, vendorFn)
+	layer.SetCombinedWithScaffold(true)
+
+	err := layer.Install(context.Background())
+	require.NoError(t, err)
+	assert.False(t, called, "vendor function should be skipped when combined with scaffold")
+}
+
 func TestVendorBinaryLayer_EnabledCallsVendorFn(t *testing.T) {
 	client := &forge.FakeClient{}
 	called := false

@@ -991,7 +991,19 @@ func runPerRepoInstall(ctx context.Context, c perRepoInstallConfig) error {
 		"FULLSEND_GCP_WIF_PROVIDER": inferenceWIFProvider,
 	}
 
-	printer.StepStart("Writing per-repo scaffold files")
+	var vendorAssetCount int
+	if vendor {
+		var vendorErr error
+		files, vendorAssetCount, vendorErr = appendVendorTreeFiles(printer, owner, repo, files, vendor, fullsendBinary, fullsendSource)
+		if vendorErr != nil {
+			return fmt.Errorf("collecting vendored assets: %w", vendorErr)
+		}
+	}
+	if vendorAssetCount > 0 {
+		printer.StepStart(fmt.Sprintf("Writing per-repo scaffold and vendored assets (%d content files)", vendorAssetCount))
+	} else {
+		printer.StepStart("Writing per-repo scaffold files")
+	}
 	committed, err := client.CommitFiles(ctx, owner, repo,
 		fmt.Sprintf("chore: initialize fullsend-%s per-repo installation", version), files)
 	if err != nil {
@@ -999,7 +1011,11 @@ func runPerRepoInstall(ctx context.Context, c perRepoInstallConfig) error {
 		return fmt.Errorf("committing scaffold files: %w", err)
 	}
 	if committed {
-		printer.StepDone(fmt.Sprintf("Wrote %d files", len(files)))
+		if vendorAssetCount > 0 {
+			printer.StepDone(fmt.Sprintf("Wrote %d scaffold files and vendored binary (%d content files)", len(files), vendorAssetCount))
+		} else {
+			printer.StepDone(fmt.Sprintf("Wrote %d files", len(files)))
+		}
 	} else {
 		printer.StepDone("Scaffold up to date")
 	}
@@ -1022,11 +1038,7 @@ func runPerRepoInstall(ctx context.Context, c perRepoInstallConfig) error {
 	}
 	printer.StepDone(fmt.Sprintf("Set %d repository secrets", len(repoSecrets)))
 
-	if vendor {
-		if err := acquireAndVendor(ctx, client, printer, owner, repo, fullsendBinary, fullsendSource); err != nil {
-			return fmt.Errorf("vendoring assets: %w", err)
-		}
-	} else {
+	if !vendor {
 		if err := removeStaleVendoredAssets(ctx, client, printer, owner, repo, true); err != nil {
 			return err
 		}
@@ -1193,7 +1205,8 @@ func runDryRun(ctx context.Context, client forge.Client, printer *ui.Printer, or
 	} else {
 		dispatcher = gcf.NewProvisioner(gcf.Config{}, nil)
 	}
-	stack := buildLayerStack(org, client, cfg, printer, user, privateRepo, enabledRepos, agentCreds, enrolledRepoIDs, inferenceProvider, vendor, makeVendorFunc(fullsendBinary, fullsendSource), "", dispatcher)
+	vendorFn, vendorCollect := vendorStackArgs(vendor, fullsendBinary, fullsendSource)
+	stack := buildLayerStack(org, client, cfg, printer, user, privateRepo, enabledRepos, agentCreds, enrolledRepoIDs, inferenceProvider, vendor, vendorFn, vendorCollect, "", dispatcher)
 
 	if err := runPreflight(ctx, stack, layers.OpInstall, client, printer); err != nil {
 		return err
@@ -1546,7 +1559,8 @@ func runInstall(ctx context.Context, client forge.Client, printer *ui.Printer, o
 		}, gcf.NewLiveGCFClient(mintProject))
 	}
 
-	stack := buildLayerStack(org, client, cfg, printer, user, privateRepo, enabledRepos, agentCreds, enrolledRepoIDs, inferenceProvider, vendor, makeVendorFunc(fullsendBinary, fullsendSource), "", disp)
+	vendorFn, vendorCollect := vendorStackArgs(vendor, fullsendBinary, fullsendSource)
+	stack := buildLayerStack(org, client, cfg, printer, user, privateRepo, enabledRepos, agentCreds, enrolledRepoIDs, inferenceProvider, vendor, vendorFn, vendorCollect, "", disp)
 
 	if err := runPreflight(ctx, stack, layers.OpInstall, client, printer); err != nil {
 		return err
@@ -1791,7 +1805,7 @@ func runAnalyze(ctx context.Context, client forge.Client, printer *ui.Printer, o
 	}
 
 	dispatcher := gcf.NewProvisioner(gcf.Config{}, nil)
-	stack := buildLayerStack(org, client, cfg, printer, user, privateRepo, nil, agentCreds, nil, inferenceProvider, false, nil, analyzeFullsendSource, dispatcher)
+	stack := buildLayerStack(org, client, cfg, printer, user, privateRepo, nil, agentCreds, nil, inferenceProvider, false, nil, nil, analyzeFullsendSource, dispatcher)
 
 	if err := runPreflight(ctx, stack, layers.OpAnalyze, client, printer); err != nil {
 		return err
@@ -1821,6 +1835,7 @@ func buildLayerStack(
 	inferenceProvider inference.Provider,
 	vendor bool,
 	vendorFn layers.VendorFunc,
+	vendorCollect layers.VendorCollectFunc,
 	analyzeFullsendSource string,
 	dispatcher dispatch.Dispatcher,
 ) *layers.Stack {
@@ -1838,13 +1853,29 @@ func buildLayerStack(
 
 	return layers.NewStack(
 		layers.NewConfigRepoLayer(org, client, cfg, printer, privateRepo),
-		layers.NewWorkflowsLayer(org, client, printer, user, version, vendor),
-		newVendorLayer(org, client, printer, vendor, vendorFn, analyzeFullsendSource),
+		workflowsLayer(org, client, printer, user, version, vendor, vendorCollect),
+		vendorLayer(org, client, printer, vendor, vendorFn, vendorCollect, analyzeFullsendSource),
 		layers.NewSecretsLayer(org, client, agentCreds, printer).WithOIDCMode(),
 		layers.NewInferenceLayer(org, client, inferenceProvider, printer),
 		dispatchLayer,
 		layers.NewEnrollmentLayer(org, client, enabledRepos, disabledRepos, printer),
 	)
+}
+
+func workflowsLayer(org string, client forge.Client, printer *ui.Printer, user, version string, vendor bool, vendorCollect layers.VendorCollectFunc) *layers.WorkflowsLayer {
+	layer := layers.NewWorkflowsLayer(org, client, printer, user, version, vendor)
+	if vendorCollect != nil {
+		layer = layer.WithVendorCollect(vendorCollect)
+	}
+	return layer
+}
+
+func vendorLayer(org string, client forge.Client, printer *ui.Printer, vendor bool, vendorFn layers.VendorFunc, vendorCollect layers.VendorCollectFunc, analyzeFullsendSource string) *layers.VendorBinaryLayer {
+	layer := newVendorLayer(org, client, printer, vendor, vendorFn, analyzeFullsendSource)
+	if vendorCollect != nil {
+		layer.SetCombinedWithScaffold(true)
+	}
+	return layer
 }
 
 // installRequiredScopes is the set of OAuth scopes the install command

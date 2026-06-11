@@ -3,6 +3,7 @@ package layers
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/fullsend-ai/fullsend/internal/forge"
@@ -14,6 +15,10 @@ const (
 
 	// repoMaintenanceWorkflow is the workflow file that handles enrollment.
 	repoMaintenanceWorkflow = "repo-maintenance.yml"
+
+	workflowDispatchRetryAttempts = 12
+	workflowDispatchRetryInitial  = 3 * time.Second
+	workflowDispatchRetryMax      = 15 * time.Second
 )
 
 // EnrollmentLayer monitors workflow-driven enrollment of target repos.
@@ -72,8 +77,7 @@ func (l *EnrollmentLayer) Install(ctx context.Context) error {
 	dispatchTime := time.Now().UTC().Add(-30 * time.Second)
 
 	l.ui.StepStart("dispatching repo-maintenance workflow for enrollment")
-	err := l.client.DispatchWorkflow(ctx, l.org, forge.ConfigRepoName, repoMaintenanceWorkflow, "main", nil)
-	if err != nil {
+	if err := l.dispatchRepoMaintenanceWithRetry(ctx); err != nil {
 		return fmt.Errorf("dispatching repo-maintenance: %w", err)
 	}
 	l.ui.StepDone("dispatched repo-maintenance workflow")
@@ -98,6 +102,44 @@ func (l *EnrollmentLayer) Install(ctx context.Context) error {
 	l.reportReconciliationPRs(ctx)
 
 	return nil
+}
+
+func (l *EnrollmentLayer) dispatchRepoMaintenanceWithRetry(ctx context.Context) error {
+	delay := workflowDispatchRetryInitial
+	var lastErr error
+
+	for attempt := range workflowDispatchRetryAttempts {
+		if attempt > 0 {
+			l.ui.StepInfo(fmt.Sprintf("workflow dispatch not ready, retrying in %s (attempt %d/%d)", delay, attempt+1, workflowDispatchRetryAttempts))
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(delay):
+			}
+			delay += workflowDispatchRetryInitial
+			if delay > workflowDispatchRetryMax {
+				delay = workflowDispatchRetryMax
+			}
+		}
+
+		lastErr = l.client.DispatchWorkflow(ctx, l.org, forge.ConfigRepoName, repoMaintenanceWorkflow, "main", nil)
+		if lastErr == nil {
+			return nil
+		}
+		if !isWorkflowDispatchNotReady(lastErr) {
+			return lastErr
+		}
+	}
+
+	return lastErr
+}
+
+func isWorkflowDispatchNotReady(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "422") && strings.Contains(msg, "workflow_dispatch")
 }
 
 // awaitWorkflowRun polls for a repo-maintenance workflow run created after

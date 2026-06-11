@@ -20,6 +20,7 @@ type WorkflowsLayer struct {
 	authenticatedUser string
 	version           string
 	vendored          bool
+	vendorCollect     VendorCollectFunc
 }
 
 var _ Layer = (*WorkflowsLayer)(nil)
@@ -34,6 +35,12 @@ func NewWorkflowsLayer(org string, client forge.Client, printer *ui.Printer, use
 		version:           version,
 		vendored:          vendored,
 	}
+}
+
+// WithVendorCollect configures combined scaffold+vendor commits for --vendor installs.
+func (l *WorkflowsLayer) WithVendorCollect(fn VendorCollectFunc) *WorkflowsLayer {
+	l.vendorCollect = fn
+	return l
 }
 
 func (l *WorkflowsLayer) Name() string { return "workflows" }
@@ -77,15 +84,34 @@ func (l *WorkflowsLayer) Install(ctx context.Context) error {
 		Mode:    "100644",
 	})
 
-	l.ui.StepStart("Writing scaffold files")
-	committed, err := l.client.CommitFiles(ctx, l.org, forge.ConfigRepoName,
-		fmt.Sprintf("chore: update fullsend-%s scaffold", l.version), files)
+	vendorAssetCount := 0
+	if l.vendored && l.vendorCollect != nil {
+		vendorFiles, count, err := l.vendorCollect(ctx, l.ui, l.org, forge.ConfigRepoName)
+		if err != nil {
+			return fmt.Errorf("collecting vendored assets: %w", err)
+		}
+		files = append(files, vendorFiles...)
+		vendorAssetCount = count
+	}
+
+	commitMsg := fmt.Sprintf("chore: update fullsend-%s scaffold", l.version)
+	if vendorAssetCount > 0 {
+		commitMsg = fmt.Sprintf("chore: update fullsend-%s scaffold with vendored assets", l.version)
+		l.ui.StepStart(fmt.Sprintf("Writing scaffold and vendored assets (%d content files)", vendorAssetCount))
+	} else {
+		l.ui.StepStart("Writing scaffold files")
+	}
+	committed, err := l.client.CommitFiles(ctx, l.org, forge.ConfigRepoName, commitMsg, files)
 	if err != nil {
 		l.ui.StepFail("Failed to write scaffold files")
 		return fmt.Errorf("committing scaffold files: %w", err)
 	}
 	if committed {
-		l.ui.StepDone(fmt.Sprintf("Wrote %d files", len(files)))
+		if vendorAssetCount > 0 {
+			l.ui.StepDone(fmt.Sprintf("Wrote %d scaffold files and vendored binary (%d content files)", len(files), vendorAssetCount))
+		} else {
+			l.ui.StepDone(fmt.Sprintf("Wrote %d files", len(files)))
+		}
 	} else {
 		l.ui.StepDone("Scaffold up to date")
 	}

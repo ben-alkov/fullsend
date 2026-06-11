@@ -75,6 +75,32 @@ func TestWorkflowsLayer_Install_TriageWorkflowContent(t *testing.T) {
 	assert.NotContains(t, triageContent, "fullsend_ai_repo:")
 }
 
+func TestWorkflowsLayer_Install_CombinedVendorCommit(t *testing.T) {
+	client := forge.NewFakeClient()
+	collectFn := func(_ context.Context, _ *ui.Printer, owner, repo string) ([]forge.TreeFile, int, error) {
+		assert.Equal(t, "test-org", owner)
+		assert.Equal(t, forge.ConfigRepoName, repo)
+		return []forge.TreeFile{
+			{Path: "bin/fullsend", Content: []byte("bin"), Mode: "100755"},
+			{Path: ".defaults/action.yml", Content: []byte("marker"), Mode: "100644"},
+		}, 1, nil
+	}
+	layer := NewWorkflowsLayer("test-org", client, ui.New(&bytes.Buffer{}), "admin-user", "test-version", true)
+	layer = layer.WithVendorCollect(collectFn)
+
+	err := layer.Install(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, client.CommittedFiles, 1)
+	paths := make(map[string]struct{})
+	for _, f := range client.CommittedFiles[0].Files {
+		paths[f.Path] = struct{}{}
+	}
+	assert.Contains(t, paths, ".github/workflows/triage.yml")
+	assert.Contains(t, paths, "bin/fullsend")
+	assert.Contains(t, paths, ".defaults/action.yml")
+}
+
 func TestWorkflowsLayer_Install_VendoredUsesLocalReusablePaths(t *testing.T) {
 	client := forge.NewFakeClient()
 	layer, _ := newWorkflowsLayer(t, client, true)
