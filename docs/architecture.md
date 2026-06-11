@@ -592,7 +592,7 @@ GitHub event ──► SHIM WORKFLOW (fullsend.yml in enrolled repo)
                  ║ │                                                           │ ║
                  ║ │ Extracts from destroyed sandbox:                          │ ║
                  ║ │   /sandbox/workspace/output/, JSONL transcripts,          │ ║
-                 ║ │   rsync repo back (--no-links, exclude .git/hooks/)       │ ║
+                 ║ │   SafeDownload repo (sanitize symlinks, strip hooks)      │ ║
                  ║ │                                                           │ ║
                  ║ │ Post-agent secret scan (redact from extracted output).    │ ║
                  ║ │                                                           │ ║
