@@ -12,6 +12,9 @@ There are independent version reference inputs that control different parts of t
 | `fullsend_ai_ref` | Which ref composite actions (`action.yml`) and defaults are loaded from at runtime | Passed as a `with:` input |
 | `fullsend_version` | Which fullsend CLI binary is installed | Passed as a `with:` input |
 
+When no release exists for `fullsend_version`, `action.yml` falls back to cloning
+and building from source at that ref (see the `install-method=source` path).
+
 If `uses:`, `fullsend_ai_ref` and `fullsend_version` diverge, the workflows, agents and harnesses, and
 CLI diverge, potentially causing mismatch in behavior and failures.
 
@@ -31,7 +34,6 @@ fullsend admin install "$ORG" \
   # ... other flags
 ```
 
-E2e uses `--vendor` so CI exercises the commit under test, not upstream `@v0`.
 After changing reusable workflows or agent content, re-run install (or
 `fullsend github setup`) with `--vendor` to refresh vendored files.
 `fullsend github sync-scaffold` updates thin caller templates and auto-detects

@@ -91,7 +91,10 @@ onto the workspace root at job start (inline prepare step).
 Thin caller `uses:` paths are rendered at install/sync time (local `./...` when
 `--vendor`, upstream `@v0` when layered).
 
-### What was removed
+### What this PR removes
+
+These existed on earlier iterations of the distribution-mode branch and are
+dropped in favor of `--vendor` plus runtime marker detection:
 
 - `distribution.mode` / `distribution.upstream.ref` in org and per-repo config
 - `--distribution-mode`, `--upstream-ref` CLI flags
