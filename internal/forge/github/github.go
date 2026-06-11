@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/fullsend-ai/fullsend/internal/forge"
 	"golang.org/x/crypto/nacl/box"
@@ -599,8 +600,8 @@ func isTransientStatus(code int) bool {
 // CommitFiles atomically commits multiple files to the default branch
 // using the Git Trees/Blobs/Commits API. Returns (false, nil) when
 // all files already match the current tree (idempotent).
-// Tree entries use base64 encoding so binary content (e.g. vendored ELF)
-// is not corrupted by JSON UTF-8 replacement.
+// Text files are embedded as UTF-8 tree content. Binary files (e.g.
+// vendored ELF) are uploaded via the Git Blob API and referenced by SHA.
 func (c *LiveClient) CommitFiles(ctx context.Context, owner, repo, message string, files []forge.TreeFile) (bool, error) {
 	if len(files) == 0 {
 		return false, nil
@@ -689,16 +690,32 @@ func (c *LiveClient) CommitFiles(ctx context.Context, owner, repo, message strin
 	var changedEntries []map[string]any
 	for _, f := range files {
 		expectedSHA := blobSHA(f.Content)
-		if info, ok := existing[f.Path]; ok && info.sha == expectedSHA && info.mode == f.Mode {
+		info, exists := existing[f.Path]
+		if exists && info.sha == expectedSHA && info.mode == f.Mode {
 			continue
 		}
-		changedEntries = append(changedEntries, map[string]any{
-			"path":     f.Path,
-			"mode":     f.Mode,
-			"type":     "blob",
-			"encoding": "base64",
-			"content":  base64.StdEncoding.EncodeToString(f.Content),
-		})
+
+		entry := map[string]any{
+			"path": f.Path,
+			"mode": f.Mode,
+			"type": "blob",
+		}
+		if utf8.Valid(f.Content) {
+			entry["content"] = string(f.Content)
+		} else {
+			blobSHAValue := expectedSHA
+			if exists && info.sha == expectedSHA {
+				blobSHAValue = info.sha
+			} else {
+				createdSHA, err := c.createBlob(ctx, owner, repo, f.Content)
+				if err != nil {
+					return false, fmt.Errorf("create blob for %s: %w", f.Path, err)
+				}
+				blobSHAValue = createdSHA
+			}
+			entry["sha"] = blobSHAValue
+		}
+		changedEntries = append(changedEntries, entry)
 	}
 
 	if len(changedEntries) == 0 {
@@ -897,6 +914,24 @@ func blobSHA(content []byte) string {
 	fmt.Fprintf(h, "blob %d\x00", len(content))
 	h.Write(content)
 	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func (c *LiveClient) createBlob(ctx context.Context, owner, repo string, content []byte) (string, error) {
+	payload := map[string]string{
+		"content":  base64.StdEncoding.EncodeToString(content),
+		"encoding": "base64",
+	}
+	resp, err := c.post(ctx, fmt.Sprintf("/repos/%s/%s/git/blobs", owner, repo), payload)
+	if err != nil {
+		return "", fmt.Errorf("create blob: %w", err)
+	}
+	var blob struct {
+		SHA string `json:"sha"`
+	}
+	if err := decodeJSON(resp, &blob); err != nil {
+		return "", fmt.Errorf("decode blob: %w", err)
+	}
+	return blob.SHA, nil
 }
 
 // GetFileContent retrieves the content of a file from a repository.

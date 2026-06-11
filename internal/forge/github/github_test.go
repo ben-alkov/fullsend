@@ -1290,6 +1290,11 @@ func TestCommitFiles_AllNew(t *testing.T) {
 			assert.Equal(t, "tree000", body["base_tree"])
 			entries := body["tree"].([]any)
 			assert.Len(t, entries, 2)
+			for _, raw := range entries {
+				entry := raw.(map[string]any)
+				assert.NotContains(t, entry, "encoding")
+				assert.IsType(t, "", entry["content"])
+			}
 
 			w.WriteHeader(http.StatusCreated)
 			json.NewEncoder(w).Encode(map[string]string{"sha": "newtree"})
@@ -1326,8 +1331,9 @@ func TestCommitFiles_AllNew(t *testing.T) {
 	assert.True(t, committed)
 }
 
-func TestCommitFiles_BinaryUsesBase64Encoding(t *testing.T) {
+func TestCommitFiles_BinaryUsesBlobAPI(t *testing.T) {
 	binaryContent := []byte{0x7f, 0x45, 0x4c, 0x46, 0xff, 0xfe, 0x00}
+	blobSHAValue := blobSHA(binaryContent)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -1339,16 +1345,24 @@ func TestCommitFiles_BinaryUsesBase64Encoding(t *testing.T) {
 			json.NewEncoder(w).Encode(map[string]any{"tree": map[string]string{"sha": "tree000"}})
 		case r.Method == "GET" && r.URL.Path == "/repos/org/repo/git/trees/tree000":
 			json.NewEncoder(w).Encode(map[string]any{"tree": []any{}, "truncated": false})
+		case r.Method == "POST" && r.URL.Path == "/repos/org/repo/git/blobs":
+			var body map[string]string
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			assert.Equal(t, "base64", body["encoding"])
+			decoded, err := base64.StdEncoding.DecodeString(body["content"])
+			require.NoError(t, err)
+			assert.Equal(t, binaryContent, decoded)
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]string{"sha": blobSHAValue})
 		case r.Method == "POST" && r.URL.Path == "/repos/org/repo/git/trees":
 			var body map[string]any
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 			entries := body["tree"].([]any)
 			require.Len(t, entries, 1)
 			entry := entries[0].(map[string]any)
-			assert.Equal(t, "base64", entry["encoding"])
-			decoded, err := base64.StdEncoding.DecodeString(entry["content"].(string))
-			require.NoError(t, err)
-			assert.Equal(t, binaryContent, decoded)
+			assert.Equal(t, blobSHAValue, entry["sha"])
+			assert.NotContains(t, entry, "content")
+			assert.NotContains(t, entry, "encoding")
 			w.WriteHeader(http.StatusCreated)
 			json.NewEncoder(w).Encode(map[string]string{"sha": "newtree"})
 		case r.Method == "POST" && r.URL.Path == "/repos/org/repo/git/commits":
