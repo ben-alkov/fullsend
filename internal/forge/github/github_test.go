@@ -1437,8 +1437,8 @@ func TestDeleteFiles_Atomic(t *testing.T) {
 		case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/repos/org/repo/git/trees/tree"):
 			json.NewEncoder(w).Encode(map[string]any{
 				"tree": []map[string]string{
-					{"path": "bin/fullsend", "sha": "abc"},
-					{"path": ".defaults/action.yml", "sha": "def"},
+					{"path": "bin/fullsend", "sha": "abc", "mode": "100755"},
+					{"path": ".defaults/action.yml", "sha": "def", "mode": "100644"},
 				},
 				"truncated": false,
 			})
@@ -1448,6 +1448,12 @@ func TestDeleteFiles_Atomic(t *testing.T) {
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 			entries := body["tree"].([]any)
 			require.Len(t, entries, 2)
+			for _, raw := range entries {
+				entry := raw.(map[string]any)
+				assert.Equal(t, "blob", entry["type"])
+				assert.NotEmpty(t, entry["mode"])
+				assert.Nil(t, entry["sha"])
+			}
 			w.WriteHeader(http.StatusCreated)
 			json.NewEncoder(w).Encode(map[string]string{"sha": "newtree"})
 		case r.Method == "POST" && r.URL.Path == "/repos/org/repo/git/commits":
