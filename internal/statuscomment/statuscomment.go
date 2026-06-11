@@ -4,8 +4,8 @@
 // Unlike internal/sticky, which manages persistent bot comments that
 // accumulate history across multiple runs (e.g. review output),
 // statuscomment manages transient lifecycle markers: a start comment
-// created when the agent begins, updated or replaced on completion,
-// and deleted on cancellation. The two packages share the HTML-marker
+// created when the agent begins, then updated or replaced on
+// completion (including cancellation). The two packages share the HTML-marker
 // convention but have different lifecycles and placement heuristics.
 package statuscomment
 
@@ -83,10 +83,7 @@ func (n *Notifier) PostStart(ctx context.Context, description string) error {
 // PostCompletion posts or edits a completion comment.
 // status should be "success", "failure", or "cancelled".
 //
-// Cancellation deletes the start comment (if one exists), leaving no
-// trace on the timeline. No completion comment is posted.
-//
-// For success/failure, placement follows three rules:
+// Placement follows three rules:
 //  1. If the agent posted output after the start comment (a bot-authored
 //     comment that is not a status marker), the start comment is updated
 //     in place — the agent's output is the visible forward signal and a
@@ -97,10 +94,6 @@ func (n *Notifier) PostStart(ctx context.Context, description string) error {
 //     output), a new completion comment is posted so the user sees the
 //     result while reading forward.
 func (n *Notifier) PostCompletion(ctx context.Context, description, status string) error {
-	if status == "cancelled" {
-		return n.handleCancelled(ctx)
-	}
-
 	completionTime := n.now().UTC()
 
 	if !commentEnabled(n.cfg.Comment.Completion) {
@@ -138,15 +131,6 @@ func (n *Notifier) PostCompletion(ctx context.Context, description, status strin
 		}
 	}
 
-	return nil
-}
-
-func (n *Notifier) handleCancelled(ctx context.Context) error {
-	if n.startCommentID != 0 {
-		if err := n.client.DeleteIssueComment(ctx, n.owner, n.repo, n.startCommentID); err != nil {
-			n.warnf("failed to delete start comment on cancellation: %v", err)
-		}
-	}
 	return nil
 }
 
