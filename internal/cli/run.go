@@ -762,7 +762,7 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 		go runHeartbeat(printer, agentStart, timeout, heartbeatDone)
 
 		var metrics agentruntime.RunMetrics
-		exitCode, runErr := rt.Run(agentruntime.RunParams{
+		exitCode, runErr := rt.Run(ctx, agentruntime.RunParams{
 			SandboxName:   sandboxName,
 			AgentBaseName: agentBaseName,
 			Model:         h.Model,
