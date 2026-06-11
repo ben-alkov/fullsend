@@ -306,4 +306,4 @@ The GCF provisioner avoids redundant Cloud Function deployments by computing a S
 - [Installation Guide](../../reference/installation.md) — Setup instructions (end-user and all-in-one)
 - [Mint service administration](mint-administration.md) — Deploying and managing the token mint
 - [Setting up with pre-provisioned infrastructure](../../reference/github-setup.md) — GitHub-only setup guide
-- [Local Development](../dev/local-dev.md) — Developer setup
+- [Running agents locally](../user/running-agents-locally.md) — Run agents locally (binary download, GCP credentials, per-agent env vars)

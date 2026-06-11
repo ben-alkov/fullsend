@@ -1,6 +1,6 @@
 # CLI Internals
 
-This guide provides implementation details for fullsend CLI internals: command structure, installation pipeline, sandbox runtime, and key source files. For local development setup, see [Local Development](local-dev.md).
+This guide provides implementation details for fullsend CLI internals: command structure, installation pipeline, sandbox runtime, and key source files. For running agents locally, see [Running agents locally](../user/running-agents-locally.md).
 
 ## CLI Command Tree
 
@@ -529,7 +529,7 @@ var executableFiles = map[string]struct{}{
 
 ## See Also
 
-- [Local Development](local-dev.md) — Development environment setup
+- [Running agents locally](../user/running-agents-locally.md) — Run agents locally (binary download, GCP credentials, per-agent env vars)
 - [Installing fullsend](../../reference/installation.md) — End-user setup and all-in-one admin install
 - [Setting up with pre-provisioned infrastructure](../../reference/github-setup.md) — GitHub-only setup guide
 - [Mint service administration](../infrastructure/mint-administration.md) — Deploying and managing the token mint

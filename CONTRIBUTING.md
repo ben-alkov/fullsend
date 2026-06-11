@@ -39,6 +39,14 @@ ADRs (Architecture Decision Records) are **point-in-time records**. Once accepte
 
 ADR filenames use a four-digit number (`NNNN-short-description.md`). When multiple PRs add ADRs concurrently, number collisions can happen. Before merging, use the `/renumber-adr` skill to check whether your ADR number is still available on the target branch and renumber if needed.
 
+## Building from source
+
+```bash
+make go-build
+```
+
+The binary is written to `./bin/fullsend`. To run agents locally with the built binary, see [Running agents locally](docs/guides/user/running-agents-locally.md).
+
 ## Issues
 
 When in doubt about whether something warrants a PR, start with an issue. Issues are low-friction and can graduate into PRs, problem docs, or ADRs later.
