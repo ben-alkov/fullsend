@@ -185,11 +185,17 @@ func TestPostCompletion_Cancelled(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, fc.IssueComments["org/repo/7"], 1)
 
+	completionTime := fixedTime().Add(2 * time.Minute)
+	n.now = func() time.Time { return completionTime }
+
 	err = n.PostCompletion(context.Background(), "Working", "cancelled")
 	require.NoError(t, err)
 
-	require.Len(t, fc.DeletedComments, 1)
-	assert.Equal(t, 1, fc.DeletedComments[0])
+	assert.Empty(t, fc.DeletedComments, "should update, not delete")
+	require.Len(t, fc.UpdatedComments, 1)
+	assert.Equal(t, 1, fc.UpdatedComments[0].CommentID)
+	assert.Contains(t, fc.UpdatedComments[0].Body, "Finished Working")
+	assert.Contains(t, fc.UpdatedComments[0].Body, "⚠️ Cancelled")
 }
 
 func TestAllDisabled_NoAPICalls(t *testing.T) {
@@ -332,6 +338,27 @@ func TestPostCompletion_CompletionDisabled_CleansUpStartComment(t *testing.T) {
 
 	n.now = func() time.Time { return fixedTime().Add(time.Minute) }
 	err = n.PostCompletion(context.Background(), "Working", "success")
+	require.NoError(t, err)
+
+	assert.Empty(t, fc.UpdatedComments, "should not update start comment")
+	require.Len(t, fc.DeletedComments, 1, "should delete orphaned start comment")
+	assert.Equal(t, 1, fc.DeletedComments[0])
+	assert.Empty(t, fc.IssueComments["org/repo/7"], "start comment should be removed")
+}
+
+func TestPostCompletion_CancelledWithCompletionDisabled(t *testing.T) {
+	fc := forge.NewFakeClient()
+	cfg := config.StatusNotificationConfig{
+		Comment: config.CommentNotificationConfig{Start: "enabled", Completion: "disabled"},
+	}
+	n := newTestNotifier(fc, cfg)
+
+	err := n.PostStart(context.Background(), "Working")
+	require.NoError(t, err)
+	require.Equal(t, 1, n.startCommentID)
+
+	n.now = func() time.Time { return fixedTime().Add(time.Minute) }
+	err = n.PostCompletion(context.Background(), "Working", "cancelled")
 	require.NoError(t, err)
 
 	assert.Empty(t, fc.UpdatedComments, "should not update start comment")
@@ -484,11 +511,14 @@ func TestPostCompletion_CancelledWithNoStartComment(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, n.startCommentID)
 
+	n.now = func() time.Time { return fixedTime().Add(time.Minute) }
 	err = n.PostCompletion(context.Background(), "Working", "cancelled")
 	require.NoError(t, err)
 
 	assert.Empty(t, fc.DeletedComments, "should not attempt deletion when no start comment exists")
-	assert.Empty(t, fc.IssueComments, "should not post any comment")
+	comments := fc.IssueComments["org/repo/7"]
+	require.Len(t, comments, 1, "should post a completion comment")
+	assert.Contains(t, comments[0].Body, "⚠️ Cancelled")
 }
 
 func TestPostCompletion_AnalyzeTimelineError_UpdatesStartInPlace(t *testing.T) {
