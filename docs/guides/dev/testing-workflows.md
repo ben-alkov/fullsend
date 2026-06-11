@@ -1,6 +1,19 @@
 # Testing workflow changes
 
-This guide explains how to test changes to Fullsend's GitHub Actions workflows.
+This guide explains how to test changes to Fullsend's GitHub Actions workflows, composite actions, and the CLI itself.
+
+## References
+
+There are independent version reference inputs that control different parts of the system:
+
+| Input | Controls | Where set |
+|-------|----------|-----------|
+| `@<ref>` on `uses:` | Which reusable workflow YAML runs | The `uses:` line in the caller workflow |
+| `fullsend_ai_ref` | Which ref composite actions (`action.yml`) and defaults are loaded from at runtime | Passed as a `with:` input |
+| `fullsend_version` | Which fullsend CLI binary is installed | Passed as a `with:` input |
+
+If `uses:`, `fullsend_ai_ref` and `fullsend_version` diverge, the workflows, agents and harnesses, and
+CLI diverge, potentially causing mismatch in behavior and failures.
 
 ## Vendored installs (recommended for PR testing)
 
@@ -27,11 +40,16 @@ vendored vs layered mode from `.defaults/action.yml` presence.
 Runtime skips the upstream sparse checkout when `.defaults/action.yml` is
 present (vendored install) and stages content from `.defaults/` instead.
 
+See [ADR 0046](../../ADRs/0046-vendored-installs-with-vendor-flag.md) for the
+full distribution model.
+
 ## Layered installs: pin upstream ref
 
 In layered mode (default), thin callers reference upstream reusable workflows at
 `fullsend-ai/fullsend@v0`. To test a specific upstream ref without vendoring,
-change the `uses:` ref in the thin caller workflows.
+change the `uses:` ref and matching `with:` inputs in the thin caller workflows.
+
+**Note**: for forks, change the `fullsend-ai/fullsend` portion to point to your fork.
 
 ### Per-repo mode
 
@@ -41,7 +59,13 @@ In your repository modify the dispatch job at `.github/workflows/fullsend.yaml`:
 # .github/workflows/fullsend.yaml
 jobs:
   dispatch:
-    uses: fullsend-ai/fullsend/.github/workflows/reusable-dispatch.yml@<YOUR_VERSION>
+    # [...]
+    uses: fullsend-ai/fullsend/.github/workflows/reusable-dispatch.yml@<YOUR_BRANCH>
+    with:
+      # [...]
+      fullsend_ai_ref: <YOUR_BRANCH>
+      fullsend_version: <YOUR_BRANCH>
+      # [...]
 ```
 
 ### Per-org mode
@@ -49,17 +73,22 @@ jobs:
 **WARNING**: this impacts all repositories, so proceed with care. You can install
 your test repository using per-repo mode to avoid this problem.
 
-In your `.fullsend` repository modify the desired stage workflow file:
+In your `.fullsend` repository change the references for the `reusable-<stage>.yml` you want to
+test (triage in the example below):
 
 ```yaml
 # .github/workflows/triage.yml
 jobs:
   triage:
-    uses: fullsend-ai/fullsend/.github/workflows/reusable-triage.yml@<YOUR_VERSION>
+    # [...]
+    uses: fullsend-ai/fullsend/.github/workflows/reusable-triage.yml@<YOUR_BRANCH>
+    with:
+      # [...]
+      fullsend_ai_ref: <YOUR_BRANCH>
+      fullsend_version: <YOUR_BRANCH>
+      # [...]
 ```
 
-Then push and trigger a Fullsend action. When the ref is deleted from
-fullsend-ai/fullsend, revert to your desired reference.
-
-See [ADR 0046](../../ADRs/0046-vendored-installs-with-vendor-flag.md) for the
-full distribution model.
+Then push this change and trigger a Fullsend action on your test repository: `/fs-triage`, `/fs-code`, ...
+When the ref is deleted from fullsend-ai/fullsend (branch deleted or commit amended), revert this back
+to the desired reference.

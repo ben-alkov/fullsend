@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/fullsend-ai/fullsend/internal/cli"
 )
@@ -16,7 +19,10 @@ type exitCoder interface {
 }
 
 func main() {
-	if err := cli.Execute(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := cli.Execute(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		var ec exitCoder
 		if errors.As(err, &ec) {
