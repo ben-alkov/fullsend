@@ -17,6 +17,12 @@ import (
 
 func newWorkflowsLayer(t *testing.T, client *forge.FakeClient) (*WorkflowsLayer, *bytes.Buffer) {
 	t.Helper()
+	if client.Repos == nil {
+		client.Repos = []forge.Repository{{
+			FullName:      "test-org/" + forge.ConfigRepoName,
+			DefaultBranch: "main",
+		}}
+	}
 	var buf bytes.Buffer
 	printer := ui.New(&buf)
 	layer := NewWorkflowsLayer("test-org", client, printer, "admin-user", "test-version")
@@ -123,6 +129,10 @@ func TestWorkflowsLayer_Install_ManagedHeaders(t *testing.T) {
 
 func TestWorkflowsLayer_Install_Error(t *testing.T) {
 	client := &forge.FakeClient{
+		Repos: []forge.Repository{{
+			FullName:      "test-org/" + forge.ConfigRepoName,
+			DefaultBranch: "main",
+		}},
 		Errors: map[string]error{
 			"CommitFiles": errors.New("write failed"),
 		},

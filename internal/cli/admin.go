@@ -994,15 +994,49 @@ func runPerRepoInstall(ctx context.Context, c perRepoInstallConfig) error {
 		"FULLSEND_GCP_WIF_PROVIDER": inferenceWIFProvider,
 	}
 
-	printer.StepStart("Writing per-repo scaffold files")
+	if err := applyPerRepoScaffold(ctx, client, printer, owner, repo, files, repoVars, repoSecrets); err != nil {
+		return err
+	}
+
+	if vendorBinary {
+		if err := acquireAndVendorFullsendBinary(ctx, client, printer, owner, repo, fullsendBinary); err != nil {
+			return fmt.Errorf("vendoring binary: %w", err)
+		}
+	} else {
+		if err := removeStaleVendoredBinary(ctx, client, printer, owner, repo, layers.VendoredBinaryPathPerRepo); err != nil {
+			return err
+		}
+	}
+
+	printer.Blank()
+	printer.StepDone(fmt.Sprintf("Per-repo installation complete for %s/%s", owner, repo))
+	return nil
+}
+
+// applyPerRepoScaffold commits scaffold files to the repo's default branch
+// and configures the repository variables and secrets needed for fullsend.
+func applyPerRepoScaffold(ctx context.Context, client forge.Client, printer *ui.Printer,
+	owner, repo string, files []forge.TreeFile,
+	repoVars, repoSecrets map[string]string) error {
+
+	targetRepo, err := client.GetRepo(ctx, owner, repo)
+	if err != nil {
+		return fmt.Errorf("getting repo info: %w", err)
+	}
+	printer.StepStart(fmt.Sprintf("Committing scaffold files to %s/%s (%s branch)",
+		owner, repo, targetRepo.DefaultBranch))
 	committed, err := client.CommitFiles(ctx, owner, repo,
 		fmt.Sprintf("chore: initialize fullsend-%s per-repo installation", version), files)
 	if err != nil {
-		printer.StepFail("Failed to write scaffold files")
+		printer.StepFail("Failed to commit scaffold files")
 		return fmt.Errorf("committing scaffold files: %w", err)
 	}
 	if committed {
-		printer.StepDone(fmt.Sprintf("Wrote %d files", len(files)))
+		noun := "files"
+		if len(files) == 1 {
+			noun = "file"
+		}
+		printer.StepDone(fmt.Sprintf("Pushed %d %s to %s", len(files), noun, targetRepo.DefaultBranch))
 	} else {
 		printer.StepDone("Scaffold up to date")
 	}
@@ -1025,18 +1059,6 @@ func runPerRepoInstall(ctx context.Context, c perRepoInstallConfig) error {
 	}
 	printer.StepDone(fmt.Sprintf("Set %d repository secrets", len(repoSecrets)))
 
-	if vendorBinary {
-		if err := acquireAndVendorFullsendBinary(ctx, client, printer, owner, repo, fullsendBinary); err != nil {
-			return fmt.Errorf("vendoring binary: %w", err)
-		}
-	} else {
-		if err := removeStaleVendoredBinary(ctx, client, printer, owner, repo, layers.VendoredBinaryPathPerRepo); err != nil {
-			return err
-		}
-	}
-
-	printer.Blank()
-	printer.StepDone(fmt.Sprintf("Per-repo installation complete for %s/%s", owner, repo))
 	return nil
 }
 

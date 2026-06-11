@@ -107,15 +107,24 @@ func (l *WorkflowsLayer) Install(ctx context.Context) error {
 		Mode:    "100644",
 	})
 
-	l.ui.StepStart("Writing scaffold files")
+	cfgRepo, err := l.client.GetRepo(ctx, l.org, forge.ConfigRepoName)
+	if err != nil {
+		return fmt.Errorf("getting config repo info: %w", err)
+	}
+	l.ui.StepStart(fmt.Sprintf("Committing scaffold files to %s/%s (%s branch)",
+		l.org, forge.ConfigRepoName, cfgRepo.DefaultBranch))
 	committed, err := l.client.CommitFiles(ctx, l.org, forge.ConfigRepoName,
 		fmt.Sprintf("chore: update fullsend-%s scaffold", l.version), files)
 	if err != nil {
-		l.ui.StepFail("Failed to write scaffold files")
+		l.ui.StepFail("Failed to commit scaffold files")
 		return fmt.Errorf("committing scaffold files: %w", err)
 	}
 	if committed {
-		l.ui.StepDone(fmt.Sprintf("Wrote %d files", len(files)))
+		noun := "files"
+		if len(files) == 1 {
+			noun = "file"
+		}
+		l.ui.StepDone(fmt.Sprintf("Pushed %d %s to %s", len(files), noun, cfgRepo.DefaultBranch))
 	} else {
 		l.ui.StepDone("Scaffold up to date")
 	}
