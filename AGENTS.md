@@ -4,12 +4,12 @@ Fullsend is a platform for fully autonomous agentic development for GitHub-hoste
 
 ## How to work in this repo
 
-- This is a design exploration, not a spec. Documents should present multiple options with trade-offs, not prescribe single solutions.
+- Problem documents (`docs/problems/`) should present multiple options with trade-offs, not prescribe single solutions.
 - Each problem document has an "Open questions" section — this is where unresolved issues live.
 - When adding new problem areas, create a new file in `docs/problems/` and link it from `README.md`.
 - The security threat model (threat priority: external injection > insider > drift > supply chain) should inform all other documents.
 - Keep core problem documents organization-agnostic. Organization-specific details belong in `docs/problems/applied/<org-name>/`.
-- The target audience is any contributor community considering autonomous agents — keep language accessible, avoid presuming solutions.
+- The target audience for problem documents is any contributor community considering autonomous agents — keep language accessible and avoid presuming solutions.
 - Always run `make lint` before submitting changes and fix any failures.
 - You **must** read and follow [COMMITS.md](COMMITS.md) when writing or reviewing commit messages. Getting the prefix right is not optional — GoReleaser uses it to build release notes.
 - This repository requires a [Developer Certificate of Origin (DCO)](https://developercertificate.org/). Every commit **must** be signed off: use `git commit -s` (or add `Signed-off-by: Your Name <email>` as a trailer). Commits without a sign-off will fail CI.
@@ -66,7 +66,7 @@ These rules apply whenever you touch `docs/ADRs/` or review a PR that does. Full
 
 **Immutability:** Once an ADR on `main` has status **Accepted**, it is a point-in-time record. Do not substantially rewrite its Context, Decision, or Consequences sections. When circumstances change, write a **new** ADR that supersedes the old one. Minor annotations are welcome: cross-references to related ADRs, short notes linking to newer decisions, typo and broken-link fixes, and status changes (e.g., to Deprecated or Superseded). Call out any edits to accepted ADRs in the PR description.
 
-**New ADRs in pull requests:** Approval happens at **merge**, not when the branch is created. If the decision is made, set status to **Accepted** in the ADR you are proposing (not **Proposed** merely because the PR is open). Use **Proposed** or **Undecided** only when the decision itself is still unsettled. When status is Accepted, update `docs/architecture.md` and related problem docs in the same PR per the writing-adrs skill.
+**New ADRs in pull requests:** Approval happens at **merge**, not when the branch is created. If the decision is made, set status to **Accepted** in the ADR you are proposing — not a lesser status merely because the PR is open. Valid statuses are **Accepted**, **Deprecated**, and **Superseded**. When status is Accepted, update `docs/architecture.md` and related problem docs in the same PR per the writing-adrs skill.
 
 **When reviewing PRs:** Flag substantial rewrites to Context, Decision, or Consequences on Accepted ADRs already on `main` as a policy violation. Allow minor annotations (cross-references, short notes, typo fixes), status updates, and supersession links. For brand-new ADR files on the PR branch, evaluate whether the recorded decision matches the diff — do not treat **Accepted** on a new file as a mistake if the ADR is ready for human review at merge.
 
