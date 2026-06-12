@@ -95,6 +95,12 @@ type CommitFilesRecord struct {
 	Files                []TreeFile
 }
 
+// CommitFilesToBranchRecord records a CommitFilesToBranch call.
+type CommitFilesToBranchRecord struct {
+	Owner, Repo, Branch, Message string
+	Files                        []TreeFile
+}
+
 // FakeClient is a thread-safe test double for forge.Client.
 // Pre-populate its fields to control return values, and inspect
 // recorder slices after the test to verify which calls were made.
@@ -158,25 +164,26 @@ type FakeClient struct {
 	Annotations []Annotation
 
 	// Call recorders
-	CreatedRepos        []Repository
-	CreatedFiles        []FileRecord
-	CreatedBranches     []string // "owner/repo/branch"
-	CreatedProposals    []ChangeProposal
-	DeletedRepos        []string // "owner/repo"
-	DeletedFiles        []FileRecord
-	CreatedSecrets      []SecretRecord
-	Variables           []VariableRecord
-	DeletedOrgSecrets   []string // "org/name"
-	CreatedOrgSecrets   []OrgSecretRecord
-	CreatedOrgVariables []OrgVariableRecord
-	DeletedOrgVariables []string // "org/name"
-	CreatedIssues       []CreatedIssueRecord
-	UpdatedComments     []UpdatedCommentRecord
-	MinimizedComments   []MinimizedCommentRecord
-	CreatedReviews      []ReviewRecord
-	DismissedReviews    []DismissedReviewRecord
-	CommittedFiles      []CommitFilesRecord
-	DeletedComments     []int // comment IDs
+	CreatedRepos           []Repository
+	CreatedFiles           []FileRecord
+	CreatedBranches        []string // "owner/repo/branch"
+	CreatedProposals       []ChangeProposal
+	DeletedRepos           []string // "owner/repo"
+	DeletedFiles           []FileRecord
+	CreatedSecrets         []SecretRecord
+	Variables              []VariableRecord
+	DeletedOrgSecrets      []string // "org/name"
+	CreatedOrgSecrets      []OrgSecretRecord
+	CreatedOrgVariables    []OrgVariableRecord
+	DeletedOrgVariables    []string // "org/name"
+	CreatedIssues          []CreatedIssueRecord
+	UpdatedComments        []UpdatedCommentRecord
+	MinimizedComments      []MinimizedCommentRecord
+	CreatedReviews         []ReviewRecord
+	DismissedReviews       []DismissedReviewRecord
+	CommittedFiles         []CommitFilesRecord
+	CommittedFilesToBranch []CommitFilesToBranchRecord
+	DeletedComments        []int // comment IDs
 
 	// internal counters
 	proposalCounter int
@@ -433,6 +440,33 @@ func (f *FakeClient) CommitFiles(_ context.Context, owner, repo, message string,
 	f.CommittedFiles = append(f.CommittedFiles, CommitFilesRecord{
 		Owner:   owner,
 		Repo:    repo,
+		Message: message,
+		Files:   files,
+	})
+
+	if f.FileContents == nil {
+		f.FileContents = make(map[string][]byte)
+	}
+	for _, file := range files {
+		f.FileContents[owner+"/"+repo+"/"+file.Path] = file.Content
+	}
+
+	changed := f.CommitFilesChanged == nil || *f.CommitFilesChanged
+	return changed, nil
+}
+
+func (f *FakeClient) CommitFilesToBranch(_ context.Context, owner, repo, branch, message string, files []TreeFile) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if e := f.err("CommitFilesToBranch"); e != nil {
+		return false, e
+	}
+
+	f.CommittedFilesToBranch = append(f.CommittedFilesToBranch, CommitFilesToBranchRecord{
+		Owner:   owner,
+		Repo:    repo,
+		Branch:  branch,
 		Message: message,
 		Files:   files,
 	})

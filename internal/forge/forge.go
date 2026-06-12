@@ -24,6 +24,15 @@ func IsNotFound(err error) bool {
 	return errors.Is(err, ErrNotFound)
 }
 
+// ErrBranchProtected indicates that a ref update failed because the
+// target branch has protection rules that prevent direct pushes.
+var ErrBranchProtected = errors.New("branch is protected")
+
+// IsBranchProtected reports whether err indicates a branch protection failure.
+func IsBranchProtected(err error) bool {
+	return errors.Is(err, ErrBranchProtected)
+}
+
 // Repository represents a repository on a git forge.
 type Repository struct {
 	ID            int64
@@ -185,6 +194,11 @@ type Client interface {
 	// already have the expected content and mode, no commit is created
 	// and it returns (false, nil).
 	CommitFiles(ctx context.Context, owner, repo, message string, files []TreeFile) (committed bool, err error)
+
+	// CommitFilesToBranch atomically commits multiple files to a specific
+	// branch. Like CommitFiles, it is idempotent: if all files already
+	// have the expected content, no commit is created.
+	CommitFilesToBranch(ctx context.Context, owner, repo, branch, message string, files []TreeFile) (committed bool, err error)
 
 	// Branch operations
 	CreateBranch(ctx context.Context, owner, repo, branchName string) error
