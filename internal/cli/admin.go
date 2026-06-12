@@ -1602,6 +1602,7 @@ func runUninstall(ctx context.Context, client forge.Client, printer *ui.Printer,
 	// apps that block reinstallation (PEM keys are one-shot).
 	var agentSlugs []string
 	var configMode string
+	var enrolledRepos []string
 	cfgData, err := client.GetFileContent(ctx, org, forge.ConfigRepoName, "config.yaml")
 	if err == nil {
 		if parsedCfg, parseErr := config.ParseOrgConfig(cfgData); parseErr == nil {
@@ -1609,6 +1610,7 @@ func runUninstall(ctx context.Context, client forge.Client, printer *ui.Printer,
 				agentSlugs = append(agentSlugs, agent.Slug)
 			}
 			configMode = parsedCfg.Dispatch.Mode
+			enrolledRepos = parsedCfg.EnabledRepos()
 		} else {
 			printer.StepWarn(fmt.Sprintf("Could not parse existing config: %v; using defaults", parseErr))
 		}
@@ -1658,7 +1660,6 @@ func runUninstall(ctx context.Context, client forge.Client, printer *ui.Printer,
 	}
 
 	// Build a minimal stack for uninstall.
-	// Only ConfigRepoLayer matters for uninstall since other layers are no-ops.
 	emptyCfg := config.NewOrgConfig(nil, nil, nil, nil, "")
 	stack := layers.NewStack(
 		layers.NewConfigRepoLayer(org, client, emptyCfg, printer, false),
@@ -1666,7 +1667,7 @@ func runUninstall(ctx context.Context, client forge.Client, printer *ui.Printer,
 		layers.NewSecretsLayer(org, client, nil, printer),
 		layers.NewInferenceLayer(org, client, nil, printer),
 		dispatchLayer,
-		layers.NewEnrollmentLayer(org, client, nil, nil, printer),
+		layers.NewEnrollmentLayer(org, client, nil, enrolledRepos, printer),
 	)
 
 	if err := runPreflight(ctx, stack, layers.OpUninstall, client, printer); err != nil {
