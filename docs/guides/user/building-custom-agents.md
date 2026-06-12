@@ -6,8 +6,7 @@ For customizing existing agents (overriding harnesses, skills, or policies), see
 
 ## Prerequisites
 
-- A GitHub repository with fullsend [installed](../admin/installation.md) in per-repo mode (`fullsend admin install <owner/repo>`)
-- The fullsend GitHub App installed on the org (provides token minting and WIF infrastructure)
+- A GitHub repository with fullsend [installed](../getting-started/configuring-github.md).
 
 ## Architecture overview
 
@@ -169,7 +168,6 @@ Create `.fullsend/customized/policies/my-agent.yaml`:
 
 ```yaml
 version: 1
-
 filesystem_policy:
   include_workdir: true
   read_only: [/usr, /lib, /proc, /dev/urandom, /app, /etc, /var/log]
@@ -179,7 +177,6 @@ landlock:
 process:
   run_as_user: sandbox
   run_as_group: sandbox
-
 network_policies:
   # Required: Vertex AI for model access
   vertex_ai:
@@ -187,22 +184,26 @@ network_policies:
     endpoints:
       - host: "*.googleapis.com"
         port: 443
-        protocol: tcp
+        protocol: rest
         enforcement: enforce
-        access: allow
+        access: read-write
+      - host: "api.anthropic.com"
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-write
     binaries:
       - path: "**/claude"
       - path: "**/node"
-
   # Optional: GitHub API access (if agent needs it)
   github_api:
     name: github-api
     endpoints:
       - host: "api.github.com"
         port: 443
-        protocol: tcp
+        protocol: rest
         enforcement: enforce
-        access: allow
+        access: read-only
     binaries:
       - path: "**/gh"
       - path: "**/curl"
@@ -423,10 +424,7 @@ jobs:
         env:
           ISSUE_KEY: ${{ inputs.issue_key }}
           ISSUE_SOURCE: ${{ inputs.issue_source || 'github' }}
-          MY_VAR: ${{ vars.MY_VAR }}
-          JIRA_HOST: ${{ secrets.JIRA_HOST }}
-          JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
-          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          MY_VAR: ABCD
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ANTHROPIC_VERTEX_PROJECT_ID: ${{ secrets.FULLSEND_GCP_PROJECT_ID }}
           CLOUD_ML_REGION: ${{ vars.FULLSEND_GCP_REGION }}
@@ -538,7 +536,7 @@ When creating a new agent, you need these files:
 
 - [Customizing agents](customizing-agents.md) — override existing agent harnesses, skills, and policies
 - [Bugfix workflow](bugfix-workflow.md) — how the built-in agents work together end to end
-- [Installing fullsend](../admin/installation.md) — prerequisite: admin setup guide
+- [Getting Started](../getting-started/README.md) — prerequisite: admin setup guide
 - [Architecture overview](../../architecture.md) — component vocabulary and execution stack
 - [Security threat model](../../problems/security-threat-model.md) — how fullsend thinks about security
 - [ADR 0035: Layered Content Resolution](../../ADRs/0035-layered-content-resolution.md) — how customized files override upstream defaults
