@@ -270,7 +270,7 @@ Vendoring commit messages use title + body (upload and stale delete). `admin ana
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  ┌─────────────┐                                                │
-│  │ Load harness │ LoadWithOpts: unmarshal → validateForge →     │
+│  │ Load harness │ LoadWithBase: unmarshal → compose base →       │
 │  │              │ ResolveForge(--forge / env) → Validate        │
 │  └──────┬──────┘                                                │
 │         ▼                                                       │

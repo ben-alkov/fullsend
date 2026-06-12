@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/fullsend-ai/fullsend/internal/binary"
+	"github.com/fullsend-ai/fullsend/internal/fetch"
 	"github.com/fullsend-ai/fullsend/internal/ui"
 )
 
@@ -131,6 +132,228 @@ func TestRunCommand_RejectsNegativeMaxResources(t *testing.T) {
 	err := cmd.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--max-resources must be >= 1")
+}
+
+func TestRunAgent_HarnessLoadPipeline(t *testing.T) {
+	// Exercises the early runAgent pipeline: absFullsendDir, policy,
+	// org config loading, LoadWithBase, baseDeps, ResolveRelativeTo.
+	// The function fails later at sandbox.EnsureAvailable (no openshell
+	// in test env), but by then all harness-loading code paths are covered.
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "harness"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "agents"), 0o755))
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "agents", "code.md"),
+		[]byte("You are a coding agent."),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "harness", "code.yaml"),
+		[]byte("agent: agents/code.md\n"),
+		0o644,
+	))
+
+	rFlags := resolveFlags{maxDepth: 10, maxResources: 50}
+	printer := ui.New(io.Discard)
+	err := runAgent(context.Background(), "code", dir, "", "/tmp/repo", "", nil, false, "", "", rFlags, statusOpts{}, printer, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "openshell")
+}
+
+func TestRunAgent_HarnessLoadWithOrgConfig(t *testing.T) {
+	// Same as above but with a config.yaml present, covering the
+	// orgCfg != nil → orgAllowlist path.
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "harness"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "agents"), 0o755))
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "agents", "code.md"),
+		[]byte("You are a coding agent."),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "harness", "code.yaml"),
+		[]byte("agent: agents/code.md\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "config.yaml"),
+		[]byte("allowed_remote_resources:\n  - \"https://example.com/\"\n"),
+		0o644,
+	))
+
+	rFlags := resolveFlags{maxDepth: 10, maxResources: 50}
+	printer := ui.New(io.Discard)
+	err := runAgent(context.Background(), "code", dir, "", "/tmp/repo", "", nil, false, "", "", rFlags, statusOpts{}, printer, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "openshell")
+}
+
+func TestRunAgent_MalformedOrgConfig(t *testing.T) {
+	// A malformed config.yaml should produce a warning but not prevent
+	// local-only harnesses from proceeding through the pipeline.
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "harness"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "agents"), 0o755))
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "agents", "code.md"),
+		[]byte("You are a coding agent."),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "harness", "code.yaml"),
+		[]byte("agent: agents/code.md\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "config.yaml"),
+		[]byte("{{invalid yaml"),
+		0o644,
+	))
+
+	rFlags := resolveFlags{maxDepth: 10, maxResources: 50}
+	printer := ui.New(io.Discard)
+	err := runAgent(context.Background(), "code", dir, "", "/tmp/repo", "", nil, false, "", "", rFlags, statusOpts{}, printer, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "openshell")
+}
+
+func TestRunAgent_MalformedOrgConfigWithURLRefs(t *testing.T) {
+	// A malformed config.yaml with URL-referenced resources should fail
+	// with a parse error on the re-attempt inside HasURLReferences.
+	agentHash := fetch.ComputeSHA256([]byte("agent content"))
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "harness"), 0o755))
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "harness", "code.yaml"),
+		[]byte(fmt.Sprintf("agent: \"https://example.com/agents/code.md#sha256=%s\"\n", agentHash)),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "config.yaml"),
+		[]byte("{{invalid yaml"),
+		0o644,
+	))
+
+	rFlags := resolveFlags{maxDepth: 10, maxResources: 50}
+	printer := ui.New(io.Discard)
+	err := runAgent(context.Background(), "code", dir, "", "/tmp/repo", "", nil, false, "", "", rFlags, statusOpts{}, printer, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parsing org config")
+}
+
+func TestRunAgent_URLRefsNoOrgConfig(t *testing.T) {
+	// Harness with URL agent but no config.yaml → exercises the
+	// orgCfg == nil path inside HasURLReferences.
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "harness"), 0o755))
+
+	agentHash := fetch.ComputeSHA256([]byte("agent content"))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "harness", "code.yaml"),
+		[]byte(fmt.Sprintf("agent: \"https://example.com/agents/code.md#sha256=%s\"\n", agentHash)),
+		0o644,
+	))
+
+	rFlags := resolveFlags{maxDepth: 10, maxResources: 50}
+	printer := ui.New(io.Discard)
+	err := runAgent(context.Background(), "code", dir, "", "/tmp/repo", "", nil, false, "", "", rFlags, statusOpts{}, printer, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "URL-referenced resources require an org-level config.yaml")
+}
+
+func TestRunAgent_WithURLBase(t *testing.T) {
+	// Harness with a URL base — exercises the baseDeps logging loop.
+	baseContent := []byte("agent: agents/shared.md\n")
+	baseHash := fetch.ComputeSHA256(baseContent)
+
+	srv, policy := newLockTestServer(t, map[string][]byte{
+		"/base.yaml": baseContent,
+	})
+
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "harness"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "agents"), 0o755))
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "agents", "shared.md"),
+		[]byte("You are a shared agent."),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "harness", "code.yaml"),
+		[]byte(fmt.Sprintf("base: \"%s/base.yaml#sha256=%s\"\n", srv.URL, baseHash)),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "config.yaml"),
+		[]byte(fmt.Sprintf("allowed_remote_resources:\n  - \"%s/\"\n", srv.URL)),
+		0o644,
+	))
+
+	fetch.DefaultPolicy = policy
+	defer func() { fetch.DefaultPolicy = fetch.FetchPolicy{} }()
+
+	rFlags := resolveFlags{maxDepth: 10, maxResources: 50}
+	printer := ui.New(io.Discard)
+	err := runAgent(context.Background(), "code", dir, "", "/tmp/repo", "", nil, false, "", "", rFlags, statusOpts{}, printer, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "openshell")
+}
+
+func TestRunAgent_URLBaseNoOrgConfig(t *testing.T) {
+	// Harness with a URL base but no config.yaml — exercises the
+	// pre-check that loads config strictly when a URL base is detected.
+	baseContent := []byte("agent: agents/shared.md\n")
+	baseHash := fetch.ComputeSHA256(baseContent)
+
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "harness"), 0o755))
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "harness", "code.yaml"),
+		[]byte(fmt.Sprintf("base: \"https://example.com/base.yaml#sha256=%s\"\n", baseHash)),
+		0o644,
+	))
+
+	// No config.yaml.
+
+	rFlags := resolveFlags{maxDepth: 10, maxResources: 50}
+	printer := ui.New(io.Discard)
+	err := runAgent(context.Background(), "code", dir, "", "/tmp/repo", "", nil, false, "", "", rFlags, statusOpts{}, printer, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "URL-referenced resources require an org-level config.yaml")
+}
+
+func TestRunAgent_URLBaseMalformedOrgConfig(t *testing.T) {
+	// Harness with a URL base and malformed config.yaml — exercises the
+	// pre-check parse error path.
+	baseContent := []byte("agent: agents/shared.md\n")
+	baseHash := fetch.ComputeSHA256(baseContent)
+
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "harness"), 0o755))
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "harness", "code.yaml"),
+		[]byte(fmt.Sprintf("base: \"https://example.com/base.yaml#sha256=%s\"\n", baseHash)),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "config.yaml"),
+		[]byte("{{invalid yaml"),
+		0o644,
+	))
+
+	rFlags := resolveFlags{maxDepth: 10, maxResources: 50}
+	printer := ui.New(io.Discard)
+	err := runAgent(context.Background(), "code", dir, "", "/tmp/repo", "", nil, false, "", "", rFlags, statusOpts{}, printer, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parsing org config")
 }
 
 func TestBuildScanContextCommand_SourcesEnv(t *testing.T) {

@@ -11,7 +11,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/fullsend-ai/fullsend/internal/config"
 	"github.com/fullsend-ai/fullsend/internal/fetch"
 	"github.com/fullsend-ai/fullsend/internal/forge"
 	gh "github.com/fullsend-ai/fullsend/internal/forge/github"
@@ -116,14 +115,42 @@ func runLock(ctx context.Context, agentName, fullsendDir, forgeFlag string, upda
 		return err
 	}
 
+	// Load org config before the loop — best-effort so harnesses without
+	// remote refs (including base-only) still work when config.yaml is absent.
+	orgConfigPath := filepath.Join(absFullsendDir, "config.yaml")
+	orgCfg := tryLoadOrgConfig(orgConfigPath, printer)
+	var orgAllowlist []string
+	if orgCfg != nil {
+		orgAllowlist = orgCfg.AllowedRemoteResources
+	}
+
+	policy := fetch.DefaultPolicy
+	policy.Offline = rFlags.offline
+
+	// If the harness has a URL base and org config failed to load,
+	// load it strictly now so LoadWithBase gets a proper error path.
+	if orgCfg == nil {
+		if rawH, rawErr := harness.LoadRaw(harnessPath); rawErr == nil && rawH.Base != "" && harness.IsURL(rawH.Base) {
+			var err error
+			orgCfg, err = requireOrgConfig(orgConfigPath, printer)
+			if err != nil {
+				return err
+			}
+			orgAllowlist = orgCfg.AllowedRemoteResources
+		}
+	}
+
 	// Resolve each forge variant and collect the union of dependencies.
 	var allDeps []resolve.Dependency
 	seen := make(map[string]bool)
-	var orgCfg *config.OrgConfig
 
 	for _, platform := range forgePlatforms {
-		h, loadErr := harness.LoadWithOpts(harnessPath, harness.LoadOpts{
+		h, baseDeps, loadErr := harness.LoadWithBase(ctx, harnessPath, harness.ComposeOpts{
+			WorkspaceRoot: absFullsendDir,
+			FetchPolicy:   policy,
+			AuditLogPath:  filepath.Join(absFullsendDir, ".fullsend-cache", "fetch-audit.jsonl"),
 			ForgePlatform: platform,
+			OrgAllowlist:  orgAllowlist,
 		})
 		if loadErr != nil {
 			printer.StepFail(fmt.Sprintf("Failed to load harness (forge: %s)", platform))
@@ -135,19 +162,59 @@ func runLock(ctx context.Context, agentName, fullsendDir, forgeFlag string, upda
 			return fmt.Errorf("resolving paths: %w", err)
 		}
 
+		// Convert base composition dependencies from harness.Dependency
+		// to resolve.Dependency (structurally identical, separate types
+		// to avoid circular imports).
+		newBaseDeps := 0
+		for _, bd := range baseDeps {
+			if !seen[bd.URL] {
+				seen[bd.URL] = true
+				newBaseDeps++
+				allDeps = append(allDeps, resolve.Dependency{
+					Field:     bd.Field,
+					URL:       bd.URL,
+					LocalPath: bd.LocalPath,
+					SHA256:    bd.SHA256,
+					FetchedAt: bd.FetchedAt,
+					CacheHit:  bd.CacheHit,
+					Type:      bd.Type,
+				})
+			}
+		}
+
 		if !h.HasURLReferences() {
-			if platform != "" {
-				printer.StepInfo(fmt.Sprintf("Forge variant %q has no remote dependencies", platform))
+			switch {
+			case newBaseDeps > 0:
+				noun := "dependency"
+				if newBaseDeps > 1 {
+					noun = "dependencies"
+				}
+				if platform != "" {
+					printer.StepDone(fmt.Sprintf("Resolved %d base %s (forge: %s)", newBaseDeps, noun, platform))
+				} else {
+					printer.StepDone(fmt.Sprintf("Resolved %d base %s", newBaseDeps, noun))
+				}
+			case len(baseDeps) > 0:
+				if platform != "" {
+					printer.StepInfo(fmt.Sprintf("Forge variant %q: base dependencies already resolved", platform))
+				} else {
+					printer.StepInfo("Base dependencies already resolved")
+				}
+			default:
+				if platform != "" {
+					printer.StepInfo(fmt.Sprintf("Forge variant %q has no remote dependencies", platform))
+				}
 			}
 			continue
 		}
 
 		if orgCfg == nil {
-			var orgErr error
-			orgCfg, orgErr = loadOrgConfig(absFullsendDir, printer)
-			if orgErr != nil {
-				return orgErr
+			var err error
+			orgCfg, err = requireOrgConfig(orgConfigPath, printer)
+			if err != nil {
+				return err
 			}
+			orgAllowlist = orgCfg.AllowedRemoteResources
 		}
 		if err := h.ValidateAllowedRemoteResources(orgCfg.AllowedRemoteResources); err != nil {
 			printer.StepFail("Remote resource allowlist validation failed")
@@ -159,9 +226,6 @@ func runLock(ctx context.Context, agentName, fullsendDir, forgeFlag string, upda
 		} else {
 			printer.StepStart("Resolving dependencies")
 		}
-
-		policy := fetch.DefaultPolicy
-		policy.Offline = rFlags.offline
 
 		var forgeClient forge.Client
 		if h.HasURLSkills() {
@@ -295,26 +359,6 @@ func lockForgePlatforms(harnessPath, forgePlatform string) ([]string, error) {
 	return platforms, nil
 }
 
-// loadOrgConfig reads and parses the org config.yaml for remote resource
-// validation.
-func loadOrgConfig(absFullsendDir string, printer *ui.Printer) (*config.OrgConfig, error) {
-	orgConfigPath := filepath.Join(absFullsendDir, "config.yaml")
-	orgConfigData, err := os.ReadFile(orgConfigPath)
-	if err != nil {
-		printer.StepFail("Failed to load org config")
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("URL-referenced resources require an org-level config.yaml with allowed_remote_resources (expected at %s)", orgConfigPath)
-		}
-		return nil, fmt.Errorf("reading org config: %w", err)
-	}
-	orgCfg, err := config.ParseOrgConfig(orgConfigData)
-	if err != nil {
-		printer.StepFail("Failed to parse org config")
-		return nil, fmt.Errorf("parsing org config: %w", err)
-	}
-	return orgCfg, nil
-}
-
 // resolveFromLock resolves harness dependencies using a lock file entry instead
 // of fetching from the network. For each pinned dependency, it verifies the
 // content exists in the local cache and replaces the harness URL field with the
@@ -384,6 +428,10 @@ func resolveFromLock(h *harness.Harness, entry *lock.HarnessLock, workspaceRoot 
 			h.Policy = m.localPath
 		case strings.HasPrefix(m.field, "policy["):
 			// Transitive policy reference — leaf node, no harness field to set.
+		case m.field == "base":
+			// Base composition is already resolved by LoadWithBase before
+			// resolveFromLock runs. This entry exists only for cache
+			// verification.
 		default:
 			var idx int
 			if _, err := fmt.Sscanf(m.field, "skills[%d]", &idx); err == nil && idx >= 0 && idx < len(h.Skills) {

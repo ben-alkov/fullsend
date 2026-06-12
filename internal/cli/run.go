@@ -133,6 +133,11 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 		}
 	}
 
+	absFullsendDir, err := filepath.Abs(fullsendDir)
+	if err != nil {
+		return fmt.Errorf("resolving fullsend dir: %w", err)
+	}
+
 	// 1. Resolve and load harness.
 	harnessPath := filepath.Join(fullsendDir, "harness", agentName+".yaml")
 	harnessStart := time.Now()
@@ -144,37 +149,65 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 		return err
 	}
 
-	h, err := harness.LoadWithOpts(harnessPath, harness.LoadOpts{
+	policy := fetch.DefaultPolicy
+	policy.Offline = rFlags.offline
+
+	// Best-effort org config loading — provides the allowlist for base
+	// harness fetching. If the file is missing or unparseable we proceed
+	// without it; HasURLReferences will enforce its presence later if needed.
+	orgConfigPath := filepath.Join(absFullsendDir, "config.yaml")
+	orgCfg := tryLoadOrgConfig(orgConfigPath, printer)
+	var orgAllowlist []string
+	if orgCfg != nil {
+		orgAllowlist = orgCfg.AllowedRemoteResources
+	}
+
+	// If the harness has a URL base and org config failed to load,
+	// load it strictly now so LoadWithBase gets a proper error path
+	// rather than an unhelpful "URL base requires allowed_remote_resources".
+	if orgCfg == nil {
+		if rawH, rawErr := harness.LoadRaw(harnessPath); rawErr == nil && rawH.Base != "" && harness.IsURL(rawH.Base) {
+			var err error
+			orgCfg, err = requireOrgConfig(orgConfigPath, printer)
+			if err != nil {
+				return err
+			}
+			orgAllowlist = orgCfg.AllowedRemoteResources
+		}
+	}
+
+	h, baseDeps, err := harness.LoadWithBase(ctx, harnessPath, harness.ComposeOpts{
+		WorkspaceRoot: absFullsendDir,
+		FetchPolicy:   policy,
+		AuditLogPath:  filepath.Join(absFullsendDir, ".fullsend-cache", "fetch-audit.jsonl"),
 		ForgePlatform: forgePlatform,
+		OrgAllowlist:  orgAllowlist,
 	})
 	if err != nil {
 		printer.StepFail("Failed to load harness")
 		return fmt.Errorf("loading harness: %w", err)
 	}
 
-	absFullsendDir, err := filepath.Abs(fullsendDir)
-	if err != nil {
-		return fmt.Errorf("resolving fullsend dir: %w", err)
+	for _, dep := range baseDeps {
+		if dep.CacheHit {
+			printer.StepInfo(fmt.Sprintf("Base: %s (cache hit)", dep.URL))
+		} else {
+			printer.StepInfo(fmt.Sprintf("Base: %s (fetched)", dep.URL))
+		}
 	}
+
 	if err := h.ResolveRelativeTo(absFullsendDir); err != nil {
 		printer.StepFail("Path validation failed")
 		return fmt.Errorf("resolving paths: %w", err)
 	}
 
 	if h.HasURLReferences() {
-		orgConfigPath := filepath.Join(absFullsendDir, "config.yaml")
-		orgConfigData, err := os.ReadFile(orgConfigPath)
-		if err != nil {
-			printer.StepFail("Failed to load org config")
-			if os.IsNotExist(err) {
-				return fmt.Errorf("URL-referenced resources require an org-level config.yaml with allowed_remote_resources (expected at %s)", orgConfigPath)
+		if orgCfg == nil {
+			var err error
+			orgCfg, err = requireOrgConfig(orgConfigPath, printer)
+			if err != nil {
+				return err
 			}
-			return fmt.Errorf("reading org config for remote resource validation: %w", err)
-		}
-		orgCfg, err := config.ParseOrgConfig(orgConfigData)
-		if err != nil {
-			printer.StepFail("Failed to parse org config")
-			return fmt.Errorf("parsing org config: %w", err)
 		}
 
 		if err := h.ValidateAllowedRemoteResources(orgCfg.AllowedRemoteResources); err != nil {
@@ -218,9 +251,6 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 		}
 
 		if !usedLock {
-			policy := fetch.DefaultPolicy
-			policy.Offline = rFlags.offline
-
 			var forgeClient forge.Client
 			if h.HasURLSkills() {
 				if rFlags.forgeClient != nil {
