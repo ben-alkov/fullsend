@@ -21,6 +21,7 @@ import (
 	"github.com/fullsend-ai/fullsend/internal/config"
 	"github.com/fullsend-ai/fullsend/internal/envfile"
 	"github.com/fullsend-ai/fullsend/internal/fetch"
+	"github.com/fullsend-ai/fullsend/internal/fetchsvc"
 	"github.com/fullsend-ai/fullsend/internal/forge"
 	gh "github.com/fullsend-ai/fullsend/internal/forge/github"
 	"github.com/fullsend-ai/fullsend/internal/harness"
@@ -560,6 +561,35 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 	repoName := filepath.Base(hostRepositoryDir)
 	remoteRepositoryDir := fmt.Sprintf("%s/%s", sandbox.SandboxWorkspace, repoName)
 
+	// 5. Generate trace ID for security finding and audit log correlation.
+	traceID := security.GenerateTraceID()
+
+	// 6. Start runtime fetch service (Phase 4, ADR-0038).
+	// Only started when the harness declares remote resources — without
+	// them there is nothing to fetch, and skipping avoids exposing the
+	// service to prompt-injected agents. PR 3 will add a dedicated
+	// allow_runtime_fetch harness field for finer-grained control.
+	var fetchEnvVal fetchServiceEnv
+	if h.HasURLSkills() || len(h.AllowedRemoteResources) > 0 {
+		env, fetchShutdown, fetchErr := setupFetchService(ctx, rFlags.forgeClient, h, resolveToken, fetchsvc.ServiceConfig{
+			Harness:       h,
+			FetchPolicy:   fetch.DefaultPolicy,
+			WorkspaceRoot: absFullsendDir,
+			AuditLogPath:  filepath.Join(absFullsendDir, ".fullsend-cache", "fetch-audit.jsonl"),
+			TraceID:       traceID,
+			SandboxName:   sandboxName,
+			MaxFetches:    fetchsvc.DefaultMaxFetches,
+			Uploader:      &fetchsvc.SandboxUploader{},
+			SkillDestDir:  sandbox.SandboxClaudeConfig + "/skills",
+		}, printer.StepWarn)
+		if fetchErr != nil {
+			printer.StepWarn("Runtime fetch service failed to start: " + fetchErr.Error())
+		} else {
+			defer fetchShutdown()
+			fetchEnvVal = env
+		}
+	}
+
 	// 7. Bootstrap sandbox.
 	backend := agentruntime.Default()
 	rt := backend.Runtime
@@ -579,7 +609,7 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 		printer.StepFail("Failed to bootstrap sandbox")
 		return err
 	}
-	if err := bootstrapEnv(sandboxName, remoteRepositoryDir, h, rt.EnvExports()); err != nil {
+	if err := bootstrapEnv(sandboxName, remoteRepositoryDir, h, rt.EnvExports(), fetchEnvVal); err != nil {
 		printer.StepFail("Failed to bootstrap sandbox")
 		return err
 	}
@@ -662,8 +692,7 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 		}
 	}
 
-	// 9a. Generate trace ID for security finding correlation.
-	traceID := security.GenerateTraceID()
+	// 9a. Display trace ID (generated earlier for fetch service audit logging).
 	printer.KeyValue("Trace ID", traceID)
 	if err := injectTraceID(sandboxName, traceID); err != nil {
 		printer.StepWarn("Could not inject trace ID into sandbox: " + err.Error())
@@ -1061,7 +1090,37 @@ func bootstrapCommon(sandboxName, fullsendBinary string, h *harness.Harness) err
 // host_files entries copy files from the host into the sandbox at specified
 // destination paths. Src values may contain ${VAR} references expanded from
 // the host environment. When expand is true, file content is also expanded.
-func bootstrapEnv(sandboxName, remoteRepositoryDir string, h *harness.Harness, runtimeEnvExports []string) error {
+// fetchServiceEnv holds the address and token of the runtime fetch service
+// started by the runner. When non-empty, bootstrapEnv injects them as
+// environment variables so the in-sandbox fullsend fetch-skill subcommand
+// can reach the runner.
+type fetchServiceEnv struct {
+	addr  string // host:port
+	token string // bearer token
+}
+
+// setupFetchService resolves a forge client for runtime fetching and starts
+// the HTTP fetch service. It returns the service address/token as a
+// fetchServiceEnv, a shutdown function, and any error.
+func setupFetchService(ctx context.Context, forgeClient forge.Client, h *harness.Harness, resolveToken func() (string, error), cfg fetchsvc.ServiceConfig, warn func(string)) (fetchServiceEnv, func(), error) {
+	if forgeClient != nil {
+		cfg.ForgeClient = forgeClient
+	} else if h.HasURLSkills() || len(h.AllowedRemoteResources) > 0 {
+		if token, err := resolveToken(); err == nil {
+			cfg.ForgeClient = gh.New(token)
+		} else {
+			warn(fmt.Sprintf("Forge token unavailable, runtime fetches for uncached skills will fail: %v", err))
+		}
+	}
+
+	addr, token, shutdown, err := startFetchService(ctx, cfg)
+	if err != nil {
+		return fetchServiceEnv{}, nil, err
+	}
+	return fetchServiceEnv{addr: addr, token: token}, shutdown, nil
+}
+
+func bootstrapEnv(sandboxName, remoteRepositoryDir string, h *harness.Harness, runtimeEnvExports []string, fetchEnv ...fetchServiceEnv) error {
 	remoteEnvFile := sandbox.SandboxWorkspace + "/.env"
 	outputDir := sandbox.SandboxWorkspace + "/output"
 
@@ -1098,6 +1157,14 @@ func bootstrapEnv(sandboxName, remoteRepositoryDir string, h *harness.Harness, r
 	}
 	if outputFile, ok := h.RunnerEnv["FULLSEND_OUTPUT_FILE"]; ok && outputFile != "" {
 		lines = append(lines, fmt.Sprintf("export FULLSEND_OUTPUT_FILE='%s'", strings.ReplaceAll(outputFile, "'", "'\\''")))
+	}
+
+	// Runtime fetch service env vars (Phase 4, ADR-0038).
+	if len(fetchEnv) > 0 && fetchEnv[0].addr != "" {
+		escAddr := strings.ReplaceAll(fetchEnv[0].addr, "'", "'\\''")
+		escToken := strings.ReplaceAll(fetchEnv[0].token, "'", "'\\''")
+		lines = append(lines, fmt.Sprintf("export FULLSEND_FETCH_URL='http://%s/fetch'", escAddr))
+		lines = append(lines, fmt.Sprintf("export FULLSEND_FETCH_TOKEN='%s'", escToken))
 	}
 
 	// Source all env files from .env.d/ (populated by host_files with expand: true).
