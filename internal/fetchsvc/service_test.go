@@ -419,6 +419,29 @@ func TestServeHTTP_BadJSON(t *testing.T) {
 	}
 }
 
+func TestServeHTTP_OversizedBody(t *testing.T) {
+	svc := New(ServiceConfig{
+		Harness:       testHarness("https://github.com/org/"),
+		WorkspaceRoot: t.TempDir(),
+		MaxFetches:    10,
+	})
+
+	longURL := `{"url":"https://example.com/` + strings.Repeat("a", maxRequestBytes) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/fetch", strings.NewReader(longURL))
+	rec := httptest.NewRecorder()
+
+	svc.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413", rec.Code)
+	}
+	var resp FetchResponse
+	json.NewDecoder(rec.Body).Decode(&resp)
+	if resp.Error != "request body too large" {
+		t.Fatalf("error = %q, want 'request body too large'", resp.Error)
+	}
+}
+
 func TestServeHTTP_Forbidden(t *testing.T) {
 	svc := New(ServiceConfig{
 		Harness:       testHarness("https://github.com/allowed-org/"),
@@ -534,4 +557,34 @@ func TestHandleFetch_UploadCalled(t *testing.T) {
 		t.Fatalf("remotePath %q should contain hash prefix %s", call.remotePath, hash[:8])
 	}
 	_ = resp // LocalPath verified via uploader.calls
+}
+
+func TestHandleFetch_AuditLogWriteFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	files := fakeSkillFiles()
+	hash := fetch.ComputeTreeHash(files)
+
+	fc := setupFakeForge("org", "repo", "skills/test-skill", "abc123", files)
+	svc := New(ServiceConfig{
+		Harness:       testHarness("https://github.com/org/repo/"),
+		ForgeClient:   fc,
+		FetchPolicy:   fetch.DefaultPolicy,
+		WorkspaceRoot: tmpDir,
+		MaxFetches:    10,
+		AuditLogPath:  "/no-such-dir/audit.jsonl",
+		Uploader:      &stubUploader{},
+		SkillDestDir:  "/sandbox/skills",
+	})
+
+	resp, err := svc.HandleFetch(context.Background(), FetchRequest{
+		URL: "https://github.com/org/repo/tree/abc123/skills/test-skill#sha256=" + hash,
+	})
+
+	// Fetch succeeds even when audit log write fails (best-effort logging).
+	if err != nil {
+		t.Fatalf("expected success despite audit log failure: %v", err)
+	}
+	if resp.LocalPath == "" {
+		t.Fatal("expected non-empty LocalPath")
+	}
 }

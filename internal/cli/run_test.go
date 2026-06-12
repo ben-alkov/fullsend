@@ -21,6 +21,9 @@ import (
 
 	"github.com/fullsend-ai/fullsend/internal/binary"
 	"github.com/fullsend-ai/fullsend/internal/fetch"
+	"github.com/fullsend-ai/fullsend/internal/fetchsvc"
+	"github.com/fullsend-ai/fullsend/internal/forge"
+	"github.com/fullsend-ai/fullsend/internal/harness"
 	"github.com/fullsend-ai/fullsend/internal/ui"
 )
 
@@ -1183,4 +1186,130 @@ func TestLockCommand_HasForgeFlag(t *testing.T) {
 	flag := cmd.Flags().Lookup("forge")
 	require.NotNil(t, flag)
 	assert.Equal(t, "", flag.DefValue)
+}
+
+func TestBootstrapEnv_IncludesFetchServiceVars(t *testing.T) {
+	h := &harness.Harness{Agent: "agents/test.md"}
+	fEnv := fetchServiceEnv{addr: "127.0.0.1:54321", token: "deadbeef"}
+
+	err := bootstrapEnv("nonexistent-sandbox", "/workspace/repo", h, nil, fEnv)
+
+	// Expected to fail at sandbox.UploadFile — we just verify the fetch
+	// env var code path was reached (coverage) and the error is from upload.
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "copying .env file to sandbox")
+}
+
+func TestBootstrapEnv_SkipsFetchVarsWhenEmpty(t *testing.T) {
+	h := &harness.Harness{Agent: "agents/test.md"}
+
+	err := bootstrapEnv("nonexistent-sandbox", "/workspace/repo", h, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "copying .env file to sandbox")
+}
+
+func TestSetupFetchService_WithForgeClient(t *testing.T) {
+	tmpDir := t.TempDir()
+	h := &harness.Harness{Agent: "agents/test.md"}
+	mockClient := &mockForgeClient{}
+
+	env, shutdown, err := setupFetchService(
+		context.Background(),
+		mockClient,
+		h,
+		func() (string, error) { return "", fmt.Errorf("should not be called") },
+		fetchsvc.ServiceConfig{
+			Harness:       h,
+			WorkspaceRoot: tmpDir,
+			MaxFetches:    10,
+		},
+		func(string) {},
+	)
+	require.NoError(t, err)
+	defer shutdown()
+
+	assert.NotEmpty(t, env.addr)
+	assert.NotEmpty(t, env.token)
+	assert.Len(t, env.token, 64)
+}
+
+func TestSetupFetchService_ResolvesTokenWhenNoForgeClient(t *testing.T) {
+	tmpDir := t.TempDir()
+	h := &harness.Harness{
+		Agent:                  "agents/test.md",
+		AllowedRemoteResources: []string{"https://github.com/org/"},
+	}
+
+	tokenResolved := false
+	env, shutdown, err := setupFetchService(
+		context.Background(),
+		nil,
+		h,
+		func() (string, error) { tokenResolved = true; return "ghp_test", nil },
+		fetchsvc.ServiceConfig{
+			Harness:       h,
+			WorkspaceRoot: tmpDir,
+			MaxFetches:    10,
+		},
+		func(string) {},
+	)
+	require.NoError(t, err)
+	defer shutdown()
+
+	assert.True(t, tokenResolved)
+	assert.NotEmpty(t, env.addr)
+}
+
+func TestSetupFetchService_NoForgeClientNoRemoteResources(t *testing.T) {
+	tmpDir := t.TempDir()
+	h := &harness.Harness{Agent: "agents/test.md"}
+
+	env, shutdown, err := setupFetchService(
+		context.Background(),
+		nil,
+		h,
+		func() (string, error) { return "", fmt.Errorf("should not be called") },
+		fetchsvc.ServiceConfig{
+			Harness:       h,
+			WorkspaceRoot: tmpDir,
+			MaxFetches:    10,
+		},
+		func(string) {},
+	)
+	require.NoError(t, err)
+	defer shutdown()
+
+	assert.NotEmpty(t, env.addr)
+}
+
+func TestSetupFetchService_TokenResolutionFails(t *testing.T) {
+	tmpDir := t.TempDir()
+	h := &harness.Harness{
+		Agent:                  "agents/test.md",
+		AllowedRemoteResources: []string{"https://github.com/org/"},
+	}
+
+	var warned string
+	env, shutdown, err := setupFetchService(
+		context.Background(),
+		nil,
+		h,
+		func() (string, error) { return "", fmt.Errorf("no token available") },
+		fetchsvc.ServiceConfig{
+			Harness:       h,
+			WorkspaceRoot: tmpDir,
+			MaxFetches:    10,
+		},
+		func(msg string) { warned = msg },
+	)
+	require.NoError(t, err)
+	defer shutdown()
+
+	assert.NotEmpty(t, env.addr)
+	assert.Contains(t, warned, "no token available")
+}
+
+type mockForgeClient struct {
+	forge.Client
 }

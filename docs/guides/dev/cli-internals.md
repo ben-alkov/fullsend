@@ -53,6 +53,7 @@ fullsend
 │   ├── --status-repo <owner/repo>           #   Repository for status comments
 │   ├── --status-number <int>                #   Issue/PR number for status comments
 │   └── --status-token <token>               #   Token for status comments (default: GH_TOKEN)
+├── fetch-skill      <url>                    # Fetch a skill at runtime (in-sandbox)
 ├── scan                                     # Run security scanner on input/output
 │   ├── input                                # Scan event payload for prompt injection
 │   ├── output                               # Scan agent output for leaked secrets
@@ -314,6 +315,8 @@ Vendoring commit messages use title + body (upload and stale delete). `admin ana
 │  │  ├── PATH=/sandbox/workspace/bin:$PATH   │                   │
 │  │  ├── CLAUDE_CONFIG_DIR=/sandbox/claude-config│               │
 │  │  ├── FULLSEND_OUTPUT_DIR=...             │                   │
+│  │  ├── FULLSEND_FETCH_URL=http://host:port/fetch (if active)│  │
+│  │  ├── FULLSEND_FETCH_TOKEN=<per-run token> (if active)│       │
 │  │  └── sources .env.d/*.env files          │                   │
 │  └──────────┬───────────────────────────────┘                   │
 │             ▼                                                   │
