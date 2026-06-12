@@ -343,7 +343,8 @@ func validateCreateIssues(cfg *CreateIssuesConfig) error {
 		}
 	}
 	for _, repo := range cfg.AllowTargets.Repos {
-		if !strings.Contains(repo, "/") {
+		parts := strings.SplitN(repo, "/", 2)
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 			return fmt.Errorf("create_issues: repo %q in allow_targets.repos must contain owner/name", repo)
 		}
 	}

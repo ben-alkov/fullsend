@@ -92,12 +92,16 @@ run_test "sufficient-missing-triage-summary" \
   '{"action":"sufficient","reasoning":"ok","clarity_scores":{"symptom":0.9,"cause":0.8,"reproduction":0.9,"impact":0.7,"overall":0.85},"comment":"Done."}' \
   "false"
 
-run_test "blocked-missing-blocked-by" \
-  '{"action":"blocked","reasoning":"upstream dependency","comment":"Blocked."}' \
+run_test "prerequisites-missing-prerequisites-field" \
+  '{"action":"prerequisites","reasoning":"upstream dependency","comment":"Blocked."}' \
   "false"
 
-run_test "blocked-malformed-url" \
-  '{"action":"blocked","reasoning":"upstream dependency","blocked_by":"not-a-url","comment":"Blocked."}' \
+run_test "prerequisites-both-arrays-empty" \
+  '{"action":"prerequisites","reasoning":"upstream dependency","prerequisites":{"existing":[],"create":[]},"comment":"Blocked."}' \
+  "false"
+
+run_test "prerequisites-malformed-url-in-existing" \
+  '{"action":"prerequisites","reasoning":"upstream dependency","prerequisites":{"existing":[{"url":"not-a-url"}],"create":[]},"comment":"Blocked."}' \
   "false"
 
 # --- FULLSEND_OUTPUT_FILE override ---

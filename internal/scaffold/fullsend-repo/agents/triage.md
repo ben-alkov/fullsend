@@ -65,16 +65,16 @@ If a cross-repo search fails or returns an error (e.g., due to access restrictio
 
 ### 2c. Check existing prerequisites
 
-If the issue already has a `blocked` label, check whether the previously identified blocker (linked in prior triage comments) is still open. Fetch the full context of the blocking issue or PR to understand its current state:
+If the issue already has a `blocked` label, check whether the previously identified prerequisites (linked in prior triage comments) are still open. Fetch the full context of each prerequisite issue or PR to understand its current state:
 
 ```
-# For blocking issues:
-gh issue view BLOCKING_URL --json state,title,body,comments,labels
-# For blocking PRs:
-gh pr view BLOCKING_URL --json state,title,body,comments,labels,mergedAt
+# For prerequisite issues:
+gh issue view PREREQUISITE_URL --json state,title,body,comments,labels
+# For prerequisite PRs:
+gh pr view PREREQUISITE_URL --json state,title,body,comments,labels,mergedAt
 ```
 
-Use `gh issue view` for `/issues/` URLs and `gh pr view` for `/pull/` URLs. Review the blocker's state, recent comments, and labels to determine whether the dependency has been resolved, is making progress, or remains stalled. If the blocker has been closed or merged, the block may be resolved — proceed with a fresh assessment.
+Use `gh issue view` for `/issues/` URLs and `gh pr view` for `/pull/` URLs. Review the prerequisite's state, recent comments, and labels to determine whether the dependency has been resolved, is making progress, or remains stalled. If the prerequisite has been closed or merged, the dependency may be resolved — proceed with a fresh assessment.
 
 ### 2d. Review prior triage analysis
 

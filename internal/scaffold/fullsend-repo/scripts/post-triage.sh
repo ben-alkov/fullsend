@@ -135,6 +135,9 @@ case "${ACTION}" in
 
     ALLOWED_ORGS=""
     ALLOWED_REPOS=""
+    if [[ -f "${CONFIG_FILE}" ]] && ! command -v yq &>/dev/null; then
+      echo "::warning::yq not found — cannot read create_issues.allow_targets from config; cross-repo issue creation disabled"
+    fi
     if [[ -f "${CONFIG_FILE}" ]] && command -v yq &>/dev/null; then
       ALLOWED_ORGS=$(yq -r '.create_issues.allow_targets.orgs // [] | .[]' "${CONFIG_FILE}" 2>/dev/null || true)
       ALLOWED_REPOS=$(yq -r '.create_issues.allow_targets.repos // [] | .[]' "${CONFIG_FILE}" 2>/dev/null || true)

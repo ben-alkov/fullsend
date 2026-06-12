@@ -968,6 +968,28 @@ func TestOrgConfigValidate_CreateIssues_InvalidRepoFormat(t *testing.T) {
 	assert.Contains(t, err.Error(), "no-slash-here")
 }
 
+func TestOrgConfigValidate_CreateIssues_MalformedRepoFormat(t *testing.T) {
+	malformed := []string{"/", "/repo", "owner/", "//"}
+	for _, repo := range malformed {
+		cfg := &OrgConfig{
+			Version:  "1",
+			Dispatch: DispatchConfig{Platform: "github-actions"},
+			Defaults: RepoDefaults{
+				Roles:                    []string{"fullsend"},
+				MaxImplementationRetries: 2,
+			},
+			CreateIssues: &CreateIssuesConfig{
+				AllowTargets: AllowTargets{
+					Repos: []string{repo},
+				},
+			},
+		}
+		err := cfg.Validate()
+		assert.Error(t, err, "expected error for repo %q", repo)
+		assert.Contains(t, err.Error(), "owner/name", "expected owner/name message for repo %q", repo)
+	}
+}
+
 func TestOrgConfigValidate_CreateIssues_EmptyOrg(t *testing.T) {
 	cfg := &OrgConfig{
 		Version:  "1",
