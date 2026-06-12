@@ -314,6 +314,7 @@ runs:
       run: |
         IMAGE="${FULLSEND_SANDBOX_IMAGE:-ghcr.io/fullsend-ai/fullsend-code:latest}"
         if podman image exists -- "${IMAGE}"; then
+          rm -f /tmp/sandbox-image.tar
           podman save -o /tmp/sandbox-image.tar -- "${IMAGE}"
         else
           echo "::warning::Image not available to cache"
