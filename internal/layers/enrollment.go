@@ -2,12 +2,14 @@ package layers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/fullsend-ai/fullsend/internal/config"
 	"github.com/fullsend-ai/fullsend/internal/forge"
+	gh "github.com/fullsend-ai/fullsend/internal/forge/github"
 	"github.com/fullsend-ai/fullsend/internal/ui"
 )
 
@@ -190,8 +192,11 @@ func isWorkflowDispatchNotReady(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "422") && strings.Contains(msg, "workflow_dispatch")
+	var apiErr *gh.APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != 422 {
+		return false
+	}
+	return strings.Contains(apiErr.Message, "workflow_dispatch")
 }
 
 // awaitWorkflowRun polls for a repo-maintenance workflow run created after

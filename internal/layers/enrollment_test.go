@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/fullsend-ai/fullsend/internal/forge"
+	gh "github.com/fullsend-ai/fullsend/internal/forge/github"
 	"github.com/fullsend-ai/fullsend/internal/ui"
 )
 
@@ -160,8 +161,15 @@ func (c *dispatchRetryClient) DispatchWorkflow(_ context.Context, _, _, _, _ str
 }
 
 func TestIsWorkflowDispatchNotReady(t *testing.T) {
-	assert.True(t, isWorkflowDispatchNotReady(fmt.Errorf("dispatch workflow repo-maintenance.yml: github api: 422 Workflow does not have 'workflow_dispatch' trigger")))
-	assert.False(t, isWorkflowDispatchNotReady(fmt.Errorf("dispatch workflow repo-maintenance.yml: github api: 403 Forbidden")))
+	dispatchNotReady := fmt.Errorf("dispatch workflow repo-maintenance.yml: %w", &gh.APIError{
+		StatusCode: 422,
+		Message:    "Workflow does not have 'workflow_dispatch' trigger",
+	})
+	assert.True(t, isWorkflowDispatchNotReady(dispatchNotReady))
+	assert.False(t, isWorkflowDispatchNotReady(fmt.Errorf("dispatch workflow repo-maintenance.yml: %w", &gh.APIError{
+		StatusCode: 403,
+		Message:    "Forbidden",
+	})))
 	assert.False(t, isWorkflowDispatchNotReady(nil))
 }
 
