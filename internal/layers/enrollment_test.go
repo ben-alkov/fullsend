@@ -155,7 +155,10 @@ type dispatchRetryClient struct {
 func (c *dispatchRetryClient) DispatchWorkflow(_ context.Context, _, _, _, _ string, _ map[string]string) error {
 	c.attempts++
 	if c.attempts <= c.failUntil {
-		return fmt.Errorf("dispatch workflow repo-maintenance.yml: github api: 422 Workflow does not have 'workflow_dispatch' trigger")
+		return fmt.Errorf("dispatch workflow repo-maintenance.yml: %w", &gh.APIError{
+			StatusCode: 422,
+			Message:    "Workflow does not have 'workflow_dispatch' trigger",
+		})
 	}
 	return nil
 }
