@@ -582,18 +582,108 @@ func TestHarnessesLoadAndValidate(t *testing.T) {
 		}
 		t.Run(e.Name(), func(t *testing.T) {
 			harnessPath := filepath.Join(dir, "harness", e.Name())
-			h, err := harness.Load(harnessPath)
-			require.NoError(t, err, "Load should succeed")
 
-			err = h.ResolveRelativeTo(dir)
-			require.NoError(t, err, "ResolveRelativeTo should succeed")
+			t.Run("Load", func(t *testing.T) {
+				h, loadErr := harness.Load(harnessPath)
+				require.NoError(t, loadErr, "Load should succeed")
 
-			err = h.ValidateFilesExist()
-			require.NoError(t, err, "ValidateFilesExist should succeed")
+				// Top-level pre/post scripts serve as defaults even
+				// without forge resolution (local dev without --forge).
+				assert.NotEmpty(t, h.PreScript, "PreScript should be set at top level as default")
+				assert.NotEmpty(t, h.PostScript, "PostScript should be set at top level as default")
+				assert.NotNil(t, h.Forge, "Forge map should be present")
+				assert.Contains(t, h.Forge, "github", "Forge should have a github key")
+
+				resolveErr := h.ResolveRelativeTo(dir)
+				require.NoError(t, resolveErr, "ResolveRelativeTo should succeed")
+
+				existErr := h.ValidateFilesExist()
+				require.NoError(t, existErr, "ValidateFilesExist should succeed")
+			})
+
+			t.Run("LoadWithOpts_github", func(t *testing.T) {
+				h, loadErr := harness.LoadWithOpts(harnessPath, harness.LoadOpts{ForgePlatform: "github"})
+				require.NoError(t, loadErr, "LoadWithOpts should succeed")
+
+				assert.Nil(t, h.Forge, "Forge should be nil after resolution")
+				assert.NotEmpty(t, h.PreScript, "PreScript should be set after forge resolution")
+				assert.NotEmpty(t, h.PostScript, "PostScript should be set after forge resolution")
+				assert.NotEmpty(t, h.RunnerEnv, "RunnerEnv should be non-empty after merge")
+
+				resolveErr := h.ResolveRelativeTo(dir)
+				require.NoError(t, resolveErr, "ResolveRelativeTo should succeed")
+
+				existErr := h.ValidateFilesExist()
+				require.NoError(t, existErr, "ValidateFilesExist should succeed")
+			})
 		})
 		loaded++
 	}
 	assert.True(t, loaded >= 2, "expected at least 2 harnesses, got %d", loaded)
+}
+
+func TestHarnessForgeRunnerEnvMerge(t *testing.T) {
+	dir := t.TempDir()
+	err := WalkFullsendRepoAll(func(path string, content []byte) error {
+		dest := filepath.Join(dir, path)
+		if mkErr := os.MkdirAll(filepath.Dir(dest), 0o755); mkErr != nil {
+			return mkErr
+		}
+		return os.WriteFile(dest, content, 0o644)
+	})
+	require.NoError(t, err, "extracting scaffold")
+
+	tests := []struct {
+		file            string
+		topLevelKeys    []string
+		forgeGithubKeys []string
+	}{
+		{
+			file:            "triage.yaml",
+			topLevelKeys:    []string{"FULLSEND_OUTPUT_SCHEMA"},
+			forgeGithubKeys: []string{"GITHUB_ISSUE_URL", "GH_TOKEN"},
+		},
+		{
+			file:            "code.yaml",
+			topLevelKeys:    []string{"TARGET_BRANCH"},
+			forgeGithubKeys: []string{"PUSH_TOKEN", "PUSH_TOKEN_SOURCE", "REPO_FULL_NAME", "ISSUE_NUMBER", "REPO_DIR"},
+		},
+		{
+			file:            "review.yaml",
+			topLevelKeys:    []string{"FULLSEND_OUTPUT_SCHEMA"},
+			forgeGithubKeys: []string{"REVIEW_TOKEN", "REPO_FULL_NAME", "PR_NUMBER", "GITHUB_PR_URL"},
+		},
+		{
+			file:            "fix.yaml",
+			topLevelKeys:    []string{"TARGET_BRANCH", "TRIGGER_SOURCE", "HUMAN_INSTRUCTION", "FIX_ITERATION", "REVIEW_BODY_FILE", "PRE_AGENT_HEAD", "FULLSEND_OUTPUT_SCHEMA", "FULLSEND_OUTPUT_FILE"},
+			forgeGithubKeys: []string{"PUSH_TOKEN", "PUSH_TOKEN_SOURCE", "REPO_FULL_NAME", "PR_NUMBER", "REPO_DIR"},
+		},
+		{
+			file:            "retro.yaml",
+			topLevelKeys:    []string{"FULLSEND_OUTPUT_SCHEMA"},
+			forgeGithubKeys: []string{"ORIGINATING_URL", "REPO_FULL_NAME", "GH_TOKEN"},
+		},
+		{
+			file:            "prioritize.yaml",
+			topLevelKeys:    []string{"FULLSEND_OUTPUT_SCHEMA"},
+			forgeGithubKeys: []string{"GITHUB_ISSUE_URL", "GH_TOKEN", "ORG", "PROJECT_NUMBER"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.file, func(t *testing.T) {
+			harnessPath := filepath.Join(dir, "harness", tt.file)
+			h, loadErr := harness.LoadWithOpts(harnessPath, harness.LoadOpts{ForgePlatform: "github"})
+			require.NoError(t, loadErr)
+
+			for _, key := range tt.topLevelKeys {
+				assert.Contains(t, h.RunnerEnv, key, "merged RunnerEnv should contain top-level key %s", key)
+			}
+			for _, key := range tt.forgeGithubKeys {
+				assert.Contains(t, h.RunnerEnv, key, "merged RunnerEnv should contain forge.github key %s", key)
+			}
+		})
+	}
 }
 
 func TestRepoMaintenanceWorkflowContent(t *testing.T) {
