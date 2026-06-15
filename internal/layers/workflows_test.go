@@ -126,7 +126,6 @@ func TestWorkflowsLayer_Install_ManagedHeaders(t *testing.T) {
 	}
 }
 
-
 func TestWorkflowsLayer_Install_Error(t *testing.T) {
 	client := &forge.FakeClient{
 		Repos: []forge.Repository{{
@@ -164,7 +163,6 @@ func TestWorkflowsLayer_Install_ExecutableModes(t *testing.T) {
 		assert.Equal(t, "100644", mode, "all installed files should be 100644 (no executables after layering): %s", path)
 	}
 }
-
 
 func TestWorkflowsLayer_Uninstall_Noop(t *testing.T) {
 	client := forge.NewFakeClient()

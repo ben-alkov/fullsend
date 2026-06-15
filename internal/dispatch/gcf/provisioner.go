@@ -49,16 +49,16 @@ var embeddedMintSource embed.FS
 // triggering Go's module boundary detection) to their real names for the
 // Cloud Function deployment zip.
 var embeddedMintFiles = map[string]string{
-	"go.mod.embed":                   "go.mod",
-	"go.sum.embed":                   "go.sum",
-	"main.go.embed":                  "main.go",
-	"mintcore/go.mod.embed":          "mintcore/go.mod",
-	"mintcore/go.sum.embed":          "mintcore/go.sum",
-	"mintcore/gcp_pem.go.embed":        "mintcore/gcp_pem.go",
+	"go.mod.embed":                    "go.mod",
+	"go.sum.embed":                    "go.sum",
+	"main.go.embed":                   "main.go",
+	"mintcore/go.mod.embed":           "mintcore/go.mod",
+	"mintcore/go.sum.embed":           "mintcore/go.sum",
+	"mintcore/gcp_pem.go.embed":       "mintcore/gcp_pem.go",
 	"mintcore/github.go.embed":        "mintcore/github.go",
 	"mintcore/handler.go.embed":       "mintcore/handler.go",
 	"mintcore/interfaces.go.embed":    "mintcore/interfaces.go",
-	"mintcore/jwks_verifier.go.embed":  "mintcore/jwks_verifier.go",
+	"mintcore/jwks_verifier.go.embed": "mintcore/jwks_verifier.go",
 	"mintcore/claims.go.embed":        "mintcore/claims.go",
 	"mintcore/patterns.go.embed":      "mintcore/patterns.go",
 	"mintcore/sts_verifier.go.embed":  "mintcore/sts_verifier.go",

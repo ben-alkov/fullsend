@@ -373,10 +373,10 @@ forge:
 	require.NoError(t, err)
 
 	// GitHub forge merged, then resolved
-	assert.Equal(t, "base-pre.sh", h.PreScript)       // from base forge
-	assert.Equal(t, "child-post.sh", h.PostScript)    // from child forge
-	assert.Contains(t, h.Skills, "gh-skill-base")     // base skills
-	assert.Contains(t, h.Skills, "gh-skill-child")    // child skills
+	assert.Equal(t, "base-pre.sh", h.PreScript)    // from base forge
+	assert.Equal(t, "child-post.sh", h.PostScript) // from child forge
+	assert.Contains(t, h.Skills, "gh-skill-base")  // base skills
+	assert.Contains(t, h.Skills, "gh-skill-child") // child skills
 	assert.Equal(t, "base-value1", h.RunnerEnv["GH_KEY1"])
 	assert.Equal(t, "child-value2", h.RunnerEnv["GH_KEY2"])
 
@@ -805,7 +805,7 @@ func TestMergeForgeBlocks(t *testing.T) {
 	// GitHub merged
 	gh := result["github"]
 	require.NotNil(t, gh)
-	assert.Equal(t, "base-pre.sh", gh.PreScript)   // inherited
+	assert.Equal(t, "base-pre.sh", gh.PreScript)    // inherited
 	assert.Equal(t, "child-post.sh", gh.PostScript) // from child
 	assert.Equal(t, []string{"base-skill", "child-skill"}, gh.Skills)
 	assert.Equal(t, "base1", gh.RunnerEnv["KEY1"])  // inherited

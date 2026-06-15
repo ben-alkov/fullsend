@@ -254,8 +254,8 @@ func TestCachePutDir_CacheGetDir_RoundTrip(t *testing.T) {
 	root := t.TempDir()
 	url := "https://github.com/example/repo/tree/main/skills/review"
 	files := map[string][]byte{
-		"SKILL.md":            []byte("# Review Skill\nA skill for reviews."),
-		"scripts/helper.sh":   []byte("#!/bin/bash\necho helper"),
+		"SKILL.md":             []byte("# Review Skill\nA skill for reviews."),
+		"scripts/helper.sh":    []byte("#!/bin/bash\necho helper"),
 		"sub-agents/triage.md": []byte("# Triage sub-agent"),
 	}
 
@@ -322,9 +322,9 @@ func TestCacheGetDir_IntegrityVerification(t *testing.T) {
 func TestCachePutDir_NestedDirectories(t *testing.T) {
 	root := t.TempDir()
 	files := map[string][]byte{
-		"SKILL.md":                      []byte("# Skill"),
-		"scripts/helper.sh":             []byte("#!/bin/bash\necho hi"),
-		"sub-agents/review.md":          []byte("# Review"),
+		"SKILL.md":                       []byte("# Skill"),
+		"scripts/helper.sh":              []byte("#!/bin/bash\necho hi"),
+		"sub-agents/review.md":           []byte("# Review"),
 		"sub-agents/deep/nested/file.md": []byte("# Deep nested"),
 	}
 

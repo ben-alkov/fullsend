@@ -86,8 +86,8 @@ forge:
 	// Skills = base skills + child skills + forge.github skills (concatenated in order).
 	assert.Equal(t, []string{
 		"base-skill-1", "base-skill-2", // from base top-level
-		"child-skill-1",                // from child top-level
-		"gh-forge-skill",               // from forge.github
+		"child-skill-1",  // from child top-level
+		"gh-forge-skill", // from forge.github
 	}, h.Skills)
 
 	// RunnerEnv = base env merged with forge env (forge keys win).
@@ -146,10 +146,10 @@ forge:
 	// then ResolveForge appends the merged forge skills to the already-concatenated
 	// top-level skills (base-top + child-top).
 	assert.Equal(t, []string{
-		"base-s1",         // base top-level
-		"child-s1",        // child top-level
-		"base-forge-s1",   // base forge.github (merged into child forge)
-		"child-forge-s1",  // child forge.github
+		"base-s1",        // base top-level
+		"child-s1",       // child top-level
+		"base-forge-s1",  // base forge.github (merged into child forge)
+		"child-forge-s1", // child forge.github
 	}, h.Skills)
 }
 

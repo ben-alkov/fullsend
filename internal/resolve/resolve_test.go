@@ -199,7 +199,7 @@ func TestResolveHarness_SkillDirFetchAndCache(t *testing.T) {
 
 	fc := &forge.FakeClient{}
 	treeHash := registerSkillDir(fc, "skills/review", map[string][]byte{
-		"SKILL.md":         skillMD,
+		"SKILL.md":          skillMD,
 		"scripts/helper.sh": helperSh,
 	})
 
@@ -1073,7 +1073,7 @@ func TestResolveHarness_ZeroMaxDepthDisablesTransitive(t *testing.T) {
 		MaxDepth:      0, // disabled
 	})
 	require.NoError(t, err)
-	assert.Len(t, deps, 1)    // only A
+	assert.Len(t, deps, 1)     // only A
 	assert.Len(t, h.Skills, 1) // only A
 }
 
@@ -1166,7 +1166,7 @@ func TestResolveHarness_DirectAndTransitiveOverlap(t *testing.T) {
 		MaxDepth:      -1,
 	})
 	require.NoError(t, err)
-	assert.Len(t, deps, 2)    // A and B, each exactly once
+	assert.Len(t, deps, 2)     // A and B, each exactly once
 	assert.Len(t, h.Skills, 2) // A's path and B's path, B deduped
 
 	// B must not appear twice in h.Skills.

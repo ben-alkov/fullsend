@@ -18,7 +18,7 @@ import (
 // LockFile is the top-level structure of .fullsend/lock.yaml.
 type LockFile struct {
 	Version     int                    `yaml:"version"`
-	GeneratedAt time.Time             `yaml:"generated_at"`
+	GeneratedAt time.Time              `yaml:"generated_at"`
 	Harnesses   map[string]HarnessLock `yaml:"harnesses"`
 }
 
@@ -35,8 +35,8 @@ type DependencyEntry struct {
 	Field          string            `yaml:"field"`
 	URL            string            `yaml:"url"`
 	SHA256         string            `yaml:"sha256"`
-	Type           string            `yaml:"type,omitempty"`            // "file" or "directory"; empty treated as "file"
-	Files          []FileEntry       `yaml:"files,omitempty"`           // manifest of files (directory deps only)
+	Type           string            `yaml:"type,omitempty"`  // "file" or "directory"; empty treated as "file"
+	Files          []FileEntry       `yaml:"files,omitempty"` // manifest of files (directory deps only)
 	FetchedAt      time.Time         `yaml:"fetched_at"`
 	TransitiveDeps []DependencyEntry `yaml:"transitive_deps,omitempty"`
 }

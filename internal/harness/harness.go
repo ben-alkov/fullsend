@@ -19,9 +19,9 @@ var (
 	validModelName  = regexp.MustCompile(`^[a-zA-Z0-9_.@-]+$`)
 	validPluginName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 	// validRoleName mirrors mintcore.RolePattern — duplicated to avoid coupling harness→mintcore.
-	validRoleName   = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
-	validSlugName   = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
-	envVarRef      = regexp.MustCompile(`\$\{([^}]+)\}`)
+	validRoleName = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
+	validSlugName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
+	envVarRef     = regexp.MustCompile(`\$\{([^}]+)\}`)
 )
 
 // HostFile describes a file on the host that must be copied into the sandbox
@@ -124,8 +124,8 @@ type SandboxHooks struct {
 	SecretRedactPostTool    *bool                `yaml:"secret_redact_posttool,omitempty"`    // default: true
 	UnicodePostTool         *bool                `yaml:"unicode_posttool,omitempty"`          // default: true
 	ContextSuppressPostTool *bool                `yaml:"context_suppress_posttool,omitempty"` // default: true
-	CanaryPreTool           *bool                `yaml:"canary_pretool,omitempty"`              // default: true
-	CanaryPostTool          *bool                `yaml:"canary_posttool,omitempty"`              // default: true
+	CanaryPreTool           *bool                `yaml:"canary_pretool,omitempty"`            // default: true
+	CanaryPostTool          *bool                `yaml:"canary_posttool,omitempty"`           // default: true
 	ToolAllowlistPreTool    *ToolAllowlistConfig `yaml:"tool_allowlist_pretool,omitempty"`
 }
 
@@ -195,29 +195,29 @@ type ValidationLoop struct {
 // Harness is the per-agent configuration that the runner reads to provision
 // a sandbox and launch one agent. It follows the ADR-0017 schema.
 type Harness struct {
-	Agent          string            `yaml:"agent"`
-	Doc            string            `yaml:"doc,omitempty"` // source-repo-only; not resolved at runtime, used by lint-agent-docs
-	Description    string            `yaml:"description,omitempty"`
-	Role           string            `yaml:"role,omitempty"`
-	Slug           string            `yaml:"slug,omitempty"`
-	Base           string            `yaml:"base,omitempty"`
-	Image          string            `yaml:"image,omitempty"`
-	Policy         string            `yaml:"policy,omitempty"`
-	Skills         []string          `yaml:"skills,omitempty"`
-	Plugins        []string          `yaml:"plugins,omitempty"`
-	Providers      []string          `yaml:"providers,omitempty"`
-	HostFiles      []HostFile        `yaml:"host_files,omitempty"`
-	APIServers     []APIServer       `yaml:"api_servers,omitempty"`
-	Model          string            `yaml:"model,omitempty"`
-	PreScript      string            `yaml:"pre_script,omitempty"`
-	PostScript     string            `yaml:"post_script,omitempty"`
-	AgentInput     string            `yaml:"agent_input,omitempty"`
-	ValidationLoop *ValidationLoop   `yaml:"validation_loop,omitempty"`
-	RunnerEnv              map[string]string `yaml:"runner_env,omitempty"`
-	TimeoutMinutes         int               `yaml:"timeout_minutes,omitempty"`
-	SandboxTimeoutSeconds  int               `yaml:"sandbox_timeout_seconds,omitempty"`
+	Agent                  string                  `yaml:"agent"`
+	Doc                    string                  `yaml:"doc,omitempty"` // source-repo-only; not resolved at runtime, used by lint-agent-docs
+	Description            string                  `yaml:"description,omitempty"`
+	Role                   string                  `yaml:"role,omitempty"`
+	Slug                   string                  `yaml:"slug,omitempty"`
+	Base                   string                  `yaml:"base,omitempty"`
+	Image                  string                  `yaml:"image,omitempty"`
+	Policy                 string                  `yaml:"policy,omitempty"`
+	Skills                 []string                `yaml:"skills,omitempty"`
+	Plugins                []string                `yaml:"plugins,omitempty"`
+	Providers              []string                `yaml:"providers,omitempty"`
+	HostFiles              []HostFile              `yaml:"host_files,omitempty"`
+	APIServers             []APIServer             `yaml:"api_servers,omitempty"`
+	Model                  string                  `yaml:"model,omitempty"`
+	PreScript              string                  `yaml:"pre_script,omitempty"`
+	PostScript             string                  `yaml:"post_script,omitempty"`
+	AgentInput             string                  `yaml:"agent_input,omitempty"`
+	ValidationLoop         *ValidationLoop         `yaml:"validation_loop,omitempty"`
+	RunnerEnv              map[string]string       `yaml:"runner_env,omitempty"`
+	TimeoutMinutes         int                     `yaml:"timeout_minutes,omitempty"`
+	SandboxTimeoutSeconds  int                     `yaml:"sandbox_timeout_seconds,omitempty"`
 	Security               *SecurityConfig         `yaml:"security,omitempty"`
-	AllowedRemoteResources []string               `yaml:"allowed_remote_resources,omitempty"`
+	AllowedRemoteResources []string                `yaml:"allowed_remote_resources,omitempty"`
 	Forge                  map[string]*ForgeConfig `yaml:"forge,omitempty"`
 }
 

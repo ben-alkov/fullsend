@@ -119,7 +119,7 @@ func TestRunLock_SkillDirectoryType(t *testing.T) {
 	skillMD := []byte("# Test skill\nA test skill.")
 	helperSh := []byte("#!/bin/bash\necho hello")
 	skillFiles := map[string][]byte{
-		"SKILL.md":         skillMD,
+		"SKILL.md":          skillMD,
 		"scripts/helper.sh": helperSh,
 	}
 	treeHash := fetch.ComputeTreeHash(skillFiles)

@@ -176,7 +176,7 @@ type FakeClient struct {
 	CreatedReviews      []ReviewRecord
 	DismissedReviews    []DismissedReviewRecord
 	CommittedFiles      []CommitFilesRecord
-	DeletedComments []int // comment IDs
+	DeletedComments     []int // comment IDs
 
 	// internal counters
 	proposalCounter int
