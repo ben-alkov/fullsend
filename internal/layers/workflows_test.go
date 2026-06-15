@@ -189,6 +189,19 @@ func TestWorkflowsLayer_Install_ProtectedBranch_CommitToBranchFails(t *testing.T
 	assert.Contains(t, err.Error(), "committing scaffold files to branch")
 }
 
+func TestWorkflowsLayer_Install_ProtectedBranch_ScaffoldBranchAlsoProtected(t *testing.T) {
+	client := forge.NewFakeClient()
+	client.Repos = []forge.Repository{{FullName: "test-org/.fullsend", DefaultBranch: "main"}}
+	client.Errors["CommitFiles"] = fmt.Errorf("%w: github api: 422", forge.ErrBranchProtected)
+	client.Errors["CommitFilesToBranch"] = fmt.Errorf("%w: scaffold branch also protected", forge.ErrBranchProtected)
+	layer, _ := newWorkflowsLayer(t, client)
+
+	err := layer.Install(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "scaffold branch")
+	assert.Contains(t, err.Error(), "configure branch protection")
+}
+
 func TestWorkflowsLayer_Install_ProtectedBranch_CreatePRFails(t *testing.T) {
 	client := forge.NewFakeClient()
 	client.Repos = []forge.Repository{{FullName: "test-org/.fullsend", DefaultBranch: "main"}}
@@ -220,6 +233,7 @@ func TestWorkflowsLayer_Install_ProtectedBranch_BranchUpToDate(t *testing.T) {
 	client := forge.NewFakeClient()
 	client.Repos = []forge.Repository{{FullName: "test-org/.fullsend", DefaultBranch: "main"}}
 	client.Errors["CommitFiles"] = fmt.Errorf("%w: github api: 422", forge.ErrBranchProtected)
+	client.Errors["CreateChangeProposal"] = fmt.Errorf("PR: %w", forge.ErrAlreadyExists)
 	noChange := false
 	client.CommitFilesChanged = &noChange
 	layer, buf := newWorkflowsLayer(t, client)
@@ -227,8 +241,8 @@ func TestWorkflowsLayer_Install_ProtectedBranch_BranchUpToDate(t *testing.T) {
 	err := layer.Install(context.Background())
 	require.NoError(t, err)
 
-	assert.Empty(t, client.CreatedProposals, "should not create PR when branch files are unchanged")
-	assert.Contains(t, buf.String(), "up to date")
+	output := buf.String()
+	assert.Contains(t, output, "up to date")
 }
 
 func TestWorkflowsLayer_Install_Error(t *testing.T) {

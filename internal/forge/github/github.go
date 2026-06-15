@@ -72,6 +72,13 @@ func (e *APIError) Error() string {
 }
 
 // Unwrap returns sentinel errors for well-known API responses.
+//
+// ErrBranchProtected is intentionally NOT mapped here. Branch protection
+// 422s are context-dependent: the word "protected" in a validation error
+// only signals a branch-protection failure when it comes from a ref update
+// (PATCH /git/refs). Other 422s may coincidentally mention "protected" in
+// unrelated contexts. The wrapping happens in commitFilesTo where the
+// operation context is known.
 func (e *APIError) Unwrap() error {
 	if e.StatusCode == http.StatusNotFound {
 		return forge.ErrNotFound
@@ -777,12 +784,16 @@ func (c *LiveClient) commitFilesTo(ctx context.Context, owner, repo, branch, mes
 
 // isBranchProtectionError checks whether a 422 APIError indicates branch
 // protection rather than another validation failure (e.g. non-fast-forward).
+// It matches both legacy branch protection rules and newer repository rulesets.
 func isBranchProtectionError(apiErr *APIError) bool {
 	msg := strings.ToLower(apiErr.Message)
 	for _, d := range apiErr.Errors {
 		msg += " " + strings.ToLower(d.Message)
 	}
-	return strings.Contains(msg, "protected") || strings.Contains(msg, "required status") || strings.Contains(msg, "required review")
+	return strings.Contains(msg, "protected") ||
+		strings.Contains(msg, "required status") ||
+		strings.Contains(msg, "required review") ||
+		strings.Contains(msg, "rule violation")
 }
 
 func isAlreadyExistsError(apiErr *APIError) bool {

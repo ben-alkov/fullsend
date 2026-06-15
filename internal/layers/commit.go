@@ -18,6 +18,11 @@ func CommitScaffoldFiles(ctx context.Context, client forge.Client, printer *ui.P
 	if err != nil && forge.IsBranchProtected(err) {
 		printer.StepWarn("Default branch is protected — creating scaffold PR instead")
 
+		// The branch name is fixed so that re-runs update the same PR rather
+		// than creating a new one each time. If the branch already exists from
+		// a prior run, we commit on top of it. The branch may be behind the
+		// current default branch, which can produce merge conflicts in the PR;
+		// this is acceptable because the user must merge the PR manually anyway.
 		const scaffoldBranch = "fullsend/scaffold-install"
 		if branchErr := client.CreateBranch(ctx, owner, repo, scaffoldBranch); branchErr != nil {
 			if !forge.IsAlreadyExists(branchErr) {
@@ -36,22 +41,25 @@ func CommitScaffoldFiles(ctx context.Context, client forge.Client, printer *ui.P
 			return fmt.Errorf("committing scaffold files to branch: %w", commitErr)
 		}
 
-		if branchCommitted {
-			proposal, prErr := client.CreateChangeProposal(ctx, owner, repo,
-				prTitle, prBody, scaffoldBranch, defaultBranch)
-			if prErr != nil {
-				if !forge.IsAlreadyExists(prErr) {
-					printer.StepFail("Failed to create scaffold PR")
-					return fmt.Errorf("creating scaffold PR: %w", prErr)
-				}
-				printer.StepDone("Scaffold PR already exists")
-			} else {
-				printer.StepDone(fmt.Sprintf("Created PR #%d: %s", proposal.Number, proposal.URL))
+		// Always attempt PR creation — even when branchCommitted is false.
+		// A prior run may have committed to the branch but crashed before
+		// creating the PR. ErrAlreadyExists handles the common re-run case.
+		proposal, prErr := client.CreateChangeProposal(ctx, owner, repo,
+			prTitle, prBody, scaffoldBranch, defaultBranch)
+		if prErr != nil {
+			if !forge.IsAlreadyExists(prErr) {
+				printer.StepFail("Failed to create scaffold PR")
+				return fmt.Errorf("creating scaffold PR: %w", prErr)
 			}
-			printer.StepInfo("Merge the PR to activate fullsend workflows")
+			if branchCommitted {
+				printer.StepDone("Scaffold PR already exists — updated with new files")
+			} else {
+				printer.StepDone("Scaffold branch and PR up to date")
+			}
 		} else {
-			printer.StepDone("Scaffold branch up to date")
+			printer.StepDone(fmt.Sprintf("Created PR #%d: %s", proposal.Number, proposal.URL))
 		}
+		printer.StepInfo("Merge the PR to activate fullsend workflows")
 	} else if err != nil {
 		printer.StepFail("Failed to commit scaffold files")
 		return fmt.Errorf("committing scaffold files: %w", err)

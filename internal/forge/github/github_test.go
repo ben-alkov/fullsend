@@ -685,6 +685,17 @@ func TestIsBranchProtectionError(t *testing.T) {
 			want:   false,
 		},
 		{
+			name: "repository ruleset violation",
+			apiErr: &APIError{
+				StatusCode: 422,
+				Message:    "Update is not a fast forward",
+				Errors: []APIErrorDetail{
+					{Message: "Repository rule violations found for refs/heads/main."},
+				},
+			},
+			want: true,
+		},
+		{
 			name: "validation failed for unrelated reason",
 			apiErr: &APIError{
 				StatusCode: 422,

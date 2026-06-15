@@ -145,7 +145,10 @@ type FakeClient struct {
 	IssueComments map[string][]IssueComment // key: "owner/repo/number"
 	OpenIssues    map[string][]Issue        // key: "owner/repo"
 
-	// CommitFilesChanged controls the return value of CommitFiles (default true).
+	// CommitFilesChanged controls the return value of both CommitFiles and
+	// CommitFilesToBranch (default true). A single field suffices because
+	// callers that test the fallback path inject an error on CommitFiles,
+	// so only CommitFilesToBranch reads this value in practice.
 	CommitFilesChanged *bool
 
 	// Pull request head SHA for GetPullRequestHeadSHA.

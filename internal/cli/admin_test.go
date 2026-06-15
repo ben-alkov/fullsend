@@ -2156,6 +2156,24 @@ func TestApplyPerRepoScaffold_ProtectedBranch_CommitToBranchFails(t *testing.T) 
 	assert.Contains(t, err.Error(), "committing scaffold files to branch")
 }
 
+func TestApplyPerRepoScaffold_ProtectedBranch_ScaffoldBranchAlsoProtected(t *testing.T) {
+	client := forge.NewFakeClient()
+	client.Repos = []forge.Repository{{FullName: "acme/widget", DefaultBranch: "main"}}
+	client.Errors["CommitFiles"] = fmt.Errorf("%w: github api: 422", forge.ErrBranchProtected)
+	client.Errors["CommitFilesToBranch"] = fmt.Errorf("%w: scaffold branch also protected", forge.ErrBranchProtected)
+	printer := ui.New(&bytes.Buffer{})
+
+	files := []forge.TreeFile{
+		{Path: ".fullsend/config.yaml", Content: []byte("cfg"), Mode: "100644"},
+	}
+
+	err := applyPerRepoScaffold(context.Background(), client, printer,
+		"acme", "widget", files, nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "scaffold branch")
+	assert.Contains(t, err.Error(), "configure branch protection")
+}
+
 func TestApplyPerRepoScaffold_ProtectedBranch_CreatePRFails(t *testing.T) {
 	client := forge.NewFakeClient()
 	client.Repos = []forge.Repository{{FullName: "acme/widget", DefaultBranch: "main"}}
@@ -2198,6 +2216,7 @@ func TestApplyPerRepoScaffold_ProtectedBranch_BranchUpToDate(t *testing.T) {
 	client := forge.NewFakeClient()
 	client.Repos = []forge.Repository{{FullName: "acme/widget", DefaultBranch: "main"}}
 	client.Errors["CommitFiles"] = fmt.Errorf("%w: github api: 422", forge.ErrBranchProtected)
+	client.Errors["CreateChangeProposal"] = fmt.Errorf("PR: %w", forge.ErrAlreadyExists)
 	noChange := false
 	client.CommitFilesChanged = &noChange
 	var buf bytes.Buffer
@@ -2211,6 +2230,5 @@ func TestApplyPerRepoScaffold_ProtectedBranch_BranchUpToDate(t *testing.T) {
 		"acme", "widget", files, nil, nil)
 	require.NoError(t, err)
 
-	assert.Empty(t, client.CreatedProposals, "should not create PR when branch files are unchanged")
 	assert.Contains(t, buf.String(), "up to date")
 }
