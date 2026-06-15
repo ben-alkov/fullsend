@@ -71,10 +71,20 @@ func (e *APIError) Error() string {
 	return s
 }
 
-// Unwrap returns forge.ErrNotFound for 404 errors, enabling errors.Is checks.
+// Unwrap returns sentinel errors for well-known API responses.
+//
+// ErrBranchProtected is intentionally NOT mapped here. Branch protection
+// 422s are context-dependent: the word "protected" in a validation error
+// only signals a branch-protection failure when it comes from a ref update
+// (PATCH /git/refs). Other 422s may coincidentally mention "protected" in
+// unrelated contexts. The wrapping happens in commitFilesTo where the
+// operation context is known.
 func (e *APIError) Unwrap() error {
 	if e.StatusCode == http.StatusNotFound {
 		return forge.ErrNotFound
+	}
+	if e.StatusCode == http.StatusUnprocessableEntity && isAlreadyExistsError(e) {
+		return forge.ErrAlreadyExists
 	}
 	return nil
 }
@@ -599,12 +609,15 @@ func isTransientStatus(code int) bool {
 // CommitFiles atomically commits multiple files to the default branch
 // using the Git Trees/Blobs/Commits API. Returns (false, nil) when
 // all files already match the current tree (idempotent).
+//
+// Returns forge.ErrBranchProtected (wrapped) when the ref update fails
+// with a 422, which indicates branch protection rules prevent direct pushes.
 func (c *LiveClient) CommitFiles(ctx context.Context, owner, repo, message string, files []forge.TreeFile) (bool, error) {
 	if len(files) == 0 {
 		return false, nil
 	}
 
-	// 1. Get default branch name.
+	// Get default branch name.
 	repoResp, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s", owner, repo))
 	if err != nil {
 		return false, fmt.Errorf("get repo: %w", err)
@@ -616,12 +629,28 @@ func (c *LiveClient) CommitFiles(ctx context.Context, owner, repo, message strin
 		return false, fmt.Errorf("decode repo info: %w", err)
 	}
 
-	// 2. Get current commit SHA from the branch ref.
-	// Wrapped in retryOnTransient for freshly-created repos where the
-	// branch ref may not be materialized yet (async auto_init).
+	return c.commitFilesTo(ctx, owner, repo, repoInfo.DefaultBranch, message, files)
+}
+
+// CommitFilesToBranch atomically commits multiple files to a specific
+// branch. Like CommitFiles, it is idempotent.
+func (c *LiveClient) CommitFilesToBranch(ctx context.Context, owner, repo, branch, message string, files []forge.TreeFile) (bool, error) {
+	if len(files) == 0 {
+		return false, nil
+	}
+	return c.commitFilesTo(ctx, owner, repo, branch, message, files)
+}
+
+// commitFilesTo is the shared implementation for CommitFiles and
+// CommitFilesToBranch. It commits files to the specified branch using
+// the Git Trees/Blobs/Commits API.
+func (c *LiveClient) commitFilesTo(ctx context.Context, owner, repo, branch, message string, files []forge.TreeFile) (bool, error) {
+	// 1. Get current commit SHA from the branch ref.
+	// Wrapped in retryOnTransient for freshly-created repos/branches where
+	// the ref may not be materialized yet (async auto_init).
 	var commitSHA string
 	if err := c.retryOnTransient(ctx, "get branch ref", func() error {
-		refResp, refErr := c.get(ctx, fmt.Sprintf("/repos/%s/%s/git/ref/heads/%s", owner, repo, repoInfo.DefaultBranch))
+		refResp, refErr := c.get(ctx, fmt.Sprintf("/repos/%s/%s/git/ref/heads/%s", owner, repo, branch))
 		if refErr != nil {
 			return fmt.Errorf("get branch ref: %w", refErr)
 		}
@@ -639,7 +668,7 @@ func (c *LiveClient) CommitFiles(ctx context.Context, owner, repo, message strin
 		return false, err
 	}
 
-	// 3. Get the current commit to find its tree SHA.
+	// 2. Get the current commit to find its tree SHA.
 	cResp, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/git/commits/%s", owner, repo, commitSHA))
 	if err != nil {
 		return false, fmt.Errorf("get commit: %w", err)
@@ -654,7 +683,7 @@ func (c *LiveClient) CommitFiles(ctx context.Context, owner, repo, message strin
 	}
 	baseTreeSHA := commitObj.Tree.SHA
 
-	// 4. Get the full recursive tree to compare existing blobs.
+	// 3. Get the full recursive tree to compare existing blobs.
 	treeResp, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/git/trees/%s?recursive=1", owner, repo, baseTreeSHA))
 	if err != nil {
 		return false, fmt.Errorf("get tree: %w", err)
@@ -683,7 +712,7 @@ func (c *LiveClient) CommitFiles(ctx context.Context, owner, repo, message strin
 		existing[entry.Path] = blobInfo{sha: entry.SHA, mode: entry.Mode}
 	}
 
-	// 5. Compute expected blob SHAs and filter to changed files.
+	// 4. Compute expected blob SHAs and filter to changed files.
 	var changedEntries []map[string]string
 	for _, f := range files {
 		expectedSHA := blobSHA(f.Content)
@@ -702,7 +731,7 @@ func (c *LiveClient) CommitFiles(ctx context.Context, owner, repo, message strin
 		return false, nil
 	}
 
-	// 6. Create new tree with base_tree + changed entries.
+	// 5. Create new tree with base_tree + changed entries.
 	treePayload := map[string]any{
 		"base_tree": baseTreeSHA,
 		"tree":      changedEntries,
@@ -718,7 +747,7 @@ func (c *LiveClient) CommitFiles(ctx context.Context, owner, repo, message strin
 		return false, fmt.Errorf("decode new tree: %w", err)
 	}
 
-	// 7. Create commit with new tree and old commit as parent.
+	// 6. Create commit with new tree and old commit as parent.
 	commitPayload := map[string]any{
 		"message": message,
 		"tree":    newTree.SHA,
@@ -735,17 +764,44 @@ func (c *LiveClient) CommitFiles(ctx context.Context, owner, repo, message strin
 		return false, fmt.Errorf("decode new commit: %w", err)
 	}
 
-	// 8. Update branch ref to point to new commit.
+	// 7. Update branch ref to point to new commit.
+	// A 422 here typically means branch protection rules prevent the push.
 	refPayload := map[string]string{
 		"sha": newCommit.SHA,
 	}
-	refUpdateResp, err := c.patch(ctx, fmt.Sprintf("/repos/%s/%s/git/refs/heads/%s", owner, repo, repoInfo.DefaultBranch), refPayload)
+	refUpdateResp, err := c.patch(ctx, fmt.Sprintf("/repos/%s/%s/git/refs/heads/%s", owner, repo, branch), refPayload)
 	if err != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusUnprocessableEntity && isBranchProtectionError(apiErr) {
+			return false, fmt.Errorf("%w: %w", forge.ErrBranchProtected, err)
+		}
 		return false, fmt.Errorf("update ref: %w", err)
 	}
 	refUpdateResp.Body.Close()
 
 	return true, nil
+}
+
+// isBranchProtectionError checks whether a 422 APIError indicates branch
+// protection rather than another validation failure (e.g. non-fast-forward).
+// It matches both legacy branch protection rules and newer repository rulesets.
+func isBranchProtectionError(apiErr *APIError) bool {
+	msg := strings.ToLower(apiErr.Message)
+	for _, d := range apiErr.Errors {
+		msg += " " + strings.ToLower(d.Message)
+	}
+	return strings.Contains(msg, "protected") ||
+		strings.Contains(msg, "required status") ||
+		strings.Contains(msg, "required review") ||
+		strings.Contains(msg, "rule violation")
+}
+
+func isAlreadyExistsError(apiErr *APIError) bool {
+	msg := strings.ToLower(apiErr.Message)
+	for _, d := range apiErr.Errors {
+		msg += " " + strings.ToLower(d.Message)
+	}
+	return strings.Contains(msg, "already exists")
 }
 
 // blobSHA computes the Git blob object SHA-1 for the given content.

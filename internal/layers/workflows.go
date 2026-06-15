@@ -113,23 +113,15 @@ func (l *WorkflowsLayer) Install(ctx context.Context) error {
 	}
 	l.ui.StepStart(fmt.Sprintf("Committing scaffold files to %s/%s (%s branch)",
 		l.org, forge.ConfigRepoName, cfgRepo.DefaultBranch))
-	committed, err := l.client.CommitFiles(ctx, l.org, forge.ConfigRepoName,
-		fmt.Sprintf("chore: update fullsend-%s scaffold", l.version), files)
-	if err != nil {
-		l.ui.StepFail("Failed to commit scaffold files")
-		return fmt.Errorf("committing scaffold files: %w", err)
-	}
-	if committed {
-		noun := "files"
-		if len(files) == 1 {
-			noun = "file"
-		}
-		l.ui.StepDone(fmt.Sprintf("Pushed %d %s to %s", len(files), noun, cfgRepo.DefaultBranch))
-	} else {
-		l.ui.StepDone("Scaffold up to date")
-	}
-
-	return nil
+	commitMsg := fmt.Sprintf("chore: update fullsend-%s scaffold", l.version)
+	prTitle := "chore: add fullsend scaffold files"
+	prBody := fmt.Sprintf("This PR adds the fullsend scaffold files to the %s config repo.\n\n"+
+		"The default branch (%s) has branch protection rules that prevent direct pushes, "+
+		"so these files are delivered via PR instead.\n\n"+
+		"Merge this PR to activate fullsend workflows.", forge.ConfigRepoName, cfgRepo.DefaultBranch)
+	return CommitScaffoldFiles(ctx, l.client, l.ui,
+		l.org, forge.ConfigRepoName, cfgRepo.DefaultBranch,
+		commitMsg, prTitle, prBody, files)
 }
 
 // Uninstall is a no-op. Workflow files are removed when the config repo

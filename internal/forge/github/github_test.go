@@ -630,6 +630,203 @@ func TestAPIError_ErrorStringWithDetails(t *testing.T) {
 	assert.Contains(t, err.Error(), "name already exists on this account")
 }
 
+func TestIsBranchProtectionError(t *testing.T) {
+	tests := []struct {
+		name   string
+		apiErr *APIError
+		want   bool
+	}{
+		{
+			name: "protected branch push rejected",
+			apiErr: &APIError{
+				StatusCode: 422,
+				Message:    "Update is not a fast forward",
+				Errors: []APIErrorDetail{
+					{Message: "Protected branch update failed for refs/heads/main."},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "required status check failing",
+			apiErr: &APIError{
+				StatusCode: 422,
+				Message:    "Update is not a fast forward",
+				Errors: []APIErrorDetail{
+					{Message: "Required status check 'ci-build' is failing"},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "required review",
+			apiErr: &APIError{
+				StatusCode: 422,
+				Message:    "Validation Failed",
+				Errors: []APIErrorDetail{
+					{Message: "Required review from a code owner is not satisfied"},
+				},
+			},
+			want: true,
+		},
+		{
+			name:   "protection in top-level message",
+			apiErr: &APIError{StatusCode: 422, Message: "Protected branch 'main' does not allow direct pushes"},
+			want:   true,
+		},
+		{
+			name:   "non-fast-forward without protection",
+			apiErr: &APIError{StatusCode: 422, Message: "Update is not a fast forward"},
+			want:   false,
+		},
+		{
+			name:   "reference already exists",
+			apiErr: &APIError{StatusCode: 422, Message: "Reference already exists"},
+			want:   false,
+		},
+		{
+			name: "repository ruleset violation",
+			apiErr: &APIError{
+				StatusCode: 422,
+				Message:    "Update is not a fast forward",
+				Errors: []APIErrorDetail{
+					{Message: "Repository rule violations found for refs/heads/main."},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "validation failed for unrelated reason",
+			apiErr: &APIError{
+				StatusCode: 422,
+				Message:    "Validation Failed",
+				Errors: []APIErrorDetail{
+					{Resource: "PullRequest", Code: "custom", Message: "No commits between main and main"},
+				},
+			},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isBranchProtectionError(tt.apiErr))
+		})
+	}
+}
+
+func TestIsAlreadyExistsError(t *testing.T) {
+	tests := []struct {
+		name   string
+		apiErr *APIError
+		want   bool
+	}{
+		{
+			name:   "reference already exists",
+			apiErr: &APIError{StatusCode: 422, Message: "Reference already exists"},
+			want:   true,
+		},
+		{
+			name: "PR already exists via custom code",
+			apiErr: &APIError{
+				StatusCode: 422,
+				Message:    "Validation Failed",
+				Errors: []APIErrorDetail{
+					{Resource: "PullRequest", Code: "custom", Message: "A pull request already exists for user:branch."},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "repo name already exists on account",
+			apiErr: &APIError{
+				StatusCode: 422,
+				Message:    "Validation Failed",
+				Errors: []APIErrorDetail{
+					{Resource: "Repository", Field: "name", Code: "custom", Message: "name already exists on this account"},
+				},
+			},
+			want: true,
+		},
+		{
+			name:   "non-fast-forward",
+			apiErr: &APIError{StatusCode: 422, Message: "Update is not a fast forward"},
+			want:   false,
+		},
+		{
+			name: "branch protection",
+			apiErr: &APIError{
+				StatusCode: 422,
+				Message:    "Update is not a fast forward",
+				Errors: []APIErrorDetail{
+					{Message: "Protected branch update failed for refs/heads/main."},
+				},
+			},
+			want: false,
+		},
+		{
+			name:   "not found",
+			apiErr: &APIError{StatusCode: 404, Message: "Not Found"},
+			want:   false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isAlreadyExistsError(tt.apiErr))
+		})
+	}
+}
+
+func TestAPIError_Unwrap(t *testing.T) {
+	tests := []struct {
+		name    string
+		apiErr  *APIError
+		wantErr error
+		wantNil bool
+	}{
+		{
+			name:    "404 unwraps to ErrNotFound",
+			apiErr:  &APIError{StatusCode: 404, Message: "Not Found"},
+			wantErr: forge.ErrNotFound,
+		},
+		{
+			name:    "422 reference already exists unwraps to ErrAlreadyExists",
+			apiErr:  &APIError{StatusCode: 422, Message: "Reference already exists"},
+			wantErr: forge.ErrAlreadyExists,
+		},
+		{
+			name: "422 PR already exists unwraps to ErrAlreadyExists",
+			apiErr: &APIError{
+				StatusCode: 422,
+				Message:    "Validation Failed",
+				Errors: []APIErrorDetail{
+					{Resource: "PullRequest", Code: "custom", Message: "A pull request already exists for user:branch."},
+				},
+			},
+			wantErr: forge.ErrAlreadyExists,
+		},
+		{
+			name:    "422 non-fast-forward does not unwrap",
+			apiErr:  &APIError{StatusCode: 422, Message: "Update is not a fast forward"},
+			wantNil: true,
+		},
+		{
+			name:    "403 does not unwrap",
+			apiErr:  &APIError{StatusCode: 403, Message: "Resource not accessible by integration"},
+			wantNil: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.apiErr.Unwrap()
+			if tt.wantNil {
+				assert.Nil(t, got)
+			} else {
+				assert.ErrorIs(t, got, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestSecondaryRateLimit_RetriedWithoutRetryAfterHeader(t *testing.T) {
 	attempts := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

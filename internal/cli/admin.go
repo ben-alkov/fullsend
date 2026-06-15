@@ -1023,22 +1023,17 @@ func applyPerRepoScaffold(ctx context.Context, client forge.Client, printer *ui.
 	if err != nil {
 		return fmt.Errorf("getting repo info: %w", err)
 	}
+	commitMsg := fmt.Sprintf("chore: initialize fullsend-%s per-repo installation", version)
 	printer.StepStart(fmt.Sprintf("Committing scaffold files to %s/%s (%s branch)",
 		owner, repo, targetRepo.DefaultBranch))
-	committed, err := client.CommitFiles(ctx, owner, repo,
-		fmt.Sprintf("chore: initialize fullsend-%s per-repo installation", version), files)
-	if err != nil {
-		printer.StepFail("Failed to commit scaffold files")
-		return fmt.Errorf("committing scaffold files: %w", err)
-	}
-	if committed {
-		noun := "files"
-		if len(files) == 1 {
-			noun = "file"
-		}
-		printer.StepDone(fmt.Sprintf("Pushed %d %s to %s", len(files), noun, targetRepo.DefaultBranch))
-	} else {
-		printer.StepDone("Scaffold up to date")
+	prBody := fmt.Sprintf("This PR adds the fullsend scaffold files for per-repo installation.\n\n"+
+		"The default branch (%s) has branch protection rules that prevent direct pushes, "+
+		"so these files are delivered via PR instead.\n\n"+
+		"Merge this PR to activate fullsend workflows.", targetRepo.DefaultBranch)
+	if err := layers.CommitScaffoldFiles(ctx, client, printer,
+		owner, repo, targetRepo.DefaultBranch,
+		commitMsg, "chore: initialize fullsend per-repo installation", prBody, files); err != nil {
+		return err
 	}
 
 	printer.StepStart("Configuring repository variables")

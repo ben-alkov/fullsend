@@ -1980,6 +1980,8 @@ func TestApplyPerRepoScaffold_CommitFilesError(t *testing.T) {
 		"acme", "widget", files, nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "committing scaffold files")
+	assert.Empty(t, client.CreatedBranches, "should not attempt fallback for generic error")
+	assert.Empty(t, client.CreatedProposals, "should not attempt fallback for generic error")
 }
 
 func TestApplyPerRepoScaffold_Idempotent(t *testing.T) {
@@ -2045,4 +2047,188 @@ func TestApplyPerRepoScaffold_CreateSecretError(t *testing.T) {
 		"acme", "widget", nil, nil, map[string]string{"S": "V"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "setting repo secret")
+}
+
+func TestApplyPerRepoScaffold_ProtectedBranchFallback(t *testing.T) {
+	client := forge.NewFakeClient()
+	client.Repos = []forge.Repository{{FullName: "acme/widget", DefaultBranch: "main"}}
+	client.Errors["CommitFiles"] = fmt.Errorf("%w: github api: 422", forge.ErrBranchProtected)
+	var buf bytes.Buffer
+	printer := ui.New(&buf)
+
+	files := []forge.TreeFile{
+		{Path: ".github/workflows/fullsend.yaml", Content: []byte("workflow"), Mode: "100644"},
+	}
+	repoVars := map[string]string{"K": "V"}
+	repoSecrets := map[string]string{"S": "secret"}
+
+	err := applyPerRepoScaffold(context.Background(), client, printer,
+		"acme", "widget", files, repoVars, repoSecrets)
+	require.NoError(t, err)
+
+	require.Len(t, client.CreatedBranches, 1)
+	assert.Equal(t, "acme/widget/fullsend/scaffold-install", client.CreatedBranches[0])
+
+	require.Len(t, client.CommittedFilesToBranch, 1)
+	assert.Equal(t, "fullsend/scaffold-install", client.CommittedFilesToBranch[0].Branch)
+	assert.Len(t, client.CommittedFilesToBranch[0].Files, 1)
+
+	require.Len(t, client.CreatedProposals, 1)
+	assert.Contains(t, client.CreatedProposals[0].Title, "fullsend")
+
+	output := buf.String()
+	assert.Contains(t, output, "protected")
+	assert.Contains(t, output, "PR #1")
+	assert.Contains(t, output, "Merge the PR")
+}
+
+func TestApplyPerRepoScaffold_ProtectedBranch_ExistingBranch(t *testing.T) {
+	client := forge.NewFakeClient()
+	client.Repos = []forge.Repository{{FullName: "acme/widget", DefaultBranch: "main"}}
+	client.Errors["CommitFiles"] = fmt.Errorf("%w: github api: 422", forge.ErrBranchProtected)
+	client.Errors["CreateBranch"] = fmt.Errorf("branch: %w", forge.ErrAlreadyExists)
+	var buf bytes.Buffer
+	printer := ui.New(&buf)
+
+	files := []forge.TreeFile{
+		{Path: ".fullsend/config.yaml", Content: []byte("cfg"), Mode: "100644"},
+	}
+
+	err := applyPerRepoScaffold(context.Background(), client, printer,
+		"acme", "widget", files, nil, nil)
+	require.NoError(t, err)
+
+	require.Len(t, client.CommittedFilesToBranch, 1, "should proceed despite branch existing")
+	require.Len(t, client.CreatedProposals, 1)
+}
+
+func TestApplyPerRepoScaffold_ProtectedBranch_StillSetsVarsAndSecrets(t *testing.T) {
+	client := forge.NewFakeClient()
+	client.Repos = []forge.Repository{{FullName: "acme/widget", DefaultBranch: "main"}}
+	client.Errors["CommitFiles"] = fmt.Errorf("%w: github api: 422", forge.ErrBranchProtected)
+	printer := ui.New(&bytes.Buffer{})
+
+	files := []forge.TreeFile{
+		{Path: ".fullsend/config.yaml", Content: []byte("cfg"), Mode: "100644"},
+	}
+	repoVars := map[string]string{"FULLSEND_MINT_URL": "https://mint.example.run.app"}
+	repoSecrets := map[string]string{"FULLSEND_GCP_PROJECT_ID": "my-project"}
+
+	err := applyPerRepoScaffold(context.Background(), client, printer,
+		"acme", "widget", files, repoVars, repoSecrets)
+	require.NoError(t, err)
+
+	assert.Len(t, client.Variables, 1, "variables should be set even with PR fallback")
+	assert.Len(t, client.CreatedSecrets, 1, "secrets should be set even with PR fallback")
+}
+
+func TestApplyPerRepoScaffold_ProtectedBranch_CreateBranchFails(t *testing.T) {
+	client := forge.NewFakeClient()
+	client.Repos = []forge.Repository{{FullName: "acme/widget", DefaultBranch: "main"}}
+	client.Errors["CommitFiles"] = fmt.Errorf("%w: github api: 422", forge.ErrBranchProtected)
+	client.Errors["CreateBranch"] = fmt.Errorf("forbidden")
+	printer := ui.New(&bytes.Buffer{})
+
+	files := []forge.TreeFile{
+		{Path: ".fullsend/config.yaml", Content: []byte("cfg"), Mode: "100644"},
+	}
+
+	err := applyPerRepoScaffold(context.Background(), client, printer,
+		"acme", "widget", files, nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "creating scaffold branch")
+}
+
+func TestApplyPerRepoScaffold_ProtectedBranch_CommitToBranchFails(t *testing.T) {
+	client := forge.NewFakeClient()
+	client.Repos = []forge.Repository{{FullName: "acme/widget", DefaultBranch: "main"}}
+	client.Errors["CommitFiles"] = fmt.Errorf("%w: github api: 422", forge.ErrBranchProtected)
+	client.Errors["CommitFilesToBranch"] = fmt.Errorf("server error")
+	printer := ui.New(&bytes.Buffer{})
+
+	files := []forge.TreeFile{
+		{Path: ".fullsend/config.yaml", Content: []byte("cfg"), Mode: "100644"},
+	}
+
+	err := applyPerRepoScaffold(context.Background(), client, printer,
+		"acme", "widget", files, nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "committing scaffold files to branch")
+}
+
+func TestApplyPerRepoScaffold_ProtectedBranch_ScaffoldBranchAlsoProtected(t *testing.T) {
+	client := forge.NewFakeClient()
+	client.Repos = []forge.Repository{{FullName: "acme/widget", DefaultBranch: "main"}}
+	client.Errors["CommitFiles"] = fmt.Errorf("%w: github api: 422", forge.ErrBranchProtected)
+	client.Errors["CommitFilesToBranch"] = fmt.Errorf("%w: scaffold branch also protected", forge.ErrBranchProtected)
+	printer := ui.New(&bytes.Buffer{})
+
+	files := []forge.TreeFile{
+		{Path: ".fullsend/config.yaml", Content: []byte("cfg"), Mode: "100644"},
+	}
+
+	err := applyPerRepoScaffold(context.Background(), client, printer,
+		"acme", "widget", files, nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "scaffold branch")
+	assert.Contains(t, err.Error(), "configure branch protection")
+}
+
+func TestApplyPerRepoScaffold_ProtectedBranch_CreatePRFails(t *testing.T) {
+	client := forge.NewFakeClient()
+	client.Repos = []forge.Repository{{FullName: "acme/widget", DefaultBranch: "main"}}
+	client.Errors["CommitFiles"] = fmt.Errorf("%w: github api: 422", forge.ErrBranchProtected)
+	client.Errors["CreateChangeProposal"] = fmt.Errorf("forbidden")
+	printer := ui.New(&bytes.Buffer{})
+
+	files := []forge.TreeFile{
+		{Path: ".fullsend/config.yaml", Content: []byte("cfg"), Mode: "100644"},
+	}
+
+	err := applyPerRepoScaffold(context.Background(), client, printer,
+		"acme", "widget", files, nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "creating scaffold PR")
+}
+
+func TestApplyPerRepoScaffold_ProtectedBranch_DuplicatePR(t *testing.T) {
+	client := forge.NewFakeClient()
+	client.Repos = []forge.Repository{{FullName: "acme/widget", DefaultBranch: "main"}}
+	client.Errors["CommitFiles"] = fmt.Errorf("%w: github api: 422", forge.ErrBranchProtected)
+	client.Errors["CreateChangeProposal"] = fmt.Errorf("pr: %w", forge.ErrAlreadyExists)
+	var buf bytes.Buffer
+	printer := ui.New(&buf)
+
+	files := []forge.TreeFile{
+		{Path: ".fullsend/config.yaml", Content: []byte("cfg"), Mode: "100644"},
+	}
+
+	err := applyPerRepoScaffold(context.Background(), client, printer,
+		"acme", "widget", files, nil, nil)
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, "already exists")
+	assert.Contains(t, output, "Merge the PR")
+}
+
+func TestApplyPerRepoScaffold_ProtectedBranch_BranchUpToDate(t *testing.T) {
+	client := forge.NewFakeClient()
+	client.Repos = []forge.Repository{{FullName: "acme/widget", DefaultBranch: "main"}}
+	client.Errors["CommitFiles"] = fmt.Errorf("%w: github api: 422", forge.ErrBranchProtected)
+	client.Errors["CreateChangeProposal"] = fmt.Errorf("PR: %w", forge.ErrAlreadyExists)
+	noChange := false
+	client.CommitFilesChanged = &noChange
+	var buf bytes.Buffer
+	printer := ui.New(&buf)
+
+	files := []forge.TreeFile{
+		{Path: ".fullsend/config.yaml", Content: []byte("cfg"), Mode: "100644"},
+	}
+
+	err := applyPerRepoScaffold(context.Background(), client, printer,
+		"acme", "widget", files, nil, nil)
+	require.NoError(t, err)
+
+	assert.Contains(t, buf.String(), "up to date")
 }
