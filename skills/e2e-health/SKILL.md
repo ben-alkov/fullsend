@@ -26,7 +26,7 @@ Format the results as a markdown table with clickable links:
 
 | Status | Run | Commit Title | When |
 |--------|-----|--------------|------|
-| pass/fail/in_progress | [run-id](url) | displayTitle | relative time |
+| pass/fail/in_progress | run-id (linked) | displayTitle | relative time |
 
 Use a green checkmark for success, red X for failure, and a spinner for in-progress.
 
