@@ -732,7 +732,8 @@ The composite action accepts four optional inputs for status notifications:
 | `run-url` | URL of the CI/CD run shown in the status comment |
 | `status-repo` | Repository (`owner/repo`) to post status comments on |
 | `status-number` | Issue or PR number for status comments |
-| `status-token` | Token for posting comments (defaults to `GH_TOKEN`) |
+| `mint-url` | URL of the token mint service used to obtain fresh tokens for posting comments |
+| `status-token` | **Deprecated.** Static token for posting comments; use `mint-url` instead |
 
 All reusable workflows pass these inputs automatically.
 

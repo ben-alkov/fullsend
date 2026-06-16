@@ -588,6 +588,7 @@ func TestMintStatusCmd_TooManyArgs(t *testing.T) {
 // --- role aliasing tests ---
 
 func TestResolveRole(t *testing.T) {
+	assert.Equal(t, "coder", resolveRole("code"))
 	assert.Equal(t, "coder", resolveRole("fix"))
 	assert.Equal(t, "coder", resolveRole("coder"))
 	assert.Equal(t, "triage", resolveRole("triage"))
