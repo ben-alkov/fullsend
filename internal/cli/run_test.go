@@ -1311,7 +1311,6 @@ func TestSetupFetchService_ResolvesTokenWhenNoForgeClient(t *testing.T) {
 	h := &harness.Harness{
 		Agent:                  "agents/test.md",
 		AllowedRemoteResources: []string{"https://github.com/org/"},
-		AllowRuntimeFetch:      true,
 	}
 
 	tokenResolved := false
@@ -1356,6 +1355,33 @@ func TestSetupFetchService_NoForgeClientNoRemoteResources(t *testing.T) {
 	assert.NotEmpty(t, env.addr)
 }
 
+func TestSetupFetchService_TokenResolutionFails(t *testing.T) {
+	tmpDir := t.TempDir()
+	h := &harness.Harness{
+		Agent:                  "agents/test.md",
+		AllowedRemoteResources: []string{"https://github.com/org/"},
+	}
+
+	var warned string
+	env, shutdown, err := setupFetchService(
+		context.Background(),
+		nil,
+		h,
+		func() (string, error) { return "", fmt.Errorf("no token available") },
+		fetchsvc.ServiceConfig{
+			Harness:       h,
+			WorkspaceRoot: tmpDir,
+			MaxFetches:    10,
+		},
+		func(msg string) { warned = msg },
+	)
+	require.NoError(t, err)
+	defer shutdown()
+
+	assert.NotEmpty(t, env.addr)
+	assert.Contains(t, warned, "no token available")
+}
+
 func TestSetupFetchService_CustomMaxFetches(t *testing.T) {
 	tmpDir := t.TempDir()
 	maxFetches := 50
@@ -1387,34 +1413,6 @@ func TestSetupFetchService_CustomMaxFetches(t *testing.T) {
 	assert.NotEmpty(t, env.addr)
 }
 
-func TestSetupFetchService_TokenResolutionFails(t *testing.T) {
-	tmpDir := t.TempDir()
-	h := &harness.Harness{
-		Agent:                  "agents/test.md",
-		AllowedRemoteResources: []string{"https://github.com/org/"},
-		AllowRuntimeFetch:      true,
-	}
-
-	var warned string
-	env, shutdown, err := setupFetchService(
-		context.Background(),
-		nil,
-		h,
-		func() (string, error) { return "", fmt.Errorf("no token available") },
-		fetchsvc.ServiceConfig{
-			Harness:       h,
-			WorkspaceRoot: tmpDir,
-			MaxFetches:    10,
-		},
-		func(msg string) { warned = msg },
-	)
-	require.NoError(t, err)
-	defer shutdown()
-
-	assert.NotEmpty(t, env.addr)
-	assert.Contains(t, warned, "no token available")
-}
-
 func TestEffectiveMaxRuntimeFetches_MatchesFetchsvcDefault(t *testing.T) {
 	h := &harness.Harness{}
 	if h.EffectiveMaxRuntimeFetches() != fetchsvc.DefaultMaxFetches {
@@ -1425,4 +1423,187 @@ func TestEffectiveMaxRuntimeFetches_MatchesFetchsvcDefault(t *testing.T) {
 
 type mockForgeClient struct {
 	forge.Client
+}
+
+func TestSetupStatusNotifier_MintURL(t *testing.T) {
+	tmpDir := t.TempDir()
+	printer := ui.New(io.Discard)
+
+	sOpts := statusOpts{
+		statusRepo: "org/repo",
+		statusNum:  7,
+		mintURL:    "https://mint.example.com",
+	}
+
+	t.Setenv("GITHUB_RUN_ID", "run-42")
+
+	n, err := setupStatusNotifier(tmpDir, "review", sOpts, printer)
+	require.NoError(t, err)
+	assert.NotNil(t, n)
+	assert.True(t, n.HasClientFactory(), "client factory should be set when mint URL provided")
+}
+
+func TestSetupStatusNotifier_MintURLFromEnv(t *testing.T) {
+	tmpDir := t.TempDir()
+	printer := ui.New(io.Discard)
+
+	sOpts := statusOpts{
+		statusRepo: "org/repo",
+		statusNum:  7,
+	}
+
+	t.Setenv("FULLSEND_MINT_URL", "https://mint.example.com")
+	t.Setenv("GITHUB_RUN_ID", "run-42")
+
+	n, err := setupStatusNotifier(tmpDir, "code", sOpts, printer)
+	require.NoError(t, err)
+	assert.NotNil(t, n)
+	assert.True(t, n.HasClientFactory(), "client factory should be set from FULLSEND_MINT_URL env var")
+}
+
+func TestSetupStatusNotifier_NoMintURL(t *testing.T) {
+	tmpDir := t.TempDir()
+	printer := ui.New(io.Discard)
+
+	sOpts := statusOpts{
+		statusRepo: "org/repo",
+		statusNum:  7,
+	}
+
+	t.Setenv("GITHUB_RUN_ID", "run-42")
+	t.Setenv("FULLSEND_MINT_URL", "")
+	t.Setenv("GITHUB_TOKEN", "")
+
+	_, err := setupStatusNotifier(tmpDir, "review", sOpts, printer)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no mint URL available")
+}
+
+func TestSetupStatusNotifier_DeprecatedToken(t *testing.T) {
+	tmpDir := t.TempDir()
+	printer := ui.New(io.Discard)
+
+	sOpts := statusOpts{
+		statusRepo:  "org/repo",
+		statusNum:   7,
+		statusToken: "test-static-token",
+	}
+
+	t.Setenv("GITHUB_RUN_ID", "run-42")
+	t.Setenv("FULLSEND_MINT_URL", "")
+
+	n, err := setupStatusNotifier(tmpDir, "code", sOpts, printer)
+	require.NoError(t, err)
+	assert.NotNil(t, n)
+	assert.False(t, n.HasClientFactory(), "client factory should not be set when using deprecated static token")
+}
+
+func TestSetupStatusNotifier_InvalidRepo(t *testing.T) {
+	tmpDir := t.TempDir()
+	printer := ui.New(io.Discard)
+
+	sOpts := statusOpts{
+		statusRepo: "noslash",
+		statusNum:  7,
+	}
+
+	_, err := setupStatusNotifier(tmpDir, "review", sOpts, printer)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--status-repo must be in owner/repo format")
+}
+
+func TestRunCommand_HasMintURLFlag(t *testing.T) {
+	cmd := newRunCmd()
+
+	f := cmd.Flags().Lookup("mint-url")
+	require.NotNil(t, f, "run command should have --mint-url flag")
+	assert.Equal(t, "", f.DefValue)
+}
+
+func TestRunCommand_StatusTokenFlagDeprecated(t *testing.T) {
+	cmd := newRunCmd()
+
+	f := cmd.Flags().Lookup("status-token")
+	require.NotNil(t, f, "run command should have --status-token flag for backwards compatibility")
+	assert.NotEmpty(t, f.Deprecated, "--status-token flag should be marked deprecated")
+}
+
+func TestTitleCase(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"hello world", "Hello World"},
+		{"code", "Code"},
+		{"", ""},
+		{"already Title", "Already Title"},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, titleCase(tt.in))
+	}
+}
+
+func TestSetupStatusNotifier_ConfigYAML(t *testing.T) {
+	tmpDir := t.TempDir()
+	printer := ui.New(io.Discard)
+
+	configData := `defaults:
+  status_notifications:
+    comment:
+      start: enabled
+      completion: disabled
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "config.yaml"), []byte(configData), 0o644))
+
+	sOpts := statusOpts{
+		statusRepo: "org/repo",
+		statusNum:  7,
+		mintURL:    "https://mint.example.com",
+	}
+
+	t.Setenv("GITHUB_RUN_ID", "run-42")
+
+	n, err := setupStatusNotifier(tmpDir, "review", sOpts, printer)
+	require.NoError(t, err)
+	assert.NotNil(t, n)
+}
+
+func TestSetupStatusNotifier_RunIDFallback(t *testing.T) {
+	tmpDir := t.TempDir()
+	printer := ui.New(io.Discard)
+
+	sOpts := statusOpts{
+		statusRepo:  "org/repo",
+		statusNum:   7,
+		statusToken: "test-static-token",
+	}
+
+	t.Setenv("GITHUB_RUN_ID", "")
+	t.Setenv("FULLSEND_MINT_URL", "")
+
+	n, err := setupStatusNotifier(tmpDir, "code", sOpts, printer)
+	require.NoError(t, err)
+	assert.NotNil(t, n)
+}
+
+func TestSetupStatusNotifier_PRHeadSHA(t *testing.T) {
+	tmpDir := t.TempDir()
+	printer := ui.New(io.Discard)
+
+	eventPayload := `{"inputs":{"event_payload":"{\"pull_request\":{\"head\":{\"sha\":\"abc123def456\"}}}"}}`
+	eventFile := filepath.Join(tmpDir, "event.json")
+	require.NoError(t, os.WriteFile(eventFile, []byte(eventPayload), 0o644))
+
+	sOpts := statusOpts{
+		statusRepo:  "org/repo",
+		statusNum:   7,
+		statusToken: "test-static-token",
+	}
+
+	t.Setenv("GITHUB_EVENT_PATH", eventFile)
+	t.Setenv("GITHUB_RUN_ID", "run-42")
+	t.Setenv("FULLSEND_MINT_URL", "")
+
+	n, err := setupStatusNotifier(tmpDir, "code", sOpts, printer)
+	require.NoError(t, err)
+	assert.NotNil(t, n)
 }

@@ -58,7 +58,7 @@ fullsend
 │   ├── --run-url <url>                      #   CI/CD run URL for status comments
 │   ├── --status-repo <owner/repo>           #   Repository for status comments
 │   ├── --status-number <int>                #   Issue/PR number for status comments
-│   └── --status-token <token>               #   Token for status comments (default: GH_TOKEN)
+│   └── --mint-url <url>                     #   Mint service URL for on-demand status tokens
 ├── fetch-skill      <url>                    # Fetch a skill at runtime (in-sandbox)
 ├── scan                                     # Run security scanner on input/output
 │   ├── input                                # Scan event payload for prompt injection
@@ -74,7 +74,8 @@ fullsend
     ├── --run-url <url>                      #   Workflow run URL (optional)
     ├── --sha <string>                       #   Commit SHA (optional)
     ├── --reason <string>                    #   Termination reason: terminated or cancelled (default: terminated)
-    └── --token <token>                      #   GitHub token (default: $GITHUB_TOKEN)
+    ├── --mint-url <url>                     #   Mint service URL for on-demand token (default: $FULLSEND_MINT_URL)
+    └── --role <string>                      #   Agent role for minting (required with --mint-url)
 ```
 
 ### Command Decomposition

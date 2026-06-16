@@ -40,9 +40,10 @@ func defaultMintRoles() []string {
 }
 
 // roleAlias maps role aliases to their canonical names.
-// The fix role reuses the coder app — same PEM, same app ID.
+// The code and fix roles both reuse the coder app — same PEM, same app ID.
 var roleAlias = map[string]string{
-	"fix": "coder",
+	"code": "coder",
+	"fix":  "coder",
 }
 
 // resolveRole returns the canonical role name, resolving aliases.
