@@ -1705,6 +1705,53 @@ func TestRunAnalyze_WithFakeClient(t *testing.T) {
 	assert.Contains(t, buf.String(), "Layer:")
 }
 
+func TestRunInstall_RequiresAgentCredsWhenMintEnabled(t *testing.T) {
+	client := forge.NewFakeClient()
+	client.AuthenticatedUser = "testuser"
+	discovered := []forge.Repository{
+		{Name: forge.ConfigRepoName, FullName: "testorg/" + forge.ConfigRepoName},
+	}
+	client.Repos = discovered
+
+	err := runInstall(
+		context.Background(), client, ui.New(&bytes.Buffer{}), "testorg",
+		[]string{}, config.DefaultAgentRoles(), nil,
+		nil, "",
+		false, "", "",
+		"gcf", "test-project", "us-central1", "", true,
+		"https://mint.example.com/v1/token",
+		false,
+		discovered,
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "OIDC mint requires")
+}
+
+func TestRunInstall_WithSkipMintCheck(t *testing.T) {
+	cfg := setupTestConfig(map[string]bool{"myrepo": false})
+	client := setupTestClient("testorg", cfg, []string{"myrepo"})
+	client.AuthenticatedUser = "testuser"
+
+	var agentCreds []layers.AgentCredentials
+	for _, role := range config.DefaultAgentRoles() {
+		agentCreds = append(agentCreds, layers.AgentCredentials{
+			AgentEntry: config.AgentEntry{Role: role},
+		})
+	}
+
+	err := runInstall(
+		context.Background(), client, ui.New(&bytes.Buffer{}), "testorg",
+		nil, config.DefaultAgentRoles(), agentCreds,
+		nil, "",
+		false, "", "",
+		"gcf", "test-project", "us-central1", "", true,
+		"https://mint.example.com/v1/token",
+		true,
+		client.Repos,
+	)
+	require.NoError(t, err)
+}
+
 func TestFilterSlugsByAppSet(t *testing.T) {
 	tests := []struct {
 		name   string
