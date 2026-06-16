@@ -121,6 +121,8 @@ The `--inference-region` flag defaults to `global` for the broadest model availa
 
 See [Setting up with pre-provisioned infrastructure](github-setup.md) for the full `github setup` reference, including per-repo mode, `--skip-app-setup`, and day-2 operations.
 
+> **Protected default branch:** If the `.fullsend` config repo or target repo has branch protection rules that prevent direct pushes, the installer automatically falls back to creating a PR with the scaffold files instead of pushing directly. Merge the scaffold PR to complete setup.
+
 ### Step 4: Merge enrollment PRs
 
 If you enrolled repositories during setup, the installer dispatches a workflow that creates an enrollment PR in each enrolled repo. These PRs add a shim workflow (`.github/workflows/fullsend.yaml`) that wires events to the agent pipeline.
@@ -213,6 +215,8 @@ During installation, you'll be prompted to choose repository enrollment:
 - **[n] Enroll no repositories** — skip enrollment during install; enroll repositories later using `fullsend admin enable repos`
 
 The installer creates the `.fullsend` config repo as **public** by default. This is required for cross-repo `workflow_call` to work with enrolled repos of any visibility (public, private, or internal) across all GitHub plan tiers. If an admin later makes `.fullsend` private, only other private repos in the org will be able to trigger agent workflows — public and internal repos will fail silently.
+
+If the default branch of the `.fullsend` config repo has branch protection rules, the installer creates a PR with the scaffold files instead of pushing directly. Merge the scaffold PR to complete setup.
 
 If the installer fails partway through, run `fullsend admin uninstall "$ORG_NAME"` to clean up before retrying. The uninstall preflight will prompt you to add the `delete_repo` scope if it is missing.
 

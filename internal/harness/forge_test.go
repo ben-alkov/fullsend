@@ -95,8 +95,8 @@ func TestResolveForge_RunnerEnvMerge(t *testing.T) {
 		Forge: map[string]*ForgeConfig{
 			"github": {
 				RunnerEnv: map[string]string{
-					"OVERRIDE":  "forge_val",
-					"GH_TOKEN":  "${GH_TOKEN}",
+					"OVERRIDE": "forge_val",
+					"GH_TOKEN": "${GH_TOKEN}",
 				},
 			},
 		},

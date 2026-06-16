@@ -77,11 +77,24 @@ repos:
 
   - repo: local
     hooks:
+      - id: go-fmt
+        name: gofmt
+        entry: gofmt -w
+        language: system
+        types: [go]
+
       - id: go-vet
         name: go vet
         entry: go vet ./...
         language: system
         types: [go]
+        pass_filenames: false
+
+      - id: lint-mint-embed-sync
+        name: lint mint embed sync
+        entry: ./hack/lint-mint-embed-sync
+        language: script
+        files: ^(internal/mint/|internal/mintcore/|internal/dispatch/gcf/mintsrc/)
         pass_filenames: false
 
       - id: lint-adr-status

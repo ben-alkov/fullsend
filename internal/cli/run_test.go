@@ -20,6 +20,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/fullsend-ai/fullsend/internal/binary"
+	"github.com/fullsend-ai/fullsend/internal/fetch"
+	"github.com/fullsend-ai/fullsend/internal/fetchsvc"
+	"github.com/fullsend-ai/fullsend/internal/forge"
+	"github.com/fullsend-ai/fullsend/internal/harness"
 	"github.com/fullsend-ai/fullsend/internal/ui"
 )
 
@@ -131,6 +135,262 @@ func TestRunCommand_RejectsNegativeMaxResources(t *testing.T) {
 	err := cmd.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--max-resources must be >= 1")
+}
+
+func TestRunAgent_HarnessLoadPipeline(t *testing.T) {
+	// Exercises the early runAgent pipeline: absFullsendDir, policy,
+	// org config loading, LoadWithBase, baseDeps, ResolveRelativeTo.
+	// The function fails later at sandbox.EnsureAvailable (no openshell
+	// in test env), but by then all harness-loading code paths are covered.
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "harness"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "agents"), 0o755))
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "agents", "code.md"),
+		[]byte("You are a coding agent."),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "harness", "code.yaml"),
+		[]byte("agent: agents/code.md\n"),
+		0o644,
+	))
+
+	rFlags := resolveFlags{maxDepth: 10, maxResources: 50}
+	printer := ui.New(io.Discard)
+	err := runAgent(context.Background(), "code", dir, "", "/tmp/repo", "", nil, false, "", "", rFlags, statusOpts{}, printer, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "openshell")
+}
+
+func TestRunAgent_YMLFallback(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "harness"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "agents"), 0o755))
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "agents", "code.md"),
+		[]byte("You are a coding agent."),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "harness", "code.yml"),
+		[]byte("agent: agents/code.md\n"),
+		0o644,
+	))
+
+	rFlags := resolveFlags{maxDepth: 10, maxResources: 50}
+	printer := ui.New(io.Discard)
+	err := runAgent(context.Background(), "code", dir, "", "/tmp/repo", "", nil, false, "", "", rFlags, statusOpts{}, printer, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "openshell")
+}
+
+func TestRunAgent_HarnessNotFound(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "harness"), 0o755))
+
+	rFlags := resolveFlags{maxDepth: 10, maxResources: 50}
+	printer := ui.New(io.Discard)
+	err := runAgent(context.Background(), "nonexistent", dir, "", "/tmp/repo", "", nil, false, "", "", rFlags, statusOpts{}, printer, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "harness file not found: tried nonexistent.yaml and nonexistent.yml")
+}
+
+func TestRunAgent_HarnessLoadWithOrgConfig(t *testing.T) {
+	// Same as above but with a config.yaml present, covering the
+	// orgCfg != nil → orgAllowlist path.
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "harness"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "agents"), 0o755))
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "agents", "code.md"),
+		[]byte("You are a coding agent."),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "harness", "code.yaml"),
+		[]byte("agent: agents/code.md\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "config.yaml"),
+		[]byte("allowed_remote_resources:\n  - \"https://example.com/\"\n"),
+		0o644,
+	))
+
+	rFlags := resolveFlags{maxDepth: 10, maxResources: 50}
+	printer := ui.New(io.Discard)
+	err := runAgent(context.Background(), "code", dir, "", "/tmp/repo", "", nil, false, "", "", rFlags, statusOpts{}, printer, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "openshell")
+}
+
+func TestRunAgent_MalformedOrgConfig(t *testing.T) {
+	// A malformed config.yaml should produce a warning but not prevent
+	// local-only harnesses from proceeding through the pipeline.
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "harness"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "agents"), 0o755))
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "agents", "code.md"),
+		[]byte("You are a coding agent."),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "harness", "code.yaml"),
+		[]byte("agent: agents/code.md\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "config.yaml"),
+		[]byte("{{invalid yaml"),
+		0o644,
+	))
+
+	rFlags := resolveFlags{maxDepth: 10, maxResources: 50}
+	printer := ui.New(io.Discard)
+	err := runAgent(context.Background(), "code", dir, "", "/tmp/repo", "", nil, false, "", "", rFlags, statusOpts{}, printer, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "openshell")
+}
+
+func TestRunAgent_MalformedOrgConfigWithURLRefs(t *testing.T) {
+	// A malformed config.yaml with URL-referenced resources should fail
+	// with a parse error on the re-attempt inside HasURLReferences.
+	agentHash := fetch.ComputeSHA256([]byte("agent content"))
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "harness"), 0o755))
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "harness", "code.yaml"),
+		[]byte(fmt.Sprintf("agent: \"https://example.com/agents/code.md#sha256=%s\"\n", agentHash)),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "config.yaml"),
+		[]byte("{{invalid yaml"),
+		0o644,
+	))
+
+	rFlags := resolveFlags{maxDepth: 10, maxResources: 50}
+	printer := ui.New(io.Discard)
+	err := runAgent(context.Background(), "code", dir, "", "/tmp/repo", "", nil, false, "", "", rFlags, statusOpts{}, printer, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parsing org config")
+}
+
+func TestRunAgent_URLRefsNoOrgConfig(t *testing.T) {
+	// Harness with URL agent but no config.yaml → exercises the
+	// orgCfg == nil path inside HasURLReferences.
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "harness"), 0o755))
+
+	agentHash := fetch.ComputeSHA256([]byte("agent content"))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "harness", "code.yaml"),
+		[]byte(fmt.Sprintf("agent: \"https://example.com/agents/code.md#sha256=%s\"\n", agentHash)),
+		0o644,
+	))
+
+	rFlags := resolveFlags{maxDepth: 10, maxResources: 50}
+	printer := ui.New(io.Discard)
+	err := runAgent(context.Background(), "code", dir, "", "/tmp/repo", "", nil, false, "", "", rFlags, statusOpts{}, printer, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "URL-referenced resources require an org-level config.yaml")
+}
+
+func TestRunAgent_WithURLBase(t *testing.T) {
+	// Harness with a URL base — exercises the baseDeps logging loop.
+	baseContent := []byte("agent: agents/shared.md\n")
+	baseHash := fetch.ComputeSHA256(baseContent)
+
+	srv, policy := newLockTestServer(t, map[string][]byte{
+		"/base.yaml": baseContent,
+	})
+
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "harness"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "agents"), 0o755))
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "agents", "shared.md"),
+		[]byte("You are a shared agent."),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "harness", "code.yaml"),
+		[]byte(fmt.Sprintf("base: \"%s/base.yaml#sha256=%s\"\n", srv.URL, baseHash)),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "config.yaml"),
+		[]byte(fmt.Sprintf("allowed_remote_resources:\n  - \"%s/\"\n", srv.URL)),
+		0o644,
+	))
+
+	fetch.DefaultPolicy = policy
+	defer func() { fetch.DefaultPolicy = fetch.FetchPolicy{} }()
+
+	rFlags := resolveFlags{maxDepth: 10, maxResources: 50}
+	printer := ui.New(io.Discard)
+	err := runAgent(context.Background(), "code", dir, "", "/tmp/repo", "", nil, false, "", "", rFlags, statusOpts{}, printer, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "openshell")
+}
+
+func TestRunAgent_URLBaseNoOrgConfig(t *testing.T) {
+	// Harness with a URL base but no config.yaml — exercises the
+	// pre-check that loads config strictly when a URL base is detected.
+	baseContent := []byte("agent: agents/shared.md\n")
+	baseHash := fetch.ComputeSHA256(baseContent)
+
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "harness"), 0o755))
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "harness", "code.yaml"),
+		[]byte(fmt.Sprintf("base: \"https://example.com/base.yaml#sha256=%s\"\n", baseHash)),
+		0o644,
+	))
+
+	// No config.yaml.
+
+	rFlags := resolveFlags{maxDepth: 10, maxResources: 50}
+	printer := ui.New(io.Discard)
+	err := runAgent(context.Background(), "code", dir, "", "/tmp/repo", "", nil, false, "", "", rFlags, statusOpts{}, printer, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "URL-referenced resources require an org-level config.yaml")
+}
+
+func TestRunAgent_URLBaseMalformedOrgConfig(t *testing.T) {
+	// Harness with a URL base and malformed config.yaml — exercises the
+	// pre-check parse error path.
+	baseContent := []byte("agent: agents/shared.md\n")
+	baseHash := fetch.ComputeSHA256(baseContent)
+
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "harness"), 0o755))
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "harness", "code.yaml"),
+		[]byte(fmt.Sprintf("base: \"https://example.com/base.yaml#sha256=%s\"\n", baseHash)),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "config.yaml"),
+		[]byte("{{invalid yaml"),
+		0o644,
+	))
+
+	rFlags := resolveFlags{maxDepth: 10, maxResources: 50}
+	printer := ui.New(io.Discard)
+	err := runAgent(context.Background(), "code", dir, "", "/tmp/repo", "", nil, false, "", "", rFlags, statusOpts{}, printer, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parsing org config")
 }
 
 func TestBuildScanContextCommand_SourcesEnv(t *testing.T) {
@@ -960,4 +1220,209 @@ func TestLockCommand_HasForgeFlag(t *testing.T) {
 	flag := cmd.Flags().Lookup("forge")
 	require.NotNil(t, flag)
 	assert.Equal(t, "", flag.DefValue)
+}
+
+func TestBootstrapEnv_IncludesFetchServiceVars(t *testing.T) {
+	h := &harness.Harness{Agent: "agents/test.md"}
+	fEnv := fetchServiceEnv{addr: "127.0.0.1:54321", token: "deadbeef"}
+
+	err := bootstrapEnv("nonexistent-sandbox", "/workspace/repo", h, nil, fEnv)
+
+	// Expected to fail at sandbox.UploadFile — we just verify the fetch
+	// env var code path was reached (coverage) and the error is from upload.
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "copying .env file to sandbox")
+}
+
+func TestBootstrapEnv_SkipsFetchVarsWhenEmpty(t *testing.T) {
+	h := &harness.Harness{Agent: "agents/test.md"}
+
+	err := bootstrapEnv("nonexistent-sandbox", "/workspace/repo", h, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "copying .env file to sandbox")
+}
+
+func TestShouldStartFetchService_AllowRuntimeFetch(t *testing.T) {
+	h := &harness.Harness{
+		Agent:                  "agents/test.md",
+		AllowRuntimeFetch:      true,
+		AllowedRemoteResources: []string{"https://github.com/org/"},
+	}
+	start, warning := shouldStartFetchService(h)
+	assert.True(t, start)
+	assert.Empty(t, warning)
+}
+
+func TestShouldStartFetchService_URLSkills(t *testing.T) {
+	h := &harness.Harness{
+		Agent:  "agents/test.md",
+		Skills: []string{"https://github.com/org/skills/tree/abc/rust#sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
+	}
+	start, warning := shouldStartFetchService(h)
+	assert.True(t, start)
+	assert.Empty(t, warning)
+}
+
+func TestShouldStartFetchService_AllowedRemoteResourcesOnly(t *testing.T) {
+	h := &harness.Harness{
+		Agent:                  "agents/test.md",
+		AllowedRemoteResources: []string{"https://github.com/org/"},
+	}
+	start, warning := shouldStartFetchService(h)
+	assert.True(t, start)
+	assert.Contains(t, warning, "deprecated")
+}
+
+func TestShouldStartFetchService_NoRemoteResources(t *testing.T) {
+	h := &harness.Harness{Agent: "agents/test.md"}
+	start, warning := shouldStartFetchService(h)
+	assert.False(t, start)
+	assert.Empty(t, warning)
+}
+
+func TestSetupFetchService_WithForgeClient(t *testing.T) {
+	tmpDir := t.TempDir()
+	h := &harness.Harness{Agent: "agents/test.md"}
+	mockClient := &mockForgeClient{}
+
+	env, shutdown, err := setupFetchService(
+		context.Background(),
+		mockClient,
+		h,
+		func() (string, error) { return "", fmt.Errorf("should not be called") },
+		fetchsvc.ServiceConfig{
+			Harness:       h,
+			WorkspaceRoot: tmpDir,
+			MaxFetches:    10,
+		},
+		func(string) {},
+	)
+	require.NoError(t, err)
+	defer shutdown()
+
+	assert.NotEmpty(t, env.addr)
+	assert.NotEmpty(t, env.token)
+	assert.Len(t, env.token, 64)
+}
+
+func TestSetupFetchService_ResolvesTokenWhenNoForgeClient(t *testing.T) {
+	tmpDir := t.TempDir()
+	h := &harness.Harness{
+		Agent:                  "agents/test.md",
+		AllowedRemoteResources: []string{"https://github.com/org/"},
+		AllowRuntimeFetch:      true,
+	}
+
+	tokenResolved := false
+	env, shutdown, err := setupFetchService(
+		context.Background(),
+		nil,
+		h,
+		func() (string, error) { tokenResolved = true; return "ghp_test", nil },
+		fetchsvc.ServiceConfig{
+			Harness:       h,
+			WorkspaceRoot: tmpDir,
+			MaxFetches:    10,
+		},
+		func(string) {},
+	)
+	require.NoError(t, err)
+	defer shutdown()
+
+	assert.True(t, tokenResolved)
+	assert.NotEmpty(t, env.addr)
+}
+
+func TestSetupFetchService_NoForgeClientNoRemoteResources(t *testing.T) {
+	tmpDir := t.TempDir()
+	h := &harness.Harness{Agent: "agents/test.md"}
+
+	env, shutdown, err := setupFetchService(
+		context.Background(),
+		nil,
+		h,
+		func() (string, error) { return "", fmt.Errorf("should not be called") },
+		fetchsvc.ServiceConfig{
+			Harness:       h,
+			WorkspaceRoot: tmpDir,
+			MaxFetches:    10,
+		},
+		func(string) {},
+	)
+	require.NoError(t, err)
+	defer shutdown()
+
+	assert.NotEmpty(t, env.addr)
+}
+
+func TestSetupFetchService_CustomMaxFetches(t *testing.T) {
+	tmpDir := t.TempDir()
+	maxFetches := 50
+	h := &harness.Harness{
+		Agent:                  "agents/test.md",
+		AllowRuntimeFetch:      true,
+		AllowedRemoteResources: []string{"https://github.com/org/"},
+		MaxRuntimeFetches:      &maxFetches,
+	}
+
+	cfg := fetchsvc.ServiceConfig{
+		Harness:       h,
+		WorkspaceRoot: tmpDir,
+		MaxFetches:    h.EffectiveMaxRuntimeFetches(),
+	}
+	assert.Equal(t, 50, cfg.MaxFetches)
+
+	env, shutdown, err := setupFetchService(
+		context.Background(),
+		nil,
+		h,
+		func() (string, error) { return "ghp_test", nil },
+		cfg,
+		func(string) {},
+	)
+	require.NoError(t, err)
+	defer shutdown()
+
+	assert.NotEmpty(t, env.addr)
+}
+
+func TestSetupFetchService_TokenResolutionFails(t *testing.T) {
+	tmpDir := t.TempDir()
+	h := &harness.Harness{
+		Agent:                  "agents/test.md",
+		AllowedRemoteResources: []string{"https://github.com/org/"},
+		AllowRuntimeFetch:      true,
+	}
+
+	var warned string
+	env, shutdown, err := setupFetchService(
+		context.Background(),
+		nil,
+		h,
+		func() (string, error) { return "", fmt.Errorf("no token available") },
+		fetchsvc.ServiceConfig{
+			Harness:       h,
+			WorkspaceRoot: tmpDir,
+			MaxFetches:    10,
+		},
+		func(msg string) { warned = msg },
+	)
+	require.NoError(t, err)
+	defer shutdown()
+
+	assert.NotEmpty(t, env.addr)
+	assert.Contains(t, warned, "no token available")
+}
+
+func TestEffectiveMaxRuntimeFetches_MatchesFetchsvcDefault(t *testing.T) {
+	h := &harness.Harness{}
+	if h.EffectiveMaxRuntimeFetches() != fetchsvc.DefaultMaxFetches {
+		t.Fatalf("harness default %d != fetchsvc.DefaultMaxFetches %d — update defaultMaxRuntimeFetches in harness.go",
+			h.EffectiveMaxRuntimeFetches(), fetchsvc.DefaultMaxFetches)
+	}
+}
+
+type mockForgeClient struct {
+	forge.Client
 }

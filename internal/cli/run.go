@@ -21,6 +21,7 @@ import (
 	"github.com/fullsend-ai/fullsend/internal/config"
 	"github.com/fullsend-ai/fullsend/internal/envfile"
 	"github.com/fullsend-ai/fullsend/internal/fetch"
+	"github.com/fullsend-ai/fullsend/internal/fetchsvc"
 	"github.com/fullsend-ai/fullsend/internal/forge"
 	gh "github.com/fullsend-ai/fullsend/internal/forge/github"
 	"github.com/fullsend-ai/fullsend/internal/harness"
@@ -133,8 +134,16 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 		}
 	}
 
+	absFullsendDir, err := filepath.Abs(fullsendDir)
+	if err != nil {
+		return fmt.Errorf("resolving fullsend dir: %w", err)
+	}
+
 	// 1. Resolve and load harness.
-	harnessPath := filepath.Join(fullsendDir, "harness", agentName+".yaml")
+	harnessPath, err := resolveHarnessPath(absFullsendDir, agentName, printer)
+	if err != nil {
+		return err
+	}
 	harnessStart := time.Now()
 	printer.StepStart("Loading harness: " + harnessPath)
 
@@ -144,37 +153,65 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 		return err
 	}
 
-	h, err := harness.LoadWithOpts(harnessPath, harness.LoadOpts{
+	policy := fetch.DefaultPolicy
+	policy.Offline = rFlags.offline
+
+	// Best-effort org config loading — provides the allowlist for base
+	// harness fetching. If the file is missing or unparseable we proceed
+	// without it; HasURLReferences will enforce its presence later if needed.
+	orgConfigPath := filepath.Join(absFullsendDir, "config.yaml")
+	orgCfg := tryLoadOrgConfig(orgConfigPath, printer)
+	var orgAllowlist []string
+	if orgCfg != nil {
+		orgAllowlist = orgCfg.AllowedRemoteResources
+	}
+
+	// If the harness has a URL base and org config failed to load,
+	// load it strictly now so LoadWithBase gets a proper error path
+	// rather than an unhelpful "URL base requires allowed_remote_resources".
+	if orgCfg == nil {
+		if rawH, rawErr := harness.LoadRaw(harnessPath); rawErr == nil && rawH.Base != "" && harness.IsURL(rawH.Base) {
+			var err error
+			orgCfg, err = requireOrgConfig(orgConfigPath, printer)
+			if err != nil {
+				return err
+			}
+			orgAllowlist = orgCfg.AllowedRemoteResources
+		}
+	}
+
+	h, baseDeps, err := harness.LoadWithBase(ctx, harnessPath, harness.ComposeOpts{
+		WorkspaceRoot: absFullsendDir,
+		FetchPolicy:   policy,
+		AuditLogPath:  filepath.Join(absFullsendDir, ".fullsend-cache", "fetch-audit.jsonl"),
 		ForgePlatform: forgePlatform,
+		OrgAllowlist:  orgAllowlist,
 	})
 	if err != nil {
 		printer.StepFail("Failed to load harness")
 		return fmt.Errorf("loading harness: %w", err)
 	}
 
-	absFullsendDir, err := filepath.Abs(fullsendDir)
-	if err != nil {
-		return fmt.Errorf("resolving fullsend dir: %w", err)
+	for _, dep := range baseDeps {
+		if dep.CacheHit {
+			printer.StepInfo(fmt.Sprintf("Base: %s (cache hit)", dep.URL))
+		} else {
+			printer.StepInfo(fmt.Sprintf("Base: %s (fetched)", dep.URL))
+		}
 	}
+
 	if err := h.ResolveRelativeTo(absFullsendDir); err != nil {
 		printer.StepFail("Path validation failed")
 		return fmt.Errorf("resolving paths: %w", err)
 	}
 
 	if h.HasURLReferences() {
-		orgConfigPath := filepath.Join(absFullsendDir, "config.yaml")
-		orgConfigData, err := os.ReadFile(orgConfigPath)
-		if err != nil {
-			printer.StepFail("Failed to load org config")
-			if os.IsNotExist(err) {
-				return fmt.Errorf("URL-referenced resources require an org-level config.yaml with allowed_remote_resources (expected at %s)", orgConfigPath)
+		if orgCfg == nil {
+			var err error
+			orgCfg, err = requireOrgConfig(orgConfigPath, printer)
+			if err != nil {
+				return err
 			}
-			return fmt.Errorf("reading org config for remote resource validation: %w", err)
-		}
-		orgCfg, err := config.ParseOrgConfig(orgConfigData)
-		if err != nil {
-			printer.StepFail("Failed to parse org config")
-			return fmt.Errorf("parsing org config: %w", err)
 		}
 
 		if err := h.ValidateAllowedRemoteResources(orgCfg.AllowedRemoteResources); err != nil {
@@ -218,9 +255,6 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 		}
 
 		if !usedLock {
-			policy := fetch.DefaultPolicy
-			policy.Offline = rFlags.offline
-
 			var forgeClient forge.Client
 			if h.HasURLSkills() {
 				if rFlags.forgeClient != nil {
@@ -530,6 +564,35 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 	repoName := filepath.Base(hostRepositoryDir)
 	remoteRepositoryDir := fmt.Sprintf("%s/%s", sandbox.SandboxWorkspace, repoName)
 
+	// 5. Generate trace ID for security finding and audit log correlation.
+	traceID := security.GenerateTraceID()
+
+	// 6. Start runtime fetch service (Phase 4, ADR-0038).
+	var fetchEnvVal fetchServiceEnv
+	startFetch, deprecationWarning := shouldStartFetchService(h)
+	if deprecationWarning != "" {
+		printer.StepWarn(deprecationWarning)
+	}
+	if startFetch {
+		env, fetchShutdown, fetchErr := setupFetchService(ctx, rFlags.forgeClient, h, resolveToken, fetchsvc.ServiceConfig{
+			Harness:       h,
+			FetchPolicy:   fetch.DefaultPolicy,
+			WorkspaceRoot: absFullsendDir,
+			AuditLogPath:  filepath.Join(absFullsendDir, ".fullsend-cache", "fetch-audit.jsonl"),
+			TraceID:       traceID,
+			SandboxName:   sandboxName,
+			MaxFetches:    h.EffectiveMaxRuntimeFetches(),
+			Uploader:      &fetchsvc.SandboxUploader{},
+			SkillDestDir:  sandbox.SandboxClaudeConfig + "/skills",
+		}, printer.StepWarn)
+		if fetchErr != nil {
+			printer.StepWarn("Runtime fetch service failed to start: " + fetchErr.Error())
+		} else {
+			defer fetchShutdown()
+			fetchEnvVal = env
+		}
+	}
+
 	// 7. Bootstrap sandbox.
 	backend := agentruntime.Default()
 	rt := backend.Runtime
@@ -549,7 +612,7 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 		printer.StepFail("Failed to bootstrap sandbox")
 		return err
 	}
-	if err := bootstrapEnv(sandboxName, remoteRepositoryDir, h, rt.EnvExports()); err != nil {
+	if err := bootstrapEnv(sandboxName, remoteRepositoryDir, h, rt.EnvExports(), fetchEnvVal); err != nil {
 		printer.StepFail("Failed to bootstrap sandbox")
 		return err
 	}
@@ -632,8 +695,7 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 		}
 	}
 
-	// 9a. Generate trace ID for security finding correlation.
-	traceID := security.GenerateTraceID()
+	// 9a. Display trace ID (generated earlier for fetch service audit logging).
 	printer.KeyValue("Trace ID", traceID)
 	if err := injectTraceID(sandboxName, traceID); err != nil {
 		printer.StepWarn("Could not inject trace ID into sandbox: " + err.Error())
@@ -762,7 +824,7 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 		go runHeartbeat(printer, agentStart, timeout, heartbeatDone)
 
 		var metrics agentruntime.RunMetrics
-		exitCode, runErr := rt.Run(agentruntime.RunParams{
+		exitCode, runErr := rt.Run(ctx, agentruntime.RunParams{
 			SandboxName:   sandboxName,
 			AgentBaseName: agentBaseName,
 			Model:         h.Model,
@@ -1031,7 +1093,54 @@ func bootstrapCommon(sandboxName, fullsendBinary string, h *harness.Harness) err
 // host_files entries copy files from the host into the sandbox at specified
 // destination paths. Src values may contain ${VAR} references expanded from
 // the host environment. When expand is true, file content is also expanded.
-func bootstrapEnv(sandboxName, remoteRepositoryDir string, h *harness.Harness, runtimeEnvExports []string) error {
+// fetchServiceEnv holds the address and token of the runtime fetch service
+// started by the runner. When non-empty, bootstrapEnv injects them as
+// environment variables so the in-sandbox fullsend fetch-skill subcommand
+// can reach the runner.
+type fetchServiceEnv struct {
+	addr  string // host:port
+	token string // bearer token
+}
+
+const deprecatedImplicitFetchWarning = "Harness declares allowed_remote_resources without allow_runtime_fetch: true; " +
+	"the runtime fetch service will start for backward compatibility, but this behavior is " +
+	"deprecated — add allow_runtime_fetch: true to the harness to silence this warning"
+
+// shouldStartFetchService decides whether the runtime fetch HTTP service
+// should be started, and returns a deprecation warning if the harness relies
+// on the legacy implicit opt-in via allowed_remote_resources.
+func shouldStartFetchService(h *harness.Harness) (start bool, deprecationWarning string) {
+	if h.HasURLSkills() || h.AllowRuntimeFetch {
+		return true, ""
+	}
+	if len(h.AllowedRemoteResources) > 0 {
+		return true, deprecatedImplicitFetchWarning
+	}
+	return false, ""
+}
+
+// setupFetchService resolves a forge client for runtime fetching and starts
+// the HTTP fetch service. It returns the service address/token as a
+// fetchServiceEnv, a shutdown function, and any error.
+func setupFetchService(ctx context.Context, forgeClient forge.Client, h *harness.Harness, resolveToken func() (string, error), cfg fetchsvc.ServiceConfig, warn func(string)) (fetchServiceEnv, func(), error) {
+	if forgeClient != nil {
+		cfg.ForgeClient = forgeClient
+	} else if h.HasURLSkills() || h.AllowRuntimeFetch || len(h.AllowedRemoteResources) > 0 {
+		if token, err := resolveToken(); err == nil {
+			cfg.ForgeClient = gh.New(token)
+		} else {
+			warn(fmt.Sprintf("Forge token unavailable, runtime fetches for uncached skills will fail: %v", err))
+		}
+	}
+
+	addr, token, shutdown, err := startFetchService(ctx, cfg)
+	if err != nil {
+		return fetchServiceEnv{}, nil, err
+	}
+	return fetchServiceEnv{addr: addr, token: token}, shutdown, nil
+}
+
+func bootstrapEnv(sandboxName, remoteRepositoryDir string, h *harness.Harness, runtimeEnvExports []string, fetchEnv ...fetchServiceEnv) error {
 	remoteEnvFile := sandbox.SandboxWorkspace + "/.env"
 	outputDir := sandbox.SandboxWorkspace + "/output"
 
@@ -1068,6 +1177,14 @@ func bootstrapEnv(sandboxName, remoteRepositoryDir string, h *harness.Harness, r
 	}
 	if outputFile, ok := h.RunnerEnv["FULLSEND_OUTPUT_FILE"]; ok && outputFile != "" {
 		lines = append(lines, fmt.Sprintf("export FULLSEND_OUTPUT_FILE='%s'", strings.ReplaceAll(outputFile, "'", "'\\''")))
+	}
+
+	// Runtime fetch service env vars (Phase 4, ADR-0038).
+	if len(fetchEnv) > 0 && fetchEnv[0].addr != "" {
+		escAddr := strings.ReplaceAll(fetchEnv[0].addr, "'", "'\\''")
+		escToken := strings.ReplaceAll(fetchEnv[0].token, "'", "'\\''")
+		lines = append(lines, fmt.Sprintf("export FULLSEND_FETCH_URL='http://%s/fetch'", escAddr))
+		lines = append(lines, fmt.Sprintf("export FULLSEND_FETCH_TOKEN='%s'", escToken))
 	}
 
 	// Source all env files from .env.d/ (populated by host_files with expand: true).

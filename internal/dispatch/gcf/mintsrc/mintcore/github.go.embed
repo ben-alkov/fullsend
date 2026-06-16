@@ -31,8 +31,8 @@ type installationResponse struct {
 
 // installationTokenResponse is the response from POST /app/installations/{id}/access_tokens.
 type installationTokenResponse struct {
-	Token               string                       `json:"token"`
-	ExpiresAt           string                       `json:"expires_at"`
+	Token               string                        `json:"token"`
+	ExpiresAt           string                        `json:"expires_at"`
 	Permissions         map[string]string             `json:"permissions,omitempty"`
 	Repositories        []installationTokenRepository `json:"repositories,omitempty"`
 	RepositorySelection string                        `json:"repository_selection,omitempty"`

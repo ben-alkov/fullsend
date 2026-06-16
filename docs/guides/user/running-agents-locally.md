@@ -4,7 +4,7 @@ This guide walks through running agents with fullsend on your machine. It
 sets the base to help you run any agent, default or custom. Both macOS and
 Linux are supported with Podman as the container runtime.
 
-> For building fullsend from source or contributing to the CLI, see [Local development](../dev/local-dev.md).
+> For building fullsend from source, see the "Building from source" section in CONTRIBUTING.md.
 
 ## Prerequisites
 
@@ -206,6 +206,12 @@ generated. Generate or update a lock file with:
 
 ```bash
 fullsend lock code --fullsend-dir /path/to/.fullsend
+```
+
+To lock all harnesses in the directory at once:
+
+```bash
+fullsend lock --all --fullsend-dir /path/to/.fullsend
 ```
 
 When `--forge` is specified, only that platform variant is locked. When omitted,
