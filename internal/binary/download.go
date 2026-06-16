@@ -200,6 +200,7 @@ func extractSourceTree(r io.Reader, destDir string) error {
 
 	tr := tar.NewReader(gz)
 	var rootPrefix string
+	var totalExtracted int64
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -251,6 +252,11 @@ func extractSourceTree(r io.Reader, destDir string) error {
 			if n > int64(maxDownloadSize) {
 				f.Close()
 				return fmt.Errorf("extracted file %s exceeds maximum size (%d bytes)", rel, maxDownloadSize)
+			}
+			totalExtracted += n
+			if totalExtracted > int64(maxDownloadSize) {
+				f.Close()
+				return fmt.Errorf("aggregate extracted size exceeds maximum (%d bytes)", maxDownloadSize)
 			}
 			if err := f.Close(); err != nil {
 				return fmt.Errorf("closing %s: %w", rel, err)

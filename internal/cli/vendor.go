@@ -17,10 +17,18 @@ import (
 const vendorArch = binary.DefaultArch
 
 // Vendor install flags replaced the removed --vendor-fullsend-binary flag (binary-only
-// upload). There is no deprecation alias: use --vendor for the full vendored stack, or
-// --vendor with --fullsend-binary for an explicit ELF. The only known caller of the old
-// flag was our e2e suite, updated in this PR to --vendor.
+// upload). A hidden --vendor-fullsend-binary alias sets --vendor and prints a deprecation
+// warning for external automation still using the old flag.
 
+func applyDeprecatedVendorBinaryFlag(cmd *cobra.Command, vendor *bool) {
+	if f := cmd.Flags().Lookup("vendor-fullsend-binary"); f != nil && f.Changed {
+		legacy, err := cmd.Flags().GetBool("vendor-fullsend-binary")
+		if err == nil && legacy {
+			fmt.Fprintln(cmd.ErrOrStderr(), "warning: --vendor-fullsend-binary is deprecated; use --vendor")
+			*vendor = true
+		}
+	}
+}
 func validateVendorFlags(vendor bool, fullsendBinary, fullsendSource string) error {
 	if fullsendBinary != "" && !vendor {
 		return fmt.Errorf("--fullsend-binary requires --vendor")
@@ -35,6 +43,9 @@ func addVendorFlags(cmd *cobra.Command, vendor *bool, fullsendBinary, fullsendSo
 	cmd.Flags().BoolVar(vendor, "vendor", false, "vendor binary, reusable workflows, actions, and agent content for CI")
 	cmd.Flags().StringVar(fullsendBinary, "fullsend-binary", "", "path to a Linux fullsend binary to upload when vendoring (default: auto-resolve)")
 	cmd.Flags().StringVar(fullsendSource, "fullsend-source", "", "fullsend source checkout for content and cross-compile (default: auto-detect or GitHub fetch)")
+	var legacyVendorBinary bool
+	cmd.Flags().BoolVar(&legacyVendorBinary, "vendor-fullsend-binary", false, "deprecated: use --vendor")
+	_ = cmd.Flags().MarkHidden("vendor-fullsend-binary")
 }
 
 type vendorFileBundle struct {

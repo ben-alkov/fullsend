@@ -91,6 +91,7 @@ values (mint URL, WIF provider, project ID) are provided as flags.`,
 			if err := appsetup.ValidateAppSet(cfg.appSet); err != nil {
 				return fmt.Errorf("invalid --app-set: %w", err)
 			}
+			applyDeprecatedVendorBinaryFlag(cmd, &cfg.vendor)
 			if err := validateVendorFlags(cfg.vendor, cfg.fullsendBinary, cfg.fullsendSource); err != nil {
 				return err
 			}

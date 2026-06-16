@@ -122,7 +122,9 @@ func (l *WorkflowsLayer) Install(ctx context.Context) error {
 
 	if committed {
 		if err := l.activateRepoMaintenance(ctx); err != nil {
-			l.ui.StepWarn(fmt.Sprintf("could not activate repo-maintenance workflow: %v", err))
+			l.ui.StepWarn(fmt.Sprintf(
+				"repo-maintenance workflow was not activated automatically (%v); manually run repo-maintenance.yml once from %s/%s",
+				err, l.org, forge.ConfigRepoName))
 		}
 	}
 
@@ -135,6 +137,9 @@ func (l *WorkflowsLayer) activateRepoMaintenance(ctx context.Context) error {
 		return fmt.Errorf("reading %s: %w", configFilePath, err)
 	}
 
+	// GitHub only registers workflow_dispatch handlers after a push touching workflow
+	// files. Re-writing config.yaml unchanged triggers that push scan without changing
+	// org configuration content.
 	l.ui.StepStart("Activating repo-maintenance workflow")
 	if err := l.client.CreateOrUpdateFile(ctx, l.org, forge.ConfigRepoName, configFilePath, "chore: activate fullsend workflows", content); err != nil {
 		l.ui.StepFail("Failed to activate repo-maintenance workflow")

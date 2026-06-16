@@ -3,7 +3,9 @@ package scaffold
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/fullsend-ai/fullsend/internal/forge"
 	"gopkg.in/yaml.v3"
@@ -58,7 +60,45 @@ func ParseVendorManifest(data []byte) (*VendorManifest, error) {
 	if m.BinaryPath == "" {
 		return nil, fmt.Errorf("vendor manifest missing binary_path")
 	}
+	if !isSafeVendoredRepoPath(m.BinaryPath) {
+		return nil, fmt.Errorf("vendor manifest binary_path %q is not allowed", m.BinaryPath)
+	}
+	for _, p := range m.Paths {
+		if p == "" {
+			return nil, fmt.Errorf("vendor manifest contains empty path")
+		}
+		if !isSafeVendoredRepoPath(p) {
+			return nil, fmt.Errorf("vendor manifest path %q is not allowed", p)
+		}
+	}
 	return &m, nil
+}
+
+// isSafeVendoredRepoPath rejects path traversal and paths outside vendored layouts.
+func isSafeVendoredRepoPath(path string) bool {
+	if path == "" {
+		return false
+	}
+	p := filepath.ToSlash(filepath.Clean(path))
+	if p == "." || strings.HasPrefix(p, "/") || strings.Contains(p, "..") {
+		return false
+	}
+	if p == "action.yml" || p == "vendor-manifest.yaml" {
+		return true
+	}
+	if strings.HasPrefix(p, "bin/") {
+		return true
+	}
+	if strings.HasPrefix(p, ".defaults/") || strings.HasPrefix(p, ".fullsend/") {
+		return true
+	}
+	if strings.HasPrefix(p, ".github/workflows/reusable-") && strings.HasSuffix(p, ".yml") {
+		return true
+	}
+	if strings.HasPrefix(p, ".github/actions/") {
+		return true
+	}
+	return false
 }
 
 // CleanupPaths returns all repo paths to delete, including the manifest file.
@@ -75,10 +115,16 @@ func (m *VendorManifest) CleanupPaths(workflowPrefix string) []string {
 	}
 
 	for _, p := range m.Paths {
-		add(p)
+		if isSafeVendoredRepoPath(p) {
+			add(p)
+		}
 	}
-	add(m.BinaryPath)
-	add(VendorManifestPath(workflowPrefix))
+	if isSafeVendoredRepoPath(m.BinaryPath) {
+		add(m.BinaryPath)
+	}
+	if manifestPath := VendorManifestPath(workflowPrefix); isSafeVendoredRepoPath(manifestPath) {
+		add(manifestPath)
+	}
 
 	out := make([]string, 0, len(seen))
 	for p := range seen {

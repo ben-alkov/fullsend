@@ -94,3 +94,27 @@ func TestAcquireAndVendor_CheckoutBuild(t *testing.T) {
 	assert.Contains(t, client.CommittedFiles[0].Message, "\n\n")
 	assert.Contains(t, client.CommittedFiles[0].Message, "Source: --vendor install")
 }
+
+func TestVendorStackArgs(t *testing.T) {
+	vendorFn, collectFn := vendorStackArgs(false, "", "")
+	assert.Nil(t, vendorFn)
+	assert.Nil(t, collectFn)
+
+	vendorFn, collectFn = vendorStackArgs(true, "", "")
+	assert.NotNil(t, vendorFn)
+	assert.NotNil(t, collectFn)
+}
+
+func TestVendorPathPrefix(t *testing.T) {
+	assert.Equal(t, "", vendorPathPrefix("org", forge.ConfigRepoName))
+	assert.Equal(t, ".fullsend/", vendorPathPrefix("org", "my-repo"))
+}
+
+func TestApplyDeprecatedVendorBinaryFlag(t *testing.T) {
+	cmd := newInstallCmd()
+	require.NoError(t, cmd.ParseFlags([]string{"--vendor-fullsend-binary"}))
+
+	var vendor bool
+	applyDeprecatedVendorBinaryFlag(cmd, &vendor)
+	assert.True(t, vendor)
+}

@@ -93,6 +93,9 @@ func walkVendoredUpstreamFromRoot(root string, fn func(path string, content []by
 		if d.IsDir() {
 			return nil
 		}
+		if d.Type()&fs.ModeSymlink != 0 {
+			return nil
+		}
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
@@ -122,6 +125,9 @@ func walkLayeredFromRoot(layeredRoot string, fn func(path string, content []byte
 			return err
 		}
 		if d.IsDir() {
+			return nil
+		}
+		if d.Type()&fs.ModeSymlink != 0 {
 			return nil
 		}
 		rel, err := filepath.Rel(layeredRoot, path)
@@ -155,7 +161,7 @@ func isVendoredDefaultsInfra(path string) bool {
 	if strings.HasPrefix(path, ".github/actions/") {
 		return true
 	}
-	if strings.HasPrefix(path, ".github/scripts/") && path != ".github/scripts/prepare-agent-workspace.sh" {
+	if strings.HasPrefix(path, ".github/scripts/") {
 		return true
 	}
 	return false

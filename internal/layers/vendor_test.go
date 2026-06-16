@@ -67,3 +67,24 @@ func TestVendorCommitMessage_ReleaseTitle(t *testing.T) {
 	msg := VendorCommitMessage(binary.SourceReleaseDownload, "v0.4.0", "bin/fullsend", 100)
 	assert.True(t, strings.HasPrefix(msg, "chore: vendor fullsend v0.4.0 binary from release"))
 }
+
+func TestVendorContentCommitMessage(t *testing.T) {
+	msg := VendorContentCommitMessage("0.4.0", ".fullsend/", 42)
+	require.Contains(t, msg, "\n\n")
+	assert.Contains(t, msg, "CLI version: 0.4.0")
+	assert.Contains(t, msg, "Prefix: .fullsend/")
+	assert.Contains(t, msg, "Files: 42")
+}
+
+func TestRemoveStaleContentCommitMessage(t *testing.T) {
+	msg := RemoveStaleContentCommitMessage(".defaults/action.yml")
+	require.Contains(t, msg, "\n\n")
+	assert.Contains(t, msg, "Path: .defaults/action.yml")
+}
+
+func TestRemoveStaleVendoredAssetsCommitMessage(t *testing.T) {
+	msg := RemoveStaleVendoredAssetsCommitMessage([]string{"bin/fullsend", ".defaults/action.yml"})
+	require.Contains(t, msg, "\n\n")
+	assert.Contains(t, msg, "Paths: 2")
+	assert.Contains(t, msg, "- bin/fullsend")
+}

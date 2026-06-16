@@ -640,5 +640,45 @@ func TestCopyDirContentsPreservesMode(t *testing.T) {
 	assert.Equal(t, os.FileMode(0o755), info.Mode().Perm())
 }
 
+func TestPathWithinDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "extract")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+
+	assert.True(t, pathWithinDir(dir, dir))
+	assert.True(t, pathWithinDir(dir, filepath.Join(dir, "nested", "file.txt")))
+	assert.False(t, pathWithinDir(dir, filepath.Join(filepath.Dir(dir), "escape.txt")))
+	assert.False(t, pathWithinDir(dir, "/etc/passwd"))
+}
+
+func TestExtractSourceTreeAggregateSizeLimit(t *testing.T) {
+	origMax := maxDownloadSize
+	maxDownloadSize = 512
+	t.Cleanup(func() { maxDownloadSize = origMax })
+
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+
+	chunk := bytes.Repeat([]byte("x"), 300)
+	for i := range 3 {
+		name := fmt.Sprintf("fullsend-repo/part-%d.bin", i)
+		require.NoError(t, tw.WriteHeader(&tar.Header{
+			Name:     name,
+			Typeflag: tar.TypeReg,
+			Size:     int64(len(chunk)),
+			Mode:     0o644,
+		}))
+		_, err := tw.Write(chunk)
+		require.NoError(t, err)
+	}
+	require.NoError(t, tw.Close())
+	require.NoError(t, gz.Close())
+
+	dest := t.TempDir()
+	err := extractSourceTree(bytes.NewReader(buf.Bytes()), dest)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "aggregate extracted size exceeds maximum")
+}
+
 // Ensure io is used in download tests.
 var _ = io.Discard

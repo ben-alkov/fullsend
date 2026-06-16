@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/fullsend-ai/fullsend/internal/binary"
 	"github.com/fullsend-ai/fullsend/internal/forge"
 	"github.com/fullsend-ai/fullsend/internal/scaffold"
 	"github.com/fullsend-ai/fullsend/internal/ui"
@@ -348,4 +349,59 @@ func TestVendorBinaryLayer_PerRepo_EnabledCallsVendorFn(t *testing.T) {
 	err := layer.Install(context.Background())
 	require.NoError(t, err)
 	assert.True(t, called, "vendor function should have been called with per-repo args")
+}
+
+func TestVendorBinaryLayer_SetAnalyzeOptions_SourceAlignmentOk(t *testing.T) {
+	modRoot, err := binary.ModuleRoot()
+	if err != nil {
+		t.Skip("not in fullsend checkout")
+	}
+
+	expectedFiles, err := scaffold.CollectVendoredAssets(modRoot, "")
+	require.NoError(t, err)
+
+	contents := map[string][]byte{
+		"test-org/.fullsend/bin/fullsend": []byte("binary"),
+	}
+	for _, f := range expectedFiles {
+		contents["test-org/.fullsend/"+f.Path] = f.Content
+	}
+
+	layer, _ := newVendorBinaryLayer(t, &forge.FakeClient{FileContents: contents}, true, nil)
+	layer.SetAnalyzeOptions("", "dev")
+
+	report, err := layer.Analyze(context.Background())
+	require.NoError(t, err)
+	assert.Contains(t, strings.Join(report.Details, " "), "source alignment: ok")
+}
+
+func TestVendorBinaryLayer_SetAnalyzeOptions_SourceAlignmentMissing(t *testing.T) {
+	modRoot, err := binary.ModuleRoot()
+	if err != nil {
+		t.Skip("not in fullsend checkout")
+	}
+
+	expectedFiles, err := scaffold.CollectVendoredAssets(modRoot, "")
+	require.NoError(t, err)
+	require.NotEmpty(t, expectedFiles)
+
+	contents := map[string][]byte{
+		"test-org/.fullsend/bin/fullsend": []byte("binary"),
+	}
+	// Omit all vendored content paths.
+
+	layer, _ := newVendorBinaryLayer(t, &forge.FakeClient{FileContents: contents}, true, nil)
+	layer.SetAnalyzeOptions("", "dev")
+
+	report, err := layer.Analyze(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, StatusDegraded, report.Status)
+	assert.Contains(t, strings.Join(report.Details, " "), "source alignment:")
+}
+
+func TestVendorBinaryLayer_SetAnalyzeOptions_SkippedWithoutSource(t *testing.T) {
+	layer, _ := newVendorBinaryLayer(t, &forge.FakeClient{}, true, nil)
+	report, err := layer.Analyze(context.Background())
+	require.NoError(t, err)
+	assert.Contains(t, strings.Join(report.Details, " "), "source alignment: skipped")
 }

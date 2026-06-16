@@ -274,6 +274,7 @@ Inference authentication:
 			if err := appsetup.ValidateAppSet(appSet); err != nil {
 				return fmt.Errorf("invalid --app-set: %w", err)
 			}
+			applyDeprecatedVendorBinaryFlag(cmd, &vendor)
 			if err := validateVendorFlags(vendor, fullsendBinary, fullsendSource); err != nil {
 				return err
 			}

@@ -150,7 +150,7 @@ func (l *VendorBinaryLayer) Analyze(ctx context.Context) (*LayerReport, error) {
 		report.Details = append(report.Details, fmt.Sprintf("vendor manifest present at %s", scaffold.VendorManifestPath(l.workflowPrefix())))
 		missing, err := scaffold.ComparePathPresence(ctx, l.client, l.org, l.repo, manifest.Paths)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("checking manifest paths: %w", err)
 		}
 		if len(missing) > 0 {
 			manifestMisaligned = true
@@ -237,7 +237,7 @@ func (l *VendorBinaryLayer) reportSourceAlignment(ctx context.Context, report *L
 
 	missing, err := scaffold.ComparePathPresence(ctx, l.client, l.org, l.repo, expected)
 	if err != nil {
-		return err
+		return fmt.Errorf("checking source alignment paths: %w", err)
 	}
 	if len(missing) == 0 {
 		report.Details = append(report.Details, "source alignment: ok")
