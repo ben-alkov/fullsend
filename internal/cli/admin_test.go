@@ -1651,6 +1651,19 @@ func TestInstallCmd_PerRepoAcceptsValidWIFProvider(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestInstallCmd_PerRepoDryRun_Vendor(t *testing.T) {
+	t.Setenv("GH_TOKEN", "test-token")
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"admin", "install", "acme/widget",
+		"--mint-url", "https://mint-test-abc123.run.app",
+		"--inference-project", "my-project",
+		"--inference-wif-provider", "projects/123456789/locations/global/workloadIdentityPools/fullsend-pool/providers/github-oidc",
+		"--dry-run",
+		"--vendor"})
+	err := cmd.Execute()
+	require.NoError(t, err)
+}
+
 func TestFilterSlugsByAppSet(t *testing.T) {
 	tests := []struct {
 		name   string
