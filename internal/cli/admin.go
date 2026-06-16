@@ -760,7 +760,7 @@ func runPerRepoInstall(ctx context.Context, c perRepoInstallConfig) error {
 			agentAppIDs = make(map[string]string, len(roles))
 			appsFound = true
 			for _, role := range roles {
-				appID, ok := roleAppIDs[owner+"/"+role]
+				appID, ok := roleAppIDs[role]
 				if !ok {
 					appsFound = false
 					break
@@ -805,7 +805,7 @@ func runPerRepoInstall(ctx context.Context, c perRepoInstallConfig) error {
 			printer.StepInfo(fmt.Sprintf("  Mint project: %s, region: %s", mintProject, mintRegion))
 			if mintFound {
 				printer.StepInfo(fmt.Sprintf("  Would register %s in ALLOWED_ORGS", owner))
-				printer.StepInfo(fmt.Sprintf("  Would set ROLE_APP_IDS entries for %s/{%s}", owner, strings.Join(roles, ",")))
+				printer.StepInfo(fmt.Sprintf("  Would use shared ROLE_APP_IDS for roles: %s", strings.Join(roles, ",")))
 			}
 		}
 		printer.Blank()
@@ -1222,9 +1222,10 @@ func runDryRun(ctx context.Context, client forge.Client, printer *ui.Printer, or
 }
 
 // resolveSharedRoleAppIDs discovers app IDs for the given org by matching
-// installed apps against existing ROLE_APP_IDS entries from other orgs.
+// installed apps against shared role-only ROLE_APP_IDS entries.
 func resolveSharedRoleAppIDs(ctx context.Context, client forge.Client, existingIDs map[string]string, owner string, roles []string) (map[string]string, error) {
-	if len(existingIDs) == 0 {
+	roleOnly := mintcore.RoleOnlyAppIDs(existingIDs)
+	if len(roleOnly) == 0 {
 		return nil, fmt.Errorf("mint has no existing ROLE_APP_IDS — cannot determine app IDs for %s", owner)
 	}
 
@@ -1240,48 +1241,35 @@ func resolveSharedRoleAppIDs(ctx context.Context, client forge.Client, existingI
 
 	result := make(map[string]string, len(roles))
 	for _, role := range roles {
-		// If the owner already has an entry, use it directly.
-		if appID, ok := existingIDs[owner+"/"+role]; ok && installedAppIDs[appID] {
-			result[owner+"/"+role] = appID
-			continue
+		appID, ok := roleOnly[role]
+		if !ok {
+			return nil, fmt.Errorf("no app ID configured for role %q on mint", role)
 		}
-		// Otherwise, find a shared app from another org.
-		// Sort keys for deterministic selection when multiple orgs share the role.
-		sortedExisting := make([]string, 0, len(existingIDs))
-		for k := range existingIDs {
-			sortedExisting = append(sortedExisting, k)
-		}
-		sort.Strings(sortedExisting)
-		for _, key := range sortedExisting {
-			appID := existingIDs[key]
-			parts := strings.SplitN(key, "/", 2)
-			if len(parts) != 2 || parts[1] != role || parts[0] == owner {
-				continue
-			}
-			if installedAppIDs[appID] {
-				result[owner+"/"+role] = appID
-				break
-			}
-		}
-		if _, ok := result[owner+"/"+role]; !ok {
+		if !installedAppIDs[appID] {
 			return nil, fmt.Errorf("no shared app for role %q is installed in %s — install the app first", role, owner)
 		}
+		result[role] = appID
 	}
 
 	return result, nil
 }
 
+// detectSharedAppsGCFClientFactory creates GCF clients for detectSharedApps. Overridden in tests.
+var detectSharedAppsGCFClientFactory = func(projectID string) gcf.GCFClient {
+	return gcf.NewLiveGCFClient(projectID)
+}
+
 // detectSharedApps finds public GitHub Apps shared across orgs so app setup
 // can reuse existing app registrations without generating new keys.
 // Returns a role → app-slug mapping for detected shared apps and the full
-// ROLE_APP_IDS map (org/role → app_id) so callers can pass it to app setup
+// ROLE_APP_IDS map (role → app_id) so callers can pass it to app setup
 // without a redundant GCP API call.
 func detectSharedApps(ctx context.Context, client forge.Client, printer *ui.Printer, org string, roles []string, mintProject, mintRegion string) (map[string]string, map[string]string, error) {
 	prov := gcf.NewProvisioner(gcf.Config{
 		ProjectID:  mintProject,
 		Region:     mintRegion,
 		GitHubOrgs: []string{org},
-	}, gcf.NewLiveGCFClient(mintProject))
+	}, detectSharedAppsGCFClientFactory(mintProject))
 
 	existingIDs, err := prov.GetExistingRoleAppIDs(ctx)
 	if err != nil {
@@ -1291,10 +1279,11 @@ func detectSharedApps(ctx context.Context, client forge.Client, printer *ui.Prin
 	if len(existingIDs) == 0 {
 		return nil, nil, nil
 	}
+	roleOnly := mintcore.RoleOnlyAppIDs(existingIDs)
 
 	installations, err := client.ListOrgInstallations(ctx, org)
 	if err != nil {
-		return nil, existingIDs, nil
+		return nil, roleOnly, nil
 	}
 
 	roleSet := make(map[string]bool, len(roles))
@@ -1305,24 +1294,15 @@ func detectSharedApps(ctx context.Context, client forge.Client, printer *ui.Prin
 	sharedSlugs := make(map[string]string)
 	for _, inst := range installations {
 		appIDStr := strconv.Itoa(inst.AppID)
-		for key, existingAppID := range existingIDs {
-			if existingAppID != appIDStr {
+		for role, existingAppID := range roleOnly {
+			if existingAppID != appIDStr || !roleSet[role] {
 				continue
 			}
-			parts := strings.SplitN(key, "/", 2)
-			if len(parts) != 2 {
-				continue
-			}
-			srcOrg, role := parts[0], parts[1]
-			if srcOrg == org || !roleSet[role] {
-				continue
-			}
-
 			sharedSlugs[role] = inst.AppSlug
 			break
 		}
 	}
-	return sharedSlugs, existingIDs, nil
+	return sharedSlugs, roleOnly, nil
 }
 
 // runAppSetup creates or reuses GitHub Apps for each role. When mintProject is

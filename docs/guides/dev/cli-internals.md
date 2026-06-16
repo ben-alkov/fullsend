@@ -133,7 +133,8 @@ Both per-org and per-repo modes share the same core pipeline. The code follows t
 │  │  a. Discover mint   --mint-url / --mint-project / default  │ │
 │  │     └─ DiscoverMint() → check if GCF exists, get URL      │ │
 │  │  b. Resolve existing app IDs from mint env vars            │ │
-│  │     └─ ROLE_APP_IDS → skip app creation if all present     │ │
+│  │     └─ ROLE_APP_IDS (role → app ID, shared) → skip app     │ │
+│  │        creation when all roles are present                 │ │
 │  └──────────┬─────────────────────────────────────────────────┘ │
 │             ▼                                                   │
 │  ┌────────────────────────────────────────────────────────────┐ │

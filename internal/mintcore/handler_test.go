@@ -187,7 +187,7 @@ func TestHandler_HealthEndpoint(t *testing.T) {
 }
 
 func TestHandler_StatusEndpoint(t *testing.T) {
-	t.Setenv("ROLE_APP_IDS", `{"test-org/triage":"100","test-org/coder":"200"}`)
+	t.Setenv("ROLE_APP_IDS", `{"triage":"100","coder":"200"}`)
 	t.Setenv("ALLOWED_ORGS", "test-org")
 
 	env := newTestOIDCEnv(t, &fakePEMAccessor{})
@@ -260,8 +260,54 @@ func TestHandler_StatusEndpoint_NoAuth(t *testing.T) {
 	}
 }
 
-func TestHandler_StatusEndpoint_MixedCaseRoleAppIDs(t *testing.T) {
-	t.Setenv("ROLE_APP_IDS", `{"Test-Org/coder":"200","Test-Org/triage":"100"}`)
+func TestRoleOnlyAppIDs_IgnoresLegacyOrgScopedKeys(t *testing.T) {
+	ids := map[string]string{
+		"coder":            "200",
+		"test-org/coder":   "999",
+		"other-org/triage": "100",
+		"triage":           "100",
+	}
+	got := RoleOnlyAppIDs(ids)
+	want := map[string]string{"coder": "200", "triage": "100"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d entries, got %d: %v", len(want), len(got), got)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Fatalf("RoleOnlyAppIDs[%q] = %q, want %q", k, got[k], v)
+		}
+	}
+}
+
+func TestRoleOnlyAppIDs_ReturnsNilForEmpty(t *testing.T) {
+	if RoleOnlyAppIDs(nil) != nil {
+		t.Fatal("expected nil for nil input")
+	}
+	if RoleOnlyAppIDs(map[string]string{}) != nil {
+		t.Fatal("expected nil for empty map")
+	}
+}
+
+func TestNewHandler_WarnsWhenOnlyLegacyRoleAppIDs(t *testing.T) {
+	t.Setenv("ROLE_APP_IDS", `{"test-org/coder":"200"}`)
+	t.Setenv("ALLOWED_ROLES", "")
+
+	var buf bytes.Buffer
+	orig := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(orig) })
+
+	_, err := NewHandler(&fakePEMAccessor{}, &fakeOIDCVerifier{})
+	if err != nil {
+		t.Fatalf("NewHandler: %v", err)
+	}
+	if !strings.Contains(buf.String(), "no role-only keys") {
+		t.Fatalf("expected legacy-only ROLE_APP_IDS warning, got log: %q", buf.String())
+	}
+}
+
+func TestHandler_StatusEndpoint_MixedCaseOrgClaim(t *testing.T) {
+	t.Setenv("ROLE_APP_IDS", `{"coder":"200","triage":"100"}`)
 	t.Setenv("ALLOWED_ORGS", "Test-Org")
 
 	env := newTestOIDCEnv(t, &fakePEMAccessor{})
@@ -400,7 +446,7 @@ func TestHandler_InvalidRoleFormat(t *testing.T) {
 }
 
 func TestHandler_RoleAllowed(t *testing.T) {
-	t.Setenv("ROLE_APP_IDS", `{"test-org/triage":"100","test-org/coder":"200"}`)
+	t.Setenv("ROLE_APP_IDS", `{"triage":"100","coder":"200"}`)
 
 	pemData, err := generateTestRSAKey()
 	if err != nil {
@@ -430,7 +476,7 @@ func TestHandler_RoleAllowed(t *testing.T) {
 
 func TestHandler_RoleNotAllowed(t *testing.T) {
 	t.Setenv("ALLOWED_ROLES", "triage,coder")
-	t.Setenv("ROLE_APP_IDS", `{"test-org/triage":"100","test-org/coder":"200"}`)
+	t.Setenv("ROLE_APP_IDS", `{"triage":"100","coder":"200"}`)
 	h := mustNewHandler(t, &fakePEMAccessor{}, &fakeOIDCVerifier{})
 
 	body := `{"role":"deploy"}`
@@ -446,7 +492,7 @@ func TestHandler_RoleNotAllowed(t *testing.T) {
 
 func TestHandler_InvalidRepoName(t *testing.T) {
 	t.Setenv("ALLOWED_ROLES", "coder")
-	t.Setenv("ROLE_APP_IDS", `{"test-org/coder":"200"}`)
+	t.Setenv("ROLE_APP_IDS", `{"coder":"200"}`)
 	h := mustNewHandler(t, &fakePEMAccessor{}, &fakeOIDCVerifier{})
 
 	tests := []struct {
@@ -475,7 +521,7 @@ func TestHandler_InvalidRepoName(t *testing.T) {
 
 func TestHandler_EmptyRepos(t *testing.T) {
 	t.Setenv("ALLOWED_ROLES", "coder")
-	t.Setenv("ROLE_APP_IDS", `{"test-org/coder":"200"}`)
+	t.Setenv("ROLE_APP_IDS", `{"coder":"200"}`)
 	h := mustNewHandler(t, &fakePEMAccessor{}, &fakeOIDCVerifier{})
 
 	body := `{"role":"coder"}`
@@ -496,7 +542,7 @@ func TestHandler_EmptyRepos(t *testing.T) {
 
 func TestHandler_TooManyRepos(t *testing.T) {
 	t.Setenv("ALLOWED_ROLES", "coder")
-	t.Setenv("ROLE_APP_IDS", `{"test-org/coder":"200"}`)
+	t.Setenv("ROLE_APP_IDS", `{"coder":"200"}`)
 	h := mustNewHandler(t, &fakePEMAccessor{}, &fakeOIDCVerifier{})
 
 	repos := make([]string, maxRepos+1)
@@ -610,7 +656,7 @@ func TestHandler_OIDCVerification_BadAudience(t *testing.T) {
 }
 
 func TestHandler_SecretAccessError(t *testing.T) {
-	t.Setenv("ROLE_APP_IDS", `{"test-org/coder":"200"}`)
+	t.Setenv("ROLE_APP_IDS", `{"coder":"200"}`)
 	env := newTestOIDCEnv(t, &fakePEMAccessor{err: fmt.Errorf("access denied")})
 	token := env.signToken(t, nil)
 
@@ -632,7 +678,7 @@ func TestHandler_SecretAccessError(t *testing.T) {
 }
 
 func TestHandler_FullFlow(t *testing.T) {
-	t.Setenv("ROLE_APP_IDS", `{"test-org/coder":"200"}`)
+	t.Setenv("ROLE_APP_IDS", `{"coder":"200"}`)
 
 	pemData, err := generateTestRSAKey()
 	if err != nil {
@@ -708,7 +754,7 @@ func TestHandler_FullFlow(t *testing.T) {
 }
 
 func TestHandler_FullFlowGrantedScopeAll(t *testing.T) {
-	t.Setenv("ROLE_APP_IDS", `{"test-org/coder":"200"}`)
+	t.Setenv("ROLE_APP_IDS", `{"coder":"200"}`)
 
 	pemData, err := generateTestRSAKey()
 	if err != nil {
@@ -716,7 +762,7 @@ func TestHandler_FullFlowGrantedScopeAll(t *testing.T) {
 	}
 
 	env := newTestOIDCEnv(t, &fakePEMAccessor{
-		pems: map[string][]byte{"test-org/coder": pemData},
+		pems: map[string][]byte{"coder": pemData},
 	})
 	token := env.signToken(t, nil)
 
@@ -773,7 +819,7 @@ func TestHandler_FullFlowGrantedScopeAll(t *testing.T) {
 }
 
 func TestHandler_FullFlowWithRepos(t *testing.T) {
-	t.Setenv("ROLE_APP_IDS", `{"test-org/coder":"200"}`)
+	t.Setenv("ROLE_APP_IDS", `{"coder":"200"}`)
 
 	pemData, err := generateTestRSAKey()
 	if err != nil {
@@ -837,7 +883,7 @@ func TestHandler_FullFlowWithRepos(t *testing.T) {
 }
 
 func TestHandler_InstallationNotFound(t *testing.T) {
-	t.Setenv("ROLE_APP_IDS", `{"test-org/coder":"200"}`)
+	t.Setenv("ROLE_APP_IDS", `{"coder":"200"}`)
 
 	pemData, err := generateTestRSAKey()
 	if err != nil {
@@ -887,7 +933,7 @@ func TestHandler_LargeBody(t *testing.T) {
 }
 
 func TestCheckAllowedRole(t *testing.T) {
-	t.Setenv("ROLE_APP_IDS", `{"test-org/triage":"100","test-org/coder":"200","test-org/review":"300"}`)
+	t.Setenv("ROLE_APP_IDS", `{"triage":"100","coder":"200","review":"300"}`)
 	h := mustNewHandler(t, &fakePEMAccessor{}, &fakeOIDCVerifier{})
 
 	if !h.checkAllowedRole("coder") {
@@ -908,10 +954,10 @@ func TestCheckAllowedRole_Empty(t *testing.T) {
 }
 
 func TestLookupRoleAppID(t *testing.T) {
-	t.Setenv("ROLE_APP_IDS", `{"test-org/triage":"100","test-org/coder":"200"}`)
+	t.Setenv("ROLE_APP_IDS", `{"triage":"100","coder":"200"}`)
 	h := mustNewHandler(t, &fakePEMAccessor{}, &fakeOIDCVerifier{})
 
-	id, err := h.lookupRoleAppID("test-org", "coder")
+	id, err := h.lookupRoleAppID("coder")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -919,14 +965,32 @@ func TestLookupRoleAppID(t *testing.T) {
 		t.Fatalf("expected 200, got %s", id)
 	}
 
-	_, err = h.lookupRoleAppID("test-org", "deploy")
+	_, err = h.lookupRoleAppID("deploy")
 	if err == nil {
 		t.Fatal("expected error for unknown role")
 	}
+}
 
-	_, err = h.lookupRoleAppID("other-org", "coder")
+func TestLookupRoleAppID_FixAliasUsesCoderAppID(t *testing.T) {
+	t.Setenv("ROLE_APP_IDS", `{"coder":"200","fix":"400"}`)
+	h := mustNewHandler(t, &fakePEMAccessor{}, &fakeOIDCVerifier{})
+
+	id, err := h.lookupRoleAppID("fix")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id != "200" {
+		t.Fatalf("expected fix to resolve via coder alias to 200, got %s", id)
+	}
+}
+
+func TestLookupRoleAppID_LegacyOrgScopedKeysIgnored(t *testing.T) {
+	t.Setenv("ROLE_APP_IDS", `{"test-org/coder":"200"}`)
+	h := mustNewHandler(t, &fakePEMAccessor{}, &fakeOIDCVerifier{})
+
+	_, err := h.lookupRoleAppID("coder")
 	if err == nil {
-		t.Fatal("expected error for wrong org")
+		t.Fatal("expected error when only legacy org-scoped keys are configured")
 	}
 }
 
@@ -935,7 +999,7 @@ func TestLookupRoleAppID_NotSet(t *testing.T) {
 	t.Setenv("ROLE_APP_IDS", "")
 	h := mustNewHandler(t, &fakePEMAccessor{}, &fakeOIDCVerifier{})
 
-	_, err := h.lookupRoleAppID("test-org", "coder")
+	_, err := h.lookupRoleAppID("coder")
 	if err == nil {
 		t.Fatal("expected error when ROLE_APP_IDS not set")
 	}
@@ -962,7 +1026,7 @@ func TestHandler_MultiOrg_FullFlow(t *testing.T) {
 	t.Setenv("ALLOWED_ORGS", "test-org,other-org")
 	t.Setenv("GCP_PROJECT_NUMBER", "123456")
 	t.Setenv("OIDC_AUDIENCE", "fullsend-mint")
-	t.Setenv("ROLE_APP_IDS", `{"test-org/triage":"100","test-org/coder":"200","test-org/review":"300","test-org/fix":"400","test-org/fullsend":"500","other-org/triage":"100","other-org/coder":"200","other-org/review":"300","other-org/fix":"400","other-org/fullsend":"500"}`)
+	t.Setenv("ROLE_APP_IDS", `{"triage":"100","coder":"200","review":"300","fix":"400","fullsend":"500"}`)
 
 	pemData, err := generateTestRSAKey()
 	if err != nil {
@@ -1027,7 +1091,7 @@ func TestHandler_CrossOrgInstallationMismatch(t *testing.T) {
 	t.Setenv("ALLOWED_ORGS", "org-a,org-b")
 	t.Setenv("GCP_PROJECT_NUMBER", "123456")
 	t.Setenv("OIDC_AUDIENCE", "fullsend-mint")
-	t.Setenv("ROLE_APP_IDS", `{"org-a/retro":"999","org-b/retro":"999"}`)
+	t.Setenv("ROLE_APP_IDS", `{"retro":"999"}`)
 	t.Setenv("ALLOWED_WORKFLOW_FILES", "*")
 
 	pemData, err := generateTestRSAKey()
@@ -1085,7 +1149,7 @@ func TestHandler_CrossOrgInstallationMismatch(t *testing.T) {
 func TestHandler_STSVerifier_Integration(t *testing.T) {
 	t.Setenv("ALLOWED_ORGS", "test-org")
 	t.Setenv("OIDC_AUDIENCE", "fullsend-mint")
-	t.Setenv("ROLE_APP_IDS", `{"test-org/coder":"200"}`)
+	t.Setenv("ROLE_APP_IDS", `{"coder":"200"}`)
 
 	pemData, err := generateTestRSAKey()
 	if err != nil {
@@ -1183,7 +1247,7 @@ func TestHandler_STSVerifier_Integration(t *testing.T) {
 func TestHandler_STSVerifier_RestrictedWorkflows(t *testing.T) {
 	t.Setenv("ALLOWED_ORGS", "test-org")
 	t.Setenv("OIDC_AUDIENCE", "fullsend-mint")
-	t.Setenv("ROLE_APP_IDS", `{"test-org/coder":"200"}`)
+	t.Setenv("ROLE_APP_IDS", `{"coder":"200"}`)
 
 	pemData, err := generateTestRSAKey()
 	if err != nil {
@@ -1285,7 +1349,7 @@ func TestHandler_CrossOrgInstallation_SameOrgPasses(t *testing.T) {
 	t.Setenv("ALLOWED_ORGS", "org-a,org-b")
 	t.Setenv("GCP_PROJECT_NUMBER", "123456")
 	t.Setenv("OIDC_AUDIENCE", "fullsend-mint")
-	t.Setenv("ROLE_APP_IDS", `{"org-a/retro":"999","org-b/retro":"999"}`)
+	t.Setenv("ROLE_APP_IDS", `{"retro":"999"}`)
 	t.Setenv("ALLOWED_WORKFLOW_FILES", "*")
 
 	pemData, err := generateTestRSAKey()
@@ -1342,7 +1406,7 @@ func TestHandler_CrossOrgInstallation_SameOrgPasses(t *testing.T) {
 }
 
 func TestHandler_ErrorMessageLeak(t *testing.T) {
-	t.Setenv("ROLE_APP_IDS", `{"test-org/coder":"200"}`)
+	t.Setenv("ROLE_APP_IDS", `{"coder":"200"}`)
 	env := newTestOIDCEnv(t, &fakePEMAccessor{err: fmt.Errorf("secret projects/123/secrets/fullsend-coder-app-pem")})
 	token := env.signToken(t, nil)
 
@@ -1364,7 +1428,7 @@ func TestHandler_ErrorMessageLeak(t *testing.T) {
 }
 
 func TestHandler_RestrictedWorkflowFiles(t *testing.T) {
-	t.Setenv("ROLE_APP_IDS", `{"test-org/coder":"200"}`)
+	t.Setenv("ROLE_APP_IDS", `{"coder":"200"}`)
 	t.Setenv("ALLOWED_ORGS", "test-org")
 	t.Setenv("ALLOWED_WORKFLOW_FILES", "dispatch.yml")
 
@@ -1455,7 +1519,7 @@ func TestHandler_RestrictedWorkflowFiles(t *testing.T) {
 }
 
 func TestHandler_PerRepoWIF_RestrictedWorkflows(t *testing.T) {
-	t.Setenv("ROLE_APP_IDS", `{"test-org/coder":"200"}`)
+	t.Setenv("ROLE_APP_IDS", `{"coder":"200"}`)
 	t.Setenv("ALLOWED_ORGS", "test-org")
 	t.Setenv("PER_REPO_WIF_REPOS", "test-org/custom-repo")
 
@@ -1534,7 +1598,7 @@ func TestHandler_PerRepoWIF_RestrictedWorkflows(t *testing.T) {
 }
 
 func TestHandler_UpstreamWorkflowRef(t *testing.T) {
-	t.Setenv("ROLE_APP_IDS", `{"test-org/coder":"200"}`)
+	t.Setenv("ROLE_APP_IDS", `{"coder":"200"}`)
 	t.Setenv("ALLOWED_ORGS", "test-org")
 
 	pemData, err := generateTestRSAKey()
@@ -1591,7 +1655,7 @@ func TestHandler_UpstreamWorkflowRef(t *testing.T) {
 }
 
 func TestHandler_PerRepoCrossRepoRef(t *testing.T) {
-	t.Setenv("ROLE_APP_IDS", `{"test-org/coder":"200"}`)
+	t.Setenv("ROLE_APP_IDS", `{"coder":"200"}`)
 	t.Setenv("ALLOWED_ORGS", "test-org")
 
 	env := newTestOIDCEnv(t, &fakePEMAccessor{})
@@ -1621,7 +1685,7 @@ func TestHandler_PerRepoCrossRepoRef(t *testing.T) {
 }
 
 func TestHandler_NonWorkflowPath(t *testing.T) {
-	t.Setenv("ROLE_APP_IDS", `{"test-org/coder":"200"}`)
+	t.Setenv("ROLE_APP_IDS", `{"coder":"200"}`)
 	t.Setenv("ALLOWED_ORGS", "test-org")
 
 	env := newTestOIDCEnv(t, &fakePEMAccessor{})
@@ -1650,7 +1714,7 @@ func TestHandler_NonWorkflowPath(t *testing.T) {
 }
 
 func TestHandler_PerRepoUnregistered(t *testing.T) {
-	t.Setenv("ROLE_APP_IDS", `{"test-org/coder":"200"}`)
+	t.Setenv("ROLE_APP_IDS", `{"coder":"200"}`)
 	t.Setenv("ALLOWED_ORGS", "test-org")
 
 	env := newTestOIDCEnv(t, &fakePEMAccessor{})
@@ -1680,7 +1744,7 @@ func TestHandler_PerRepoUnregistered(t *testing.T) {
 }
 
 func TestHandler_PerRepoMixedCase(t *testing.T) {
-	t.Setenv("ROLE_APP_IDS", `{"test-org/coder":"200"}`)
+	t.Setenv("ROLE_APP_IDS", `{"coder":"200"}`)
 	t.Setenv("ALLOWED_ORGS", "test-org")
 
 	pemData, err := generateTestRSAKey()
@@ -1741,7 +1805,7 @@ func TestHandler_STSVerifier_PerRepoWIF_RestrictedWorkflows(t *testing.T) {
 	t.Setenv("ALLOWED_ORGS", "test-org")
 	t.Setenv("ALLOWED_ROLES", "coder")
 	t.Setenv("OIDC_AUDIENCE", "fullsend-mint")
-	t.Setenv("ROLE_APP_IDS", `{"test-org/coder":"200"}`)
+	t.Setenv("ROLE_APP_IDS", `{"coder":"200"}`)
 
 	pemData, err := generateTestRSAKey()
 	if err != nil {
@@ -1848,7 +1912,7 @@ func TestHandler_STSVerifier_PerRepoWIF_RestrictedWorkflows(t *testing.T) {
 }
 
 func TestHandler_LogsRequestedPermissionNotGranted(t *testing.T) {
-	t.Setenv("ROLE_APP_IDS", `{"test-org/coder":"200"}`)
+	t.Setenv("ROLE_APP_IDS", `{"coder":"200"}`)
 
 	pemData, err := generateTestRSAKey()
 	if err != nil {
@@ -1856,7 +1920,7 @@ func TestHandler_LogsRequestedPermissionNotGranted(t *testing.T) {
 	}
 
 	env := newTestOIDCEnv(t, &fakePEMAccessor{
-		pems: map[string][]byte{"test-org/coder": pemData},
+		pems: map[string][]byte{"coder": pemData},
 	})
 	token := env.signToken(t, nil)
 
