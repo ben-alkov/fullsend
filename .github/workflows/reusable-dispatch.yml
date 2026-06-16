@@ -94,6 +94,8 @@ jobs:
           PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           PR_BASE_REPO: ${{ github.event.pull_request.base.repo.full_name }}
           PR_USER_LOGIN: ${{ github.event.pull_request.user.login }}
+          PR_AUTHOR_ASSOC: ${{ github.event.pull_request.author_association }}
+          ISSUE_AUTHOR_ASSOC: ${{ github.event.issue.author_association }}
           ORG_NAME: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
@@ -103,6 +105,14 @@ jobs:
 
           is_authorized() {
             case "${COMMENT_AUTHOR_ASSOC}" in
+              OWNER|MEMBER|COLLABORATOR) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          is_event_actor_authorized() {
+            local assoc="${1:-}"
+            case "${assoc}" in
               OWNER|MEMBER|COLLABORATOR) return 0 ;;
               *) return 1 ;;
             esac
@@ -131,15 +141,19 @@ jobs:
             issue_comment)
               case "${COMMAND}" in
                 /fs-triage)
-                  STAGE="triage"
+                  if [[ "${COMMENT_USER_TYPE}" != "Bot" ]] && is_authorized; then
+                    STAGE="triage"
+                  fi
                   ;;
                 /fs-code)
                   if [[ "${ISSUE_IS_PR}" == "false" ]]; then
-                    STAGE="code"
+                    if [[ "${COMMENT_USER_TYPE}" != "Bot" ]] && is_authorized; then
+                      STAGE="code"
+                    fi
                   fi
                   ;;
                 /fs-review)
-                  if [[ "${ISSUE_IS_PR}" == "true" ]]; then
+                  if [[ "${COMMENT_USER_TYPE}" != "Bot" ]] && is_authorized; then
                     STAGE="review"
                   fi
                   ;;
@@ -197,7 +211,9 @@ jobs:
             pull_request_target)
               case "${EVENT_ACTION}" in
                 opened|synchronize|ready_for_review)
-                  STAGE="review"
+                  if is_event_actor_authorized "${PR_AUTHOR_ASSOC}"; then
+                    STAGE="review"
+                  fi
                   ;;
                 closed)
                   STAGE="retro"

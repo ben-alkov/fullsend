@@ -1,6 +1,6 @@
 ---
 title: "43. Require authorization on all agent dispatch paths"
-status: Proposed
+status: Accepted
 relates_to:
   - agent-architecture
   - security-threat-model
@@ -16,7 +16,7 @@ Date: 2026-05-29
 
 ## Status
 
-Proposed
+Accepted
 
 Builds on [ADR 0034](0034-centralized-shim-routing-via-dispatch.md)
 (centralized dispatch routing) and
@@ -84,7 +84,13 @@ fi
 ### Automatic event triggers
 
 For events where the acting user may be external, the dispatch logic
-must check the actor's `author_association` before setting a `STAGE`:
+must check the actor's `author_association` before setting a `STAGE`.
+Note: the `is_authorized()` helper checks `COMMENT_AUTHOR_ASSOC`, which
+is only populated for `issue_comment` events. For non-comment triggers
+(`issues.opened`, `pull_request_target.opened`), the implementation must
+read the actor's association from the appropriate event field (e.g.,
+`github.event.issue.author_association` or
+`github.event.pull_request.author_association`):
 
 | Event | Actor checked | Gated? |
 |-------|---------------|--------|
@@ -166,3 +172,7 @@ to OWNER/MEMBER/COLLABORATOR), it should do so by extending the
 - External contributors who don't want to become members will depend on
   maintainers to trigger agents on their behalf — an acceptable
   trade-off to keep the abuse surface minimal.
+- Future work: rate-limited auto-triage for external issue reporters
+  (e.g., via [vouch](https://github.com/mitchellh/vouch) or per-org
+  trust policies) could relax this boundary for drive-by bug reports
+  without re-opening the abuse surface for slash commands.
