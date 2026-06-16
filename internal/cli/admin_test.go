@@ -580,7 +580,7 @@ func setupTestConfig(repos map[string]bool) *config.OrgConfig {
 	// Sort to ensure deterministic order despite map iteration being non-deterministic.
 	sort.Strings(repoNames)
 	sort.Strings(enabledRepos)
-	return config.NewOrgConfig(repoNames, enabledRepos, []string{"triage"}, nil, "")
+	return config.NewOrgConfig(repoNames, enabledRepos, []string{"triage"}, nil, "", "")
 }
 
 func setupTestClient(org string, cfg *config.OrgConfig, orgRepos []string) *forge.FakeClient {
@@ -1085,6 +1085,7 @@ func TestBuildLayerStack_NilEnabledRepos_SkipsDisabledRepos(t *testing.T) {
 		[]string{"triage"},
 		nil,
 		"",
+		"",
 	)
 	printer := ui.New(&discardWriter{})
 
@@ -1126,6 +1127,7 @@ func TestBuildLayerStack_EmptyEnabledRepos_IncludesDisabledRepos(t *testing.T) {
 		[]string{}, // explicitly empty → all repos are disabled
 		[]string{"triage"},
 		nil,
+		"",
 		"",
 	)
 	printer := ui.New(&discardWriter{})

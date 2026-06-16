@@ -207,7 +207,7 @@ func runGitHubSetupPerRepo(ctx context.Context, client forge.Client, printer *ui
 		printer.StepInfo("Reusing existing FULLSEND_GCP_WIF_PROVIDER from " + cfg.target)
 	}
 
-	perRepoCfg := config.NewPerRepoConfig(roles)
+	perRepoCfg := config.NewPerRepoConfig(roles, cfg.target)
 	if err := perRepoCfg.Validate(); err != nil {
 		return fmt.Errorf("invalid config: %w", err)
 	}
@@ -434,7 +434,7 @@ func runGitHubSetupPerOrg(ctx context.Context, client forge.Client, printer *ui.
 	for i, ac := range agentCreds {
 		dummyAgents[i] = ac.AgentEntry
 	}
-	orgCfg := config.NewOrgConfig(repoNames, enabledRepos, roles, dummyAgents, inferenceProviderName)
+	orgCfg := config.NewOrgConfig(repoNames, enabledRepos, roles, dummyAgents, inferenceProviderName, org)
 	orgCfg.Dispatch.Mode = "oidc-mint"
 
 	user, err := client.GetAuthenticatedUser(ctx)
@@ -483,7 +483,7 @@ func runGitHubSetupPerOrg(ctx context.Context, client forge.Client, printer *ui.
 		for i, ac := range agentCreds {
 			agents[i] = ac.AgentEntry
 		}
-		orgCfg = config.NewOrgConfig(repoNames, enabledRepos, roles, agents, inferenceProviderName)
+		orgCfg = config.NewOrgConfig(repoNames, enabledRepos, roles, agents, inferenceProviderName, org)
 		orgCfg.Dispatch.Mode = "oidc-mint"
 
 		stack = buildLayerStack(org, client, orgCfg, printer, user, privateRepo, enabledRepos, agentCreds, enrolledRepoIDs, inferenceProvider, cfg.vendorBinary, vendorFn, dispatcher, commitSHA)

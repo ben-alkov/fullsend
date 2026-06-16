@@ -644,7 +644,7 @@ func runPerRepoInstall(ctx context.Context, c perRepoInstallConfig) error {
 		printer.StepWarn("Using provided WIF provider value — skipping inference provider auto-provisioning")
 	}
 
-	cfg := config.NewPerRepoConfig(roles)
+	cfg := config.NewPerRepoConfig(roles, repoFullName)
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("invalid config: %w", err)
 	}
@@ -1188,7 +1188,7 @@ func runDryRun(ctx context.Context, client forge.Client, printer *ui.Printer, or
 	}
 
 	// Build config with empty agents for analysis.
-	cfg := config.NewOrgConfig(repoNames, enabledRepos, roles, nil, inferenceProviderName)
+	cfg := config.NewOrgConfig(repoNames, enabledRepos, roles, nil, inferenceProviderName, org)
 	cfg.Dispatch.Mode = "oidc-mint"
 
 	user, err := client.GetAuthenticatedUser(ctx)
@@ -1524,7 +1524,7 @@ func runInstall(ctx context.Context, client forge.Client, printer *ui.Printer, o
 		agents[i] = ac.AgentEntry
 	}
 
-	cfg := config.NewOrgConfig(repoNames, enabledRepos, roles, agents, inferenceProviderName)
+	cfg := config.NewOrgConfig(repoNames, enabledRepos, roles, agents, inferenceProviderName, org)
 	cfg.Dispatch.Mode = "oidc-mint"
 
 	user, err := client.GetAuthenticatedUser(ctx)
@@ -1663,7 +1663,8 @@ func runUninstall(ctx context.Context, client forge.Client, printer *ui.Printer,
 	}
 
 	// Build a minimal stack for uninstall.
-	emptyCfg := config.NewOrgConfig(nil, nil, nil, nil, "")
+	// Only ConfigRepoLayer matters for uninstall since other layers are no-ops.
+	emptyCfg := config.NewOrgConfig(nil, nil, nil, nil, "", "")
 	stack := layers.NewStack(
 		layers.NewConfigRepoLayer(org, client, emptyCfg, printer, false),
 		layers.NewWorkflowsLayer(org, client, printer, "", version),
@@ -1804,7 +1805,7 @@ func runAnalyze(ctx context.Context, client forge.Client, printer *ui.Printer, o
 		})
 	}
 
-	cfg := config.NewOrgConfig(repoNames, nil, defaultRoles, nil, "")
+	cfg := config.NewOrgConfig(repoNames, nil, defaultRoles, nil, "", org)
 
 	user, err := client.GetAuthenticatedUser(ctx)
 	if err != nil {
