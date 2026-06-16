@@ -1830,7 +1830,7 @@ func TestRunInstall_WithVendorAndSkipMint(t *testing.T) {
 func TestRunPerRepoInstall_ValidationErrors(t *testing.T) {
 	base := perRepoInstallConfig{
 		RepoFullName:     "acme/widget",
-		Agents:          strings.Join(config.PerRepoDefaultRoles(), ","),
+		Agents:           strings.Join(config.PerRepoDefaultRoles(), ","),
 		InferenceProject: "my-project",
 		MintProject:      "my-project",
 		MintURL:          "https://mint.example.com/v1/token",
