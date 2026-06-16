@@ -140,7 +140,10 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 	}
 
 	// 1. Resolve and load harness.
-	harnessPath := filepath.Join(fullsendDir, "harness", agentName+".yaml")
+	harnessPath, err := resolveHarnessPath(absFullsendDir, agentName, printer)
+	if err != nil {
+		return err
+	}
 	harnessStart := time.Now()
 	printer.StepStart("Loading harness: " + harnessPath)
 

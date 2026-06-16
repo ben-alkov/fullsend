@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -24,14 +25,17 @@ func newLockCmd() *cobra.Command {
 	var fullsendDir string
 	var update bool
 	var forgeFlag string
+	var lockAll bool
 	var rFlags resolveFlags
 
 	cmd := &cobra.Command{
-		Use:   "lock <agent-name>",
+		Use:   "lock [agent-name]",
 		Short: "Pin remote dependencies for reproducible harness execution",
 		Long: `Resolve all remote dependencies for a harness and record their URLs
 and SHA256 hashes in .fullsend/lock.yaml. Subsequent fullsend run invocations
 use the lock file to skip re-resolution when dependencies have not changed.
+
+Use --all to lock every harness in the harness directory at once.
 
 When --forge is specified, the named platform's forge overrides are applied
 before locking. When --forge is omitted and the harness has a forge: section,
@@ -39,7 +43,7 @@ all forge variants are resolved and the union of dependencies is locked.
 
 The lock file should be committed to version control so all environments
 use the same pinned dependencies.`,
-		Args: cobra.ExactArgs(1),
+		Args: cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if rFlags.maxDepth < 0 {
 				return fmt.Errorf("--max-depth must be >= 0, got %d", rFlags.maxDepth)
@@ -47,14 +51,24 @@ use the same pinned dependencies.`,
 			if rFlags.maxResources < 1 {
 				return fmt.Errorf("--max-resources must be >= 1, got %d", rFlags.maxResources)
 			}
-			agentName := args[0]
+			if lockAll && len(args) > 0 {
+				return fmt.Errorf("--all and a positional agent name are mutually exclusive")
+			}
+			if !lockAll && len(args) == 0 {
+				return fmt.Errorf("must specify an agent name or use --all flag")
+			}
 			printer := ui.New(os.Stdout)
+			if lockAll {
+				return runLockAll(cmd.Context(), fullsendDir, forgeFlag, update, rFlags, printer)
+			}
+			agentName := args[0]
 			return runLock(cmd.Context(), agentName, fullsendDir, forgeFlag, update, rFlags, printer)
 		},
 	}
 
 	cmd.Flags().StringVar(&fullsendDir, "fullsend-dir", "", "base directory containing the .fullsend layout")
 	cmd.Flags().BoolVar(&update, "update", false, "force re-resolve even if lock entry is current")
+	cmd.Flags().BoolVar(&lockAll, "all", false, "lock all harness files in the .fullsend/harness/ directory")
 	cmd.Flags().StringVar(&forgeFlag, "forge", "", `forge platform to lock (e.g. "github"); omit to lock all forge variants`)
 	cmd.Flags().BoolVar(&rFlags.offline, "offline", false, "reject network fetches; only use cached remote resources")
 	cmd.Flags().IntVar(&rFlags.maxDepth, "max-depth", resolve.DefaultMaxDepth, "maximum dependency depth for transitive resolution (0 disables)")
@@ -74,25 +88,11 @@ func runLock(ctx context.Context, agentName, fullsendDir, forgeFlag string, upda
 		return fmt.Errorf("resolving fullsend dir: %w", err)
 	}
 
-	// Validate the --forge flag value if explicitly provided, but do NOT
-	// auto-detect from CI env vars. Auto-detection is appropriate for `run`
-	// (pick one platform), but `lock` without --forge means "lock all
-	// forge variants" — auto-detecting would silently lock only one.
 	if forgeFlag != "" && !harness.ValidForgePlatform(forgeFlag) {
 		return fmt.Errorf("--forge: %q is not a valid forge platform (valid: %s)", forgeFlag, harness.ForgeKeyList())
 	}
 
-	harnessPath := filepath.Join(absFullsendDir, "harness", agentName+".yaml")
 	lockPath := filepath.Join(absFullsendDir, "lock.yaml")
-
-	// Compute harness source hash and check staleness before doing any
-	// network resolution. This avoids resolving all forge variants when the
-	// lock entry is already current.
-	harnessData, err := os.ReadFile(harnessPath)
-	if err != nil {
-		return fmt.Errorf("reading harness file: %w", err)
-	}
-	harnessHash := fetch.ComputeSHA256(harnessData)
 
 	lf, err := lock.Load(lockPath)
 	if err != nil {
@@ -100,23 +100,72 @@ func runLock(ctx context.Context, agentName, fullsendDir, forgeFlag string, upda
 		lf = nil
 	}
 
-	if !update && lf != nil {
-		if entry := lf.Lookup(agentName); entry != nil && !entry.IsStale(harnessHash) {
-			printer.StepDone(fmt.Sprintf("Lock entry for %s is up to date (%d dependencies)", agentName, len(entry.Dependencies)))
-			return nil
-		}
-	}
-
-	// Determine which forge variants to lock. When --forge is specified, lock
-	// only that variant. When omitted, load the raw harness to discover all
-	// forge keys and lock each variant's URL set (union of dependencies).
-	forgePlatforms, err := lockForgePlatforms(harnessPath, forgeFlag)
+	result, err := lockOneAgent(ctx, agentName, absFullsendDir, forgeFlag, update, lf, rFlags, printer)
 	if err != nil {
 		return err
 	}
 
-	// Load org config before the loop — best-effort so harnesses without
-	// remote refs (including base-only) still work when config.yaml is absent.
+	if result == nil {
+		return nil
+	}
+
+	now := time.Now().UTC()
+	if lf == nil {
+		lf = &lock.LockFile{GeneratedAt: now}
+	}
+	lf.SetHarness(agentName, result.harnessLock)
+
+	printer.StepStart("Writing lock file")
+	if err := lock.Save(lockPath, lf); err != nil {
+		printer.StepFail("Failed to write lock file")
+		return fmt.Errorf("saving lock file: %w", err)
+	}
+	printer.StepDone(fmt.Sprintf("Locked %d dependencies for %s -> %s", len(result.deps), agentName, lockPath))
+
+	for _, dep := range result.deps {
+		if dep.CacheHit {
+			printer.StepInfo(fmt.Sprintf("  %s: %s (cached)", dep.Field, dep.URL))
+		} else {
+			printer.StepInfo(fmt.Sprintf("  %s: %s (fetched)", dep.Field, dep.URL))
+		}
+	}
+
+	return nil
+}
+
+// lockResult holds the output of lockOneAgent for callers to persist.
+type lockResult struct {
+	harnessLock lock.HarnessLock
+	deps        []resolve.Dependency
+}
+
+// lockOneAgent resolves dependencies for a single harness and returns the
+// lock entry without writing to disk. Returns nil (no error) when the harness
+// has no remote dependencies or the lock entry is already up to date.
+func lockOneAgent(ctx context.Context, agentName, absFullsendDir, forgeFlag string, update bool, lf *lock.LockFile, rFlags resolveFlags, printer *ui.Printer) (*lockResult, error) {
+	harnessPath, err := resolveHarnessPath(absFullsendDir, agentName, printer)
+	if err != nil {
+		return nil, err
+	}
+
+	harnessData, err := os.ReadFile(harnessPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading harness file: %w", err)
+	}
+	harnessHash := fetch.ComputeSHA256(harnessData)
+
+	if !update && lf != nil {
+		if entry := lf.Lookup(agentName); entry != nil && !entry.IsStale(harnessHash) {
+			printer.StepDone(fmt.Sprintf("Lock entry for %s is up to date (%d dependencies)", agentName, len(entry.Dependencies)))
+			return nil, nil
+		}
+	}
+
+	forgePlatforms, err := lockForgePlatforms(harnessPath, forgeFlag)
+	if err != nil {
+		return nil, err
+	}
+
 	orgConfigPath := filepath.Join(absFullsendDir, "config.yaml")
 	orgCfg := tryLoadOrgConfig(orgConfigPath, printer)
 	var orgAllowlist []string
@@ -127,20 +176,16 @@ func runLock(ctx context.Context, agentName, fullsendDir, forgeFlag string, upda
 	policy := fetch.DefaultPolicy
 	policy.Offline = rFlags.offline
 
-	// If the harness has a URL base and org config failed to load,
-	// load it strictly now so LoadWithBase gets a proper error path.
 	if orgCfg == nil {
 		if rawH, rawErr := harness.LoadRaw(harnessPath); rawErr == nil && rawH.Base != "" && harness.IsURL(rawH.Base) {
-			var err error
 			orgCfg, err = requireOrgConfig(orgConfigPath, printer)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			orgAllowlist = orgCfg.AllowedRemoteResources
 		}
 	}
 
-	// Resolve each forge variant and collect the union of dependencies.
 	var allDeps []resolve.Dependency
 	seen := make(map[string]bool)
 
@@ -154,17 +199,14 @@ func runLock(ctx context.Context, agentName, fullsendDir, forgeFlag string, upda
 		})
 		if loadErr != nil {
 			printer.StepFail(fmt.Sprintf("Failed to load harness (forge: %s)", platform))
-			return fmt.Errorf("loading harness for forge %q: %w", platform, loadErr)
+			return nil, fmt.Errorf("loading harness for forge %q: %w", platform, loadErr)
 		}
 
 		if err := h.ResolveRelativeTo(absFullsendDir); err != nil {
 			printer.StepFail("Path validation failed")
-			return fmt.Errorf("resolving paths: %w", err)
+			return nil, fmt.Errorf("resolving paths: %w", err)
 		}
 
-		// Convert base composition dependencies from harness.Dependency
-		// to resolve.Dependency (structurally identical, separate types
-		// to avoid circular imports).
 		newBaseDeps := 0
 		for _, bd := range baseDeps {
 			if !seen[bd.URL] {
@@ -209,16 +251,15 @@ func runLock(ctx context.Context, agentName, fullsendDir, forgeFlag string, upda
 		}
 
 		if orgCfg == nil {
-			var err error
 			orgCfg, err = requireOrgConfig(orgConfigPath, printer)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			orgAllowlist = orgCfg.AllowedRemoteResources
 		}
 		if err := h.ValidateAllowedRemoteResources(orgCfg.AllowedRemoteResources); err != nil {
 			printer.StepFail("Remote resource allowlist validation failed")
-			return fmt.Errorf("validating allowed remote resources: %w", err)
+			return nil, fmt.Errorf("validating allowed remote resources: %w", err)
 		}
 
 		if platform != "" {
@@ -235,7 +276,7 @@ func runLock(ctx context.Context, agentName, fullsendDir, forgeFlag string, upda
 				token, tokenErr := resolveToken()
 				if tokenErr != nil {
 					printer.StepFail("Skill URLs require a GitHub token (set GH_TOKEN, GITHUB_TOKEN, or run 'gh auth login')")
-					return fmt.Errorf("skill URLs require a GitHub token: %w", tokenErr)
+					return nil, fmt.Errorf("skill URLs require a GitHub token: %w", tokenErr)
 				}
 				forgeClient = gh.New(token)
 			}
@@ -251,7 +292,7 @@ func runLock(ctx context.Context, agentName, fullsendDir, forgeFlag string, upda
 		})
 		if resolveErr != nil {
 			printer.StepFail("Resolution failed")
-			return fmt.Errorf("resolving remote resources: %w", resolveErr)
+			return nil, fmt.Errorf("resolving remote resources: %w", resolveErr)
 		}
 
 		for _, dep := range deps {
@@ -266,10 +307,9 @@ func runLock(ctx context.Context, agentName, fullsendDir, forgeFlag string, upda
 
 	if len(allDeps) == 0 {
 		printer.StepDone("Harness has no remote dependencies — nothing to lock")
-		return nil
+		return nil, nil
 	}
 
-	// Build lock entry from resolved deps.
 	now := time.Now().UTC()
 	lockDeps := make([]lock.DependencyEntry, 0, len(allDeps))
 	for _, dep := range allDeps {
@@ -283,10 +323,10 @@ func runLock(ctx context.Context, agentName, fullsendDir, forgeFlag string, upda
 		if dep.Type == "directory" {
 			_, dirEntry, err := fetch.CacheGetDir(absFullsendDir, dep.SHA256)
 			if err != nil {
-				return fmt.Errorf("reading cached directory for %s: %w", dep.Field, err)
+				return nil, fmt.Errorf("reading cached directory for %s: %w", dep.Field, err)
 			}
 			if dirEntry == nil {
-				return fmt.Errorf("directory %s (%s) was just resolved but is missing from cache", dep.Field, dep.URL)
+				return nil, fmt.Errorf("directory %s (%s) was just resolved but is missing from cache", dep.Field, dep.URL)
 			}
 			for _, f := range dirEntry.Files {
 				entry.Files = append(entry.Files, lock.FileEntry{
@@ -298,35 +338,189 @@ func runLock(ctx context.Context, agentName, fullsendDir, forgeFlag string, upda
 		lockDeps = append(lockDeps, entry)
 	}
 
-	harnessLock := lock.HarnessLock{
-		Source:       filepath.Join("harness", agentName+".yaml"),
-		SHA256:       harnessHash,
-		ResolvedAt:   now,
-		Dependencies: lockDeps,
+	return &lockResult{
+		harnessLock: lock.HarnessLock{
+			Source:       filepath.Join("harness", filepath.Base(harnessPath)),
+			SHA256:       harnessHash,
+			ResolvedAt:   now,
+			Dependencies: lockDeps,
+		},
+		deps: allDeps,
+	}, nil
+}
+
+// runLockAll locks all harness files in the harness directory.
+func runLockAll(ctx context.Context, fullsendDir, forgeFlag string, update bool, rFlags resolveFlags, printer *ui.Printer) error {
+	printer.Banner(Version())
+	printer.Header("Locking all harnesses")
+	printer.Blank()
+
+	absFullsendDir, err := filepath.Abs(fullsendDir)
+	if err != nil {
+		return fmt.Errorf("resolving fullsend dir: %w", err)
 	}
 
-	// Update or create lock file.
+	if forgeFlag != "" && !harness.ValidForgePlatform(forgeFlag) {
+		return fmt.Errorf("--forge: %q is not a valid forge platform (valid: %s)", forgeFlag, harness.ForgeKeyList())
+	}
+
+	harnessDir := filepath.Join(absFullsendDir, "harness")
+	agentNames, err := discoverHarnessNames(harnessDir)
+	if err != nil {
+		return err
+	}
+
+	if len(agentNames) == 0 {
+		printer.StepWarn("No harness files found in " + harnessDir)
+		return nil
+	}
+
+	lockPath := filepath.Join(absFullsendDir, "lock.yaml")
+	lf, err := lock.Load(lockPath)
+	if err != nil {
+		printer.StepWarn("Could not load existing lock file: " + err.Error())
+		lf = nil
+	}
+
+	now := time.Now().UTC()
 	if lf == nil {
 		lf = &lock.LockFile{GeneratedAt: now}
 	}
-	lf.SetHarness(agentName, harnessLock)
+
+	var locked []string
+	var upToDate int
+	var pruned []string
+	for _, name := range agentNames {
+		printer.Header("Locking dependencies: " + name)
+		printer.Blank()
+
+		result, lockErr := lockOneAgent(ctx, name, absFullsendDir, forgeFlag, update, lf, rFlags, printer)
+		if lockErr != nil {
+			if len(locked) > 0 {
+				printer.StepStart("Writing partial lock file (preserving progress)")
+				if saveErr := lock.Save(lockPath, lf); saveErr != nil {
+					printer.StepWarn("Failed to save partial progress: " + saveErr.Error())
+				} else {
+					printer.StepDone(fmt.Sprintf("Saved %d harnesses before failure: %s", len(locked), strings.Join(locked, ", ")))
+				}
+			}
+			return fmt.Errorf("%s: %w", name, lockErr)
+		}
+		if result != nil {
+			lf.SetHarness(name, result.harnessLock)
+			locked = append(locked, name)
+		} else if entry := lf.Lookup(name); entry != nil {
+			if isHarnessUpToDate(absFullsendDir, name, entry, printer) {
+				upToDate++
+			} else {
+				delete(lf.Harnesses, name)
+				pruned = append(pruned, name)
+				printer.StepInfo(fmt.Sprintf("Pruned stale lock entry for %s (no longer has remote dependencies)", name))
+			}
+		}
+	}
+
+	// Prune lock entries for harnesses removed from the directory.
+	for _, name := range lf.HarnessNames() {
+		if !slices.Contains(agentNames, name) && !slices.Contains(locked, name) {
+			delete(lf.Harnesses, name)
+			pruned = append(pruned, name)
+			printer.StepInfo(fmt.Sprintf("Pruned lock entry for removed harness %s", name))
+		}
+	}
+
+	dirty := len(locked) > 0 || len(pruned) > 0
+	if !dirty {
+		if upToDate > 0 {
+			printer.StepDone(fmt.Sprintf("All %d harnesses already up to date", upToDate))
+		} else {
+			printer.StepDone("No harnesses have remote dependencies — nothing to lock")
+		}
+		return nil
+	}
 
 	printer.StepStart("Writing lock file")
 	if err := lock.Save(lockPath, lf); err != nil {
 		printer.StepFail("Failed to write lock file")
 		return fmt.Errorf("saving lock file: %w", err)
 	}
-	printer.StepDone(fmt.Sprintf("Locked %d dependencies for %s -> %s", len(allDeps), agentName, lockPath))
 
-	for _, dep := range allDeps {
-		if dep.CacheHit {
-			printer.StepInfo(fmt.Sprintf("  %s: %s (cached)", dep.Field, dep.URL))
-		} else {
-			printer.StepInfo(fmt.Sprintf("  %s: %s (fetched)", dep.Field, dep.URL))
+	var summary []string
+	if len(locked) > 0 {
+		summary = append(summary, fmt.Sprintf("locked %d: %s", len(locked), strings.Join(locked, ", ")))
+	}
+	if len(pruned) > 0 {
+		summary = append(summary, fmt.Sprintf("pruned %d: %s", len(pruned), strings.Join(pruned, ", ")))
+	}
+	printer.StepDone(strings.Join(summary, "; "))
+
+	return nil
+}
+
+// resolveHarnessPath finds the harness file for agentName, preferring .yaml
+// over .yml. Warns via printer when both extensions exist.
+func resolveHarnessPath(dir, agentName string, printer *ui.Printer) (string, error) {
+	yamlPath := filepath.Join(dir, "harness", agentName+".yaml")
+	if _, err := os.Stat(yamlPath); err != nil {
+		if !os.IsNotExist(err) {
+			return "", fmt.Errorf("checking harness file: %w", err)
+		}
+		ymlPath := filepath.Join(dir, "harness", agentName+".yml")
+		if _, ymlErr := os.Stat(ymlPath); ymlErr != nil {
+			if !os.IsNotExist(ymlErr) {
+				return "", fmt.Errorf("checking harness file: %w", ymlErr)
+			}
+			return "", fmt.Errorf("harness file not found: tried %s.yaml and %s.yml", agentName, agentName)
+		}
+		return ymlPath, nil
+	}
+	if _, ymlErr := os.Stat(filepath.Join(dir, "harness", agentName+".yml")); ymlErr == nil {
+		printer.StepWarn(fmt.Sprintf("Both %s.yaml and %s.yml exist; using .yaml", agentName, agentName))
+	}
+	return yamlPath, nil
+}
+
+// discoverHarnessNames returns sorted agent names from *.yaml and *.yml files
+// in the given directory.
+func discoverHarnessNames(dir string) ([]string, error) {
+	var names []string
+	seen := make(map[string]bool)
+
+	for _, pattern := range []string{"*.yaml", "*.yml"} {
+		matches, err := filepath.Glob(filepath.Join(dir, pattern))
+		if err != nil {
+			return nil, fmt.Errorf("globbing harness files: %w", err)
+		}
+		for _, path := range matches {
+			base := filepath.Base(path)
+			ext := filepath.Ext(base)
+			name := strings.TrimSuffix(base, ext)
+			if !seen[name] {
+				seen[name] = true
+				names = append(names, name)
+			}
 		}
 	}
 
-	return nil
+	sort.Strings(names)
+	return names, nil
+}
+
+// isHarnessUpToDate checks whether a lock entry's hash matches the current
+// harness file on disk. Used by runLockAll to distinguish "already locked"
+// from "re-evaluated with no remote deps" when lockOneAgent returns nil.
+func isHarnessUpToDate(absFullsendDir, name string, entry *lock.HarnessLock, printer *ui.Printer) bool {
+	harnessPath, err := resolveHarnessPath(absFullsendDir, name, printer)
+	if err != nil {
+		printer.StepWarn(fmt.Sprintf("Cannot stat harness for %s: %v; preserving lock entry", name, err))
+		return true
+	}
+	data, err := os.ReadFile(harnessPath)
+	if err != nil {
+		printer.StepWarn(fmt.Sprintf("Cannot read %s: %v; preserving lock entry", harnessPath, err))
+		return true
+	}
+	return !entry.IsStale(fetch.ComputeSHA256(data))
 }
 
 // lockForgePlatforms determines which forge platform(s) to lock. When a

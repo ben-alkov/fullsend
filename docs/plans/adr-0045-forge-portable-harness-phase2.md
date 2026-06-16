@@ -92,7 +92,7 @@ PRs 1, 2, 3, 5 can start in parallel. PR 4 depends on PR 3 (needs the base URL b
   - For each file, calls `LoadRaw(path)` (unmarshal only, no validation)
   - Extracts `h.Role` and `h.Slug`; skips files where both are empty (not harness identity files, or legacy harnesses without role/slug)
   - Returns sorted by `Role` for deterministic output
-  - Errors on individual files are collected and returned as a multi-error (one bad YAML file should not prevent discovery of others). This partial-result semantic is intentional: discovery is a read-only inventory operation where returning what we can find is more useful than failing entirely. Contrast with `lock --all` (PR 5), which uses all-or-nothing semantics because writing an incomplete lock file would silently leave some dependencies unpinned.
+  - Errors on individual files are collected and returned as a multi-error (one bad YAML file should not prevent discovery of others). This partial-result semantic is intentional: discovery is a read-only inventory operation where returning what we can find is more useful than failing entirely. `lock --all` (PR 5) uses similar partial-progress semantics: successfully resolved harnesses are saved before returning the error, so they don't need to be re-resolved on retry.
   - Does NOT resolve `base:` chains -- reads only the top-level `role`/`slug` from each file. This is correct because generated wrappers set `role`/`slug` at the top level (not inherited from base).
 
 **Create `internal/harness/discover_test.go`:**
@@ -317,14 +317,14 @@ The `HarnessWrappersLayer` maintains this mapping. A helper function `harnessNam
 
 **Modify `internal/cli/lock.go`:**
 
-- Change `cobra.ExactArgs(1)` to `cobra.MaximumNArgs(1)` -- accept zero or one positional argument
+- Change `cobra.ExactArgs(1)` to `cobra.RangeArgs(0, 1)` -- accept zero or one positional argument
 - Add `--all` bool flag
 - Validation:
   - `--all` and a positional argument are mutually exclusive -> error
   - Neither `--all` nor a positional argument -> error with usage hint
 - When `--all` is set:
   1. Glob `filepath.Join(absFullsendDir, "harness", "*.yaml")` and `*.yml` to get all harness files. Uses `filepath.Glob` directly rather than `DiscoverAgents` to avoid coupling lock to the discover API -- lock only needs filenames, not role/slug.
-  2. For each harness file found, run the existing lock logic (load, resolve, hash, record in lockfile). If any individual file fails to parse, the entire `lock --all` invocation fails with no partial lock file written (all-or-nothing semantics, matching the single-file lock behavior).
+  2. For each harness file found, run the existing lock logic (load, resolve, hash, record in lockfile). If any individual file fails, previously resolved harnesses are saved to the lock file (partial-progress semantics) so they don't need to be re-resolved on retry. The error message includes the failing harness name.
   3. Write the combined lock file once at the end with all harness entries.
   4. Report summary: `Locked N harnesses: triage, code, review, fix, retro, prioritize`
 
@@ -338,7 +338,7 @@ The `HarnessWrappersLayer` maintains this mapping. A helper function `harnessNam
 - `--all` with no harness files -> warning, empty lock file
 - `--all` with multiple harnesses -> all locked, lock file contains entries for each
 - `--all` with one harness having URL base, others local-only -> only URL-bearing harnesses get lock entries (or all get entries with empty deps -- follow existing convention)
-- `--all` with one harness failing to parse -> error with harness name in message, no partial lock file written (all-or-nothing)
+- `--all` with one harness failing to parse -> error with harness name in message, partial progress saved for already-resolved harnesses
 
 **After merge:** `fullsend lock --all` locks every harness in the directory. Combined with PR 4's wrapper generation, running `fullsend lock --all` after install pins all base URLs in `lock.yaml`.
 

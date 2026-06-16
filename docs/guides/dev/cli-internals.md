@@ -36,7 +36,8 @@ fullsend
 │   ├── status       <org>                   # Analyze GitHub-side state
 │   ├── uninstall    <org>                   # Remove fullsend GitHub configuration
 │   └── sync-scaffold <org>                  # Update workflow templates
-├── lock             <agent-name>             # Pin remote deps to lock.yaml
+├── lock             [agent-name]              # Pin remote deps to lock.yaml
+│   ├── --all                                #   Lock all harnesses in the harness directory
 │   ├── --fullsend-dir <path>                #   Base directory with .fullsend layout
 │   ├── --forge <platform>                   #   Lock only this forge variant; omit for all
 │   ├── --update                             #   Force re-resolve even if current

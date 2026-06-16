@@ -208,6 +208,12 @@ generated. Generate or update a lock file with:
 fullsend lock code --fullsend-dir /path/to/.fullsend
 ```
 
+To lock all harnesses in the directory at once:
+
+```bash
+fullsend lock --all --fullsend-dir /path/to/.fullsend
+```
+
 When `--forge` is specified, only that platform variant is locked. When omitted,
 all forge variants defined in the harness are resolved and the union of their
 dependencies is locked.
