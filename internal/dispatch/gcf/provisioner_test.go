@@ -3154,3 +3154,17 @@ func TestDeleteAgentPEM_FixRoleUsesCoderSecret(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"fullsend-coder-app-pem"}, fake.deletedSecretIDs)
 }
+
+func TestDeleteAgentPEM_MissingProjectID(t *testing.T) {
+	p := NewProvisioner(Config{}, newFakeGCFClient())
+	err := p.DeleteAgentPEM(context.Background(), "coder")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "GCP project ID is required")
+}
+
+func TestRemoveRoleFromMint_MissingProjectID(t *testing.T) {
+	p := NewProvisioner(Config{}, newFakeGCFClient())
+	err := p.RemoveRoleFromMint(context.Background(), "coder")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "GCP project ID is required")
+}

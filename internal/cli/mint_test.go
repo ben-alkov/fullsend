@@ -1153,3 +1153,118 @@ func TestConfirmUnenroll_CustomAbortLabel(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "aborting remove-role")
 }
+
+func TestMintAddRoleCmd_ExistingSecretRegisters(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/apps/fullsend-ai-review", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `{"id": 99999}`)
+	}))
+	defer srv.Close()
+
+	orig := githubAPIBaseURL
+	githubAPIBaseURL = srv.URL
+	defer func() { githubAPIBaseURL = orig }()
+
+	withMintGCFClient(t, gcf.NewFakeGCFClient(
+		gcf.WithFakeFunctionInfo(&gcf.FunctionInfo{
+			URI:     "https://mint.example.com",
+			EnvVars: map[string]string{"ROLE_APP_IDS": `{"coder":"100"}`},
+		}),
+		gcf.WithFakeTrafficEnvVars(map[string]string{
+			"ROLE_APP_IDS": `{"coder":"100"}`,
+		}),
+		gcf.WithFakeSecrets(map[string]bool{
+			"fullsend-review-app-pem": true,
+		}),
+	))
+
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{
+		"mint", "add-role", "review",
+		"--project=my-project-id",
+		"--slug=fullsend-ai-review",
+		"--use-existing-pem-secret",
+	})
+	err := cmd.Execute()
+	require.NoError(t, err)
+}
+
+func TestMintAddRoleCmd_SlugPEMRegisters(t *testing.T) {
+	testPEM := generateTestPEM(t)
+	pemPath := filepath.Join(t.TempDir(), "review.pem")
+	require.NoError(t, os.WriteFile(pemPath, testPEM, 0o600))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/apps/fullsend-ai-review":
+			fmt.Fprintln(w, `{"id": 88888}`)
+		case "/app":
+			fmt.Fprintln(w, `{"id": 88888}`)
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	orig := githubAPIBaseURL
+	githubAPIBaseURL = srv.URL
+	defer func() { githubAPIBaseURL = orig }()
+
+	withMintGCFClient(t, gcf.NewFakeGCFClient(
+		gcf.WithFakeFunctionInfo(&gcf.FunctionInfo{
+			URI:     "https://mint.example.com",
+			EnvVars: map[string]string{"ROLE_APP_IDS": `{"coder":"100"}`},
+		}),
+		gcf.WithFakeTrafficEnvVars(map[string]string{
+			"ROLE_APP_IDS": `{"coder":"100"}`,
+		}),
+		gcf.WithFakeErrors(map[string]error{"GetSecret": gcf.ErrSecretNotFound}),
+	))
+
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{
+		"mint", "add-role", "review",
+		"--project=my-project-id",
+		"--slug=fullsend-ai-review",
+		"--pem=" + pemPath,
+	})
+	err := cmd.Execute()
+	require.NoError(t, err)
+}
+
+func TestMintRemoveRoleCmd_YoloSuccess(t *testing.T) {
+	withMintGCFClient(t, mintDiscoveryClient())
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{
+		"mint", "remove-role", "triage",
+		"--project=my-project-id",
+		"--yolo",
+	})
+	err := cmd.Execute()
+	require.NoError(t, err)
+}
+
+func TestMintTrafficRoleAppIDs_InvalidJSON(t *testing.T) {
+	withMintGCFClient(t, gcf.NewFakeGCFClient(
+		gcf.WithFakeTrafficEnvVars(map[string]string{
+			"ROLE_APP_IDS": `not-json`,
+		}),
+	))
+	provisioner := gcf.NewProvisioner(gcf.Config{ProjectID: "my-project-id", Region: "us-central1"}, mintGCFClientFactory("my-project-id"))
+	_, err := mintTrafficRoleAppIDs(context.Background(), provisioner, &gcf.MintDiscovery{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parsing traffic ROLE_APP_IDS")
+}
+
+func TestMintTrafficRoleAppIDs_FallbackWhenTrafficEmpty(t *testing.T) {
+	withMintGCFClient(t, gcf.NewFakeGCFClient(
+		gcf.WithFakeTrafficEnvVars(map[string]string{}),
+	))
+	provisioner := gcf.NewProvisioner(gcf.Config{ProjectID: "my-project-id", Region: "us-central1"}, mintGCFClientFactory("my-project-id"))
+	discovery := &gcf.MintDiscovery{RoleAppIDs: map[string]string{"coder": "100"}}
+	roles, err := mintTrafficRoleAppIDs(context.Background(), provisioner, discovery)
+	require.NoError(t, err)
+	assert.Equal(t, "100", roles["coder"])
+}
