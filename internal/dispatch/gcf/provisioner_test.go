@@ -3152,5 +3152,5 @@ func TestDeleteAgentPEM_FixRoleUsesCoderSecret(t *testing.T) {
 	p := NewProvisioner(Config{ProjectID: "proj1"}, fake)
 	err := p.DeleteAgentPEM(context.Background(), "fix")
 	require.NoError(t, err)
-	assert.Contains(t, fake.calls, "DeleteSecret")
+	assert.Equal(t, []string{"fullsend-coder-app-pem"}, fake.deletedSecretIDs)
 }

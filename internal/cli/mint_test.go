@@ -1104,3 +1104,52 @@ func TestMintSetupRemoveRoleCmd_NotRegistered(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not registered")
 }
+
+func TestMintAddRoleCmd_BrowserDryRun(t *testing.T) {
+	withMintGCFClient(t, gcf.NewFakeGCFClient(
+		gcf.WithFakeFunctionInfo(&gcf.FunctionInfo{
+			URI:     "https://mint.example.com",
+			EnvVars: map[string]string{"ROLE_APP_IDS": `{"coder":"100"}`},
+		}),
+		gcf.WithFakeTrafficEnvVars(map[string]string{
+			"ROLE_APP_IDS": `{"coder":"100"}`,
+		}),
+	))
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{
+		"mint", "add-role", "review",
+		"--project=my-project-id",
+		"--org=acme-corp",
+		"--dry-run",
+	})
+	err := cmd.Execute()
+	require.NoError(t, err)
+}
+
+func TestMintTrafficRoleAppIDs_PrefersTrafficRevision(t *testing.T) {
+	withMintGCFClient(t, gcf.NewFakeGCFClient(
+		gcf.WithFakeFunctionInfo(&gcf.FunctionInfo{
+			URI:     "https://mint.example.com",
+			EnvVars: map[string]string{"ROLE_APP_IDS": `{"coder":"100"}`},
+		}),
+		gcf.WithFakeTrafficEnvVars(map[string]string{
+			"ROLE_APP_IDS": `{"coder":"100","review":"200"}`,
+		}),
+	))
+	provisioner := gcf.NewProvisioner(gcf.Config{ProjectID: "my-project-id", Region: "us-central1"}, mintGCFClientFactory("my-project-id"))
+	discovery := &gcf.MintDiscovery{
+		URL:        "https://mint.example.com",
+		RoleAppIDs: map[string]string{"coder": "100"},
+	}
+	roles, err := mintTrafficRoleAppIDs(context.Background(), provisioner, discovery)
+	require.NoError(t, err)
+	assert.Equal(t, "200", roles["review"])
+}
+
+func TestConfirmUnenroll_CustomAbortLabel(t *testing.T) {
+	printer := ui.New(&strings.Builder{})
+	reader := bufio.NewReader(strings.NewReader("wrong\n"))
+	err := confirmUnenroll(printer, "retro", reader, true, "remove-role")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "aborting remove-role")
+}

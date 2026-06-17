@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -242,9 +243,21 @@ func runMintSetupAddRole(ctx context.Context, printer *ui.Printer, cfg mintSetup
 	}
 	printer.StepDone(fmt.Sprintf("Found mint at %s", discovery.URL))
 
-	existing := mintcore.RoleOnlyAppIDs(discovery.RoleAppIDs)
+	existing, err := mintTrafficRoleAppIDs(ctx, provisioner, discovery)
+	if err != nil {
+		return fmt.Errorf("reading traffic-serving ROLE_APP_IDS: %w", err)
+	}
 	if existingID, ok := existing[cfg.role]; ok && !cfg.force {
 		return fmt.Errorf("role %q is already registered (app ID %s); use --force to overwrite", cfg.role, existingID)
+	}
+
+	if cfg.dryRun && cfg.mode == addRoleModeBrowser {
+		printer.Blank()
+		printer.StepInfo("Dry run — no changes will be made")
+		printer.StepInfo(fmt.Sprintf("Would create GitHub App for role %q in org %s", cfg.role, cfg.org))
+		printer.StepInfo(fmt.Sprintf("Would store PEM in secret fullsend-%s-app-pem", mintcore.PemSecretRole(cfg.role)))
+		printer.StepInfo("Would update ROLE_APP_IDS and ALLOWED_ROLES on mint")
+		return nil
 	}
 
 	var appID int
@@ -403,7 +416,10 @@ func runMintSetupRemoveRole(ctx context.Context, printer *ui.Printer, role, proj
 	}
 	printer.StepDone(fmt.Sprintf("Found mint at %s", discovery.URL))
 
-	existing := mintcore.RoleOnlyAppIDs(discovery.RoleAppIDs)
+	existing, err := mintTrafficRoleAppIDs(ctx, provisioner, discovery)
+	if err != nil {
+		return fmt.Errorf("reading traffic-serving ROLE_APP_IDS: %w", err)
+	}
 	if _, ok := existing[role]; !ok {
 		return fmt.Errorf("role %q is not registered on the mint", role)
 	}
@@ -422,7 +438,7 @@ func runMintSetupRemoveRole(ctx context.Context, printer *ui.Printer, role, proj
 
 	if !yolo {
 		isTerminal := term.IsTerminal(int(stdin.Fd()))
-		if err := confirmUnenroll(printer, role, bufio.NewReader(stdin), isTerminal); err != nil {
+		if err := confirmUnenroll(printer, role, bufio.NewReader(stdin), isTerminal, "remove-role"); err != nil {
 			return err
 		}
 	}
@@ -455,4 +471,21 @@ func runMintSetupRemoveRole(ctx context.Context, printer *ui.Printer, role, proj
 	}
 	printer.Summary("Role removed", summary)
 	return nil
+}
+
+// mintTrafficRoleAppIDs returns role-only ROLE_APP_IDS from the traffic-serving
+// Cloud Run revision, falling back to discovery template env vars when needed.
+func mintTrafficRoleAppIDs(ctx context.Context, provisioner *gcf.Provisioner, discovery *gcf.MintDiscovery) (map[string]string, error) {
+	trafficEnv, err := provisioner.GetServiceTrafficEnvVars(ctx)
+	if err != nil {
+		return mintcore.RoleOnlyAppIDs(discovery.RoleAppIDs), nil
+	}
+	if raw := trafficEnv["ROLE_APP_IDS"]; raw != "" {
+		var m map[string]string
+		if err := json.Unmarshal([]byte(raw), &m); err != nil {
+			return nil, fmt.Errorf("parsing traffic ROLE_APP_IDS: %w", err)
+		}
+		return mintcore.RoleOnlyAppIDs(m), nil
+	}
+	return mintcore.RoleOnlyAppIDs(discovery.RoleAppIDs), nil
 }
