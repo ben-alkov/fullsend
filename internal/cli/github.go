@@ -820,20 +820,19 @@ func runGitHubUninstall(ctx context.Context, client forge.Client, printer *ui.Pr
 	printer.Header("Uninstalling fullsend from " + org)
 	printer.Blank()
 
-	// Read config before deleting repo to discover actual installed app slugs.
+	// Discover agent slugs: harness files first, then config.yaml agents:
+	// block, then default naming convention.
 	var agentSlugs []string
+	var parsedCfg *config.OrgConfig
 	cfgData, cfgErr := client.GetFileContent(ctx, org, forge.ConfigRepoName, "config.yaml")
 	if cfgErr == nil {
 		if parsed, parseErr := config.ParseOrgConfig(cfgData); parseErr == nil {
-			for _, agent := range parsed.Agents {
-				if agent.Slug != "" {
-					agentSlugs = append(agentSlugs, agent.Slug)
-				} else {
-					agentSlugs = append(agentSlugs, appsetup.AppSlug(appSet, agent.Role))
-				}
-			}
+			parsedCfg = parsed
 		}
 	}
+
+	agentSlugs = discoverAgentSlugs(ctx, client, org, forge.ConfigRepoName, "main", appSet, parsedCfg, printer)
+
 	if len(agentSlugs) == 0 {
 		for _, role := range config.DefaultAgentRoles() {
 			agentSlugs = append(agentSlugs, appsetup.AppSlug(appSet, role))

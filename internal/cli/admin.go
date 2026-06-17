@@ -1584,30 +1584,35 @@ func runInstall(ctx context.Context, client forge.Client, printer *ui.Printer, o
 
 // runUninstall tears down the fullsend installation.
 func runUninstall(ctx context.Context, client forge.Client, printer *ui.Printer, org, appSet string, browser appsetup.BrowserOpener, stdin io.Reader) error {
-	// Try to load agent slugs from existing config. If the .fullsend repo
-	// is already gone (e.g., previous partial uninstall), fall back to the
-	// default naming convention so we can still guide the user to delete
-	// the apps. Without this fallback, a partial uninstall leaves orphaned
-	// apps that block reinstallation (PEM keys are one-shot).
+	// Try to discover agent slugs. Prefer harness wrapper files, then
+	// fall back to config.yaml agents: block, then default naming.
+	// If the .fullsend repo is already gone (e.g., previous partial
+	// uninstall), fall back to the default naming convention so we can
+	// still guide the user to delete the apps. Without this fallback,
+	// a partial uninstall leaves orphaned apps that block reinstallation
+	// (PEM keys are one-shot).
 	var agentSlugs []string
 	var configMode string
 	var enrolledRepos []string
+	var parsedCfg *config.OrgConfig
 	cfgData, err := client.GetFileContent(ctx, org, forge.ConfigRepoName, "config.yaml")
 	if err == nil {
-		if parsedCfg, parseErr := config.ParseOrgConfig(cfgData); parseErr == nil {
-			for _, agent := range parsedCfg.Agents {
-				agentSlugs = append(agentSlugs, agent.Slug)
-			}
-			configMode = parsedCfg.Dispatch.Mode
-			enrolledRepos = parsedCfg.EnabledRepos()
+		if parsed, parseErr := config.ParseOrgConfig(cfgData); parseErr == nil {
+			parsedCfg = parsed
+			configMode = parsed.Dispatch.Mode
+			enrolledRepos = parsed.EnabledRepos()
 		} else {
 			printer.StepWarn(fmt.Sprintf("Could not parse existing config: %v; using defaults", parseErr))
 		}
 	}
+
+	agentSlugs = discoverAgentSlugs(ctx, client, org, forge.ConfigRepoName, "main", appSet, parsedCfg, printer)
+
 	if len(agentSlugs) == 0 {
-		// Config unavailable — assume default app naming convention and
-		// also include any legacy app-set prefixes so that apps created
-		// under an older version are not silently skipped.
+		// Neither harness files nor config agents found — assume default
+		// app naming convention and also include any legacy app-set
+		// prefixes so that apps created under an older version are not
+		// silently skipped.
 		for _, role := range config.DefaultAgentRoles() {
 			agentSlugs = append(agentSlugs, appsetup.AppSlug(appSet, role))
 		}

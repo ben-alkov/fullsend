@@ -466,6 +466,63 @@ func TestRunGitHubUninstall_NoConfigRepo(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestRunGitHubUninstall_UsesHarnessDiscovery(t *testing.T) {
+	client := forge.NewFakeClient()
+	client.Repos = []forge.Repository{
+		{Name: ".fullsend", FullName: "acme/.fullsend"},
+	}
+	// Provide config.yaml with agents: block (should be bypassed).
+	client.FileContents = map[string][]byte{
+		"acme/.fullsend/config.yaml": []byte("version: v1\ndispatch:\n  platform: github-actions\nagents:\n  - role: triage\n    slug: old-triage\n"),
+	}
+	// Provide harness directory with wrapper files.
+	client.DirContents = map[string][]forge.DirectoryEntry{
+		"acme/.fullsend/harness@main": {
+			{Path: "harness/triage.yaml", Type: "file"},
+		},
+	}
+	client.FileContentsRef = map[string][]byte{
+		"acme/.fullsend/harness/triage.yaml@main": []byte("role: triage\nslug: harness-triage\n"),
+	}
+	client.Installations = []forge.Installation{
+		{ID: 1, AppSlug: "harness-triage"},
+	}
+
+	var buf strings.Builder
+	printer := ui.New(&buf)
+
+	err := runGitHubUninstall(context.Background(), client, printer, "acme", "fullsend-ai")
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, "harness-triage")
+	assert.NotContains(t, output, "old-triage")
+	assert.NotContains(t, output, "agents: block")
+}
+
+func TestRunGitHubUninstall_FallsBackToAgentsBlock(t *testing.T) {
+	client := forge.NewFakeClient()
+	client.Repos = []forge.Repository{
+		{Name: ".fullsend", FullName: "acme/.fullsend"},
+	}
+	client.FileContents = map[string][]byte{
+		"acme/.fullsend/config.yaml": []byte("version: v1\ndispatch:\n  platform: github-actions\nagents:\n  - role: triage\n    slug: cfg-triage\n"),
+	}
+	client.Installations = []forge.Installation{
+		{ID: 1, AppSlug: "cfg-triage"},
+	}
+
+	var buf strings.Builder
+	printer := ui.New(&buf)
+
+	err := runGitHubUninstall(context.Background(), client, printer, "acme", "fullsend-ai")
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, "cfg-triage")
+	assert.Contains(t, output, "agents: block")
+}
+
 // --- Sync-scaffold command tests ---
 
 func TestGitHubSyncScaffoldCmd_RequiresOrg(t *testing.T) {

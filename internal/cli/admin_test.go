@@ -2152,6 +2152,69 @@ func TestRunUninstall_NopBrowserSkipsBrowserOpen(t *testing.T) {
 	assert.NotContains(t, output, "Could not open browser")
 }
 
+func TestRunUninstall_UsesHarnessDiscovery(t *testing.T) {
+	client := forge.NewFakeClient()
+	client.TokenScopes = []string{"admin:org", "repo", "delete_repo"}
+
+	// Provide config.yaml with agents: block (should be skipped in favor of harness).
+	client.FileContents = map[string][]byte{
+		"test-org/.fullsend/config.yaml": []byte("version: v1\ndispatch:\n  platform: github-actions\nagents:\n  - role: triage\n    slug: old-triage\n"),
+	}
+	// Provide harness directory with wrapper files.
+	client.DirContents = map[string][]forge.DirectoryEntry{
+		"test-org/.fullsend/harness@main": {
+			{Path: "harness/triage.yaml", Type: "file"},
+			{Path: "harness/coder.yaml", Type: "file"},
+		},
+	}
+	client.FileContentsRef = map[string][]byte{
+		"test-org/.fullsend/harness/triage.yaml@main": []byte("role: triage\nslug: my-triage\n"),
+		"test-org/.fullsend/harness/coder.yaml@main":  []byte("role: coder\nslug: my-coder\n"),
+	}
+
+	client.Installations = []forge.Installation{
+		{ID: 1, AppSlug: "my-triage"},
+		{ID: 2, AppSlug: "my-coder"},
+	}
+
+	var buf strings.Builder
+	printer := ui.New(&buf)
+
+	err := runUninstall(context.Background(), client, printer, "test-org", "fullsend-ai", appsetup.NopBrowser{}, strings.NewReader("\n\n"))
+	require.NoError(t, err)
+
+	output := buf.String()
+	// Should use harness-discovered slugs.
+	assert.Contains(t, output, "my-triage")
+	assert.Contains(t, output, "my-coder")
+	// Should NOT emit the deprecation warning about agents: block.
+	assert.NotContains(t, output, "agents: block")
+}
+
+func TestRunUninstall_FallsBackToAgentsBlockWithWarning(t *testing.T) {
+	client := forge.NewFakeClient()
+	client.TokenScopes = []string{"admin:org", "repo", "delete_repo"}
+
+	// Provide config.yaml with agents: block but no harness directory.
+	client.FileContents = map[string][]byte{
+		"test-org/.fullsend/config.yaml": []byte("version: v1\ndispatch:\n  platform: github-actions\nagents:\n  - role: triage\n    slug: cfg-triage\n"),
+	}
+
+	client.Installations = []forge.Installation{
+		{ID: 1, AppSlug: "cfg-triage"},
+	}
+
+	var buf strings.Builder
+	printer := ui.New(&buf)
+
+	err := runUninstall(context.Background(), client, printer, "test-org", "fullsend-ai", appsetup.NopBrowser{}, strings.NewReader("\n"))
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, "cfg-triage")
+	assert.Contains(t, output, "agents: block")
+}
+
 func TestAwaitRepoMaintenance_Success(t *testing.T) {
 	client := forge.NewFakeClient()
 	dispatchTime := time.Now().UTC().Add(-10 * time.Second)
