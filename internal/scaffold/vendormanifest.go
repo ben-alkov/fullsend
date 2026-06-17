@@ -150,6 +150,8 @@ var vendoredDefaultsInfraPaths = []string{
 	".github/actions/mint-token/action.yml",
 	".github/actions/setup-gcp/action.yml",
 	".github/actions/validate-enrollment/action.yml",
+	".github/scripts/install-openshell.sh",
+	".github/scripts/openshell-version.sh",
 }
 
 // enumerateVendoredPaths returns embed-derived paths for a current --vendor install layout.
