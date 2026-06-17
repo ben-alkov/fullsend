@@ -1043,6 +1043,101 @@ func TestOrgConfigValidate_CreateIssues_Nil(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// --- Agents optional (ADR-0045 Phase 3) ---
+
+func TestParseOrgConfig_WithoutAgentsBlock(t *testing.T) {
+	yamlData := `
+version: "1"
+dispatch:
+  platform: github-actions
+defaults:
+  roles:
+    - fullsend
+  max_implementation_retries: 2
+repos: {}
+`
+	cfg, err := ParseOrgConfig([]byte(yamlData))
+	require.NoError(t, err)
+	assert.Nil(t, cfg.Agents)
+	assert.Empty(t, cfg.AgentSlugs())
+}
+
+func TestParseOrgConfig_EmptyAgentsList(t *testing.T) {
+	yamlData := `
+version: "1"
+dispatch:
+  platform: github-actions
+defaults:
+  roles:
+    - fullsend
+  max_implementation_retries: 2
+agents: []
+repos: {}
+`
+	cfg, err := ParseOrgConfig([]byte(yamlData))
+	require.NoError(t, err)
+	assert.Empty(t, cfg.AgentSlugs())
+}
+
+func TestHasAgentsBlock(t *testing.T) {
+	t.Run("returns true when agents has entries", func(t *testing.T) {
+		cfg := &OrgConfig{
+			Agents: []AgentEntry{
+				{Role: "fullsend", Name: "app", Slug: "slug"},
+			},
+		}
+		assert.True(t, cfg.HasAgentsBlock())
+	})
+
+	t.Run("returns false when agents is nil", func(t *testing.T) {
+		cfg := &OrgConfig{Agents: nil}
+		assert.False(t, cfg.HasAgentsBlock())
+	})
+
+	t.Run("returns false when agents is empty slice", func(t *testing.T) {
+		cfg := &OrgConfig{Agents: []AgentEntry{}}
+		assert.False(t, cfg.HasAgentsBlock())
+	})
+}
+
+func TestOrgConfigMarshal_NilAgentsOmitted(t *testing.T) {
+	cfg := &OrgConfig{
+		Version:  "1",
+		Dispatch: DispatchConfig{Platform: "github-actions"},
+		Defaults: RepoDefaults{
+			Roles:                    []string{"fullsend"},
+			MaxImplementationRetries: 2,
+		},
+		Agents: nil,
+		Repos:  map[string]RepoConfig{},
+	}
+
+	data, err := cfg.Marshal()
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "agents:")
+}
+
+func TestOrgConfigMarshal_EmptyAgentsOmitted(t *testing.T) {
+	// yaml.v3 treats empty (non-nil) slices the same as nil for omitempty:
+	// both are considered "zero" and omitted. This test locks in that behavior.
+	cfg := &OrgConfig{
+		Version:  "1",
+		Dispatch: DispatchConfig{Platform: "github-actions"},
+		Defaults: RepoDefaults{
+			Roles:                    []string{"fullsend"},
+			MaxImplementationRetries: 2,
+		},
+		Agents: []AgentEntry{},
+		Repos:  map[string]RepoConfig{},
+	}
+
+	data, err := cfg.Marshal()
+	require.NoError(t, err)
+	// yaml.v3 omitempty uses Len()==0 for slices, so empty non-nil slices
+	// are also omitted — same as nil.
+	assert.NotContains(t, string(data), "agents:")
+}
+
 func TestNewOrgConfig_CreateIssuesDefaults(t *testing.T) {
 	cfg := NewOrgConfig(nil, nil, []string{"fullsend"}, nil, "", "my-org")
 	require.NotNil(t, cfg.CreateIssues)
