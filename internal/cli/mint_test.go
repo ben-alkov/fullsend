@@ -1268,3 +1268,52 @@ func TestMintTrafficRoleAppIDs_FallbackWhenTrafficEmpty(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "100", roles["coder"])
 }
+
+func TestMintAddRoleCmd_ExistingSecretMissingPEM(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `{"id": 99999}`)
+	}))
+	defer srv.Close()
+
+	orig := githubAPIBaseURL
+	githubAPIBaseURL = srv.URL
+	defer func() { githubAPIBaseURL = orig }()
+
+	withMintGCFClient(t, gcf.NewFakeGCFClient(
+		gcf.WithFakeFunctionInfo(&gcf.FunctionInfo{
+			URI:     "https://mint.example.com",
+			EnvVars: map[string]string{"ROLE_APP_IDS": `{"coder":"100"}`},
+		}),
+		gcf.WithFakeTrafficEnvVars(map[string]string{
+			"ROLE_APP_IDS": `{"coder":"100"}`,
+		}),
+		gcf.WithFakeSecrets(map[string]bool{
+			"fullsend-review-app-pem": false,
+		}),
+	))
+
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{
+		"mint", "add-role", "review",
+		"--project=my-project-id",
+		"--slug=fullsend-ai-review",
+		"--use-existing-pem-secret",
+	})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not exist")
+}
+
+func TestMintRemoveRoleCmd_KeepPEMDryRun(t *testing.T) {
+	withMintGCFClient(t, mintDiscoveryClient())
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{
+		"mint", "remove-role", "coder",
+		"--project=my-project-id",
+		"--keep-pem",
+		"--dry-run",
+	})
+	err := cmd.Execute()
+	require.NoError(t, err)
+}

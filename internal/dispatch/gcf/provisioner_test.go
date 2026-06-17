@@ -3168,3 +3168,62 @@ func TestRemoveRoleFromMint_MissingProjectID(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "GCP project ID is required")
 }
+
+func TestAddRoleToMint_InvalidRole(t *testing.T) {
+	p := NewProvisioner(Config{ProjectID: "proj1", Region: "us-central1"}, newFakeGCFClient())
+	err := p.AddRoleToMint(context.Background(), "BAD", "123")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid role name")
+}
+
+func TestAddRoleToMint_EmptyAppID(t *testing.T) {
+	p := NewProvisioner(Config{ProjectID: "proj1", Region: "us-central1"}, newFakeGCFClient())
+	err := p.AddRoleToMint(context.Background(), "coder", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "app ID is required")
+}
+
+func TestAddRoleToMint_MalformedExistingJSON(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.trafficEnvVars = map[string]string{"ROLE_APP_IDS": "not-json"}
+	p := NewProvisioner(Config{ProjectID: "proj1", Region: "us-central1"}, fake)
+	err := p.AddRoleToMint(context.Background(), "coder", "123")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "merging ROLE_APP_IDS")
+}
+
+func TestAddRoleToMint_UpdateEnvVarsError(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.functionInfo = &FunctionInfo{
+		URI:     "https://mint.example.com",
+		EnvVars: map[string]string{"ROLE_APP_IDS": `{"coder":"100"}`},
+	}
+	fake.errs["UpdateServiceEnvVars"] = fmt.Errorf("permission denied")
+	p := NewProvisioner(Config{ProjectID: "proj1", Region: "us-central1"}, fake)
+	err := p.AddRoleToMint(context.Background(), "review", "200")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "updating mint env vars")
+}
+
+func TestRemoveRoleFromMint_InvalidRole(t *testing.T) {
+	p := NewProvisioner(Config{ProjectID: "proj1", Region: "us-central1"}, newFakeGCFClient())
+	err := p.RemoveRoleFromMint(context.Background(), "BAD")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid role name")
+}
+
+func TestRemoveRoleFromMint_MalformedExistingJSON(t *testing.T) {
+	fake := newFakeGCFClient()
+	fake.trafficEnvVars = map[string]string{"ROLE_APP_IDS": "not-json"}
+	p := NewProvisioner(Config{ProjectID: "proj1", Region: "us-central1"}, fake)
+	err := p.RemoveRoleFromMint(context.Background(), "coder")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "pruning ROLE_APP_IDS")
+}
+
+func TestDeleteAgentPEM_InvalidRole(t *testing.T) {
+	p := NewProvisioner(Config{ProjectID: "proj1"}, newFakeGCFClient())
+	err := p.DeleteAgentPEM(context.Background(), "BAD")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid role name")
+}
