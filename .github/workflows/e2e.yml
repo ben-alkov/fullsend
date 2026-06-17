@@ -9,6 +9,7 @@ permissions: {}
 on:
   push:
     branches: [main]
+    # SYNC-WITH: grep regex in "Check for e2e-relevant changes" step in the e2e job
     paths:
       - '**/*.go'
       - 'go.mod'
@@ -87,9 +88,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
+        # SYNC-WITH: push.paths filter above
         run: |
-          FILES=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}/files" --paginate --jq '.[].filename')
-          if echo "$FILES" | grep -qE '\.go$|^go\.(mod|sum)$|^e2e/|^internal/scaffold/fullsend-repo/|^internal/security/hooks/|^internal/dispatch/gcf/mintsrc/|^internal/sentencetoken/english\.json$|^Makefile$|\.github/workflows/e2e\.yml$|\.github/actions/check-e2e-authorization/|^scripts/check-e2e-authorization\.sh$'; then
+          FILES=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}/files" --paginate --jq '.[].filename') || {
+            echo "::warning::Failed to fetch PR files — running e2e tests as a precaution"
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          if echo "$FILES" | grep -qE '\.go$|^go\.(mod|sum)$|^e2e/|^internal/scaffold/fullsend-repo/|^internal/security/hooks/|^internal/dispatch/gcf/mintsrc/|^internal/sentencetoken/english\.json$|^Makefile$|^\.github/workflows/e2e\.yml$|^\.github/actions/check-e2e-authorization/|^scripts/check-e2e-authorization\.sh$'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "::notice::No e2e-relevant files changed — skipping tests"
