@@ -1607,3 +1607,120 @@ func TestSetupStatusNotifier_PRHeadSHA(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, n)
 }
+
+func TestEmitDiagnostic_Warning(t *testing.T) {
+	var buf bytes.Buffer
+	printer := ui.New(&buf)
+
+	diag := harness.Diagnostic{
+		Severity: harness.SeverityWarning,
+		Field:    "role",
+		Message:  "test warning message",
+	}
+	emitDiagnostic(printer, diag)
+
+	output := buf.String()
+	assert.Contains(t, output, "warning")
+	assert.Contains(t, output, "role")
+	assert.Contains(t, output, "test warning message")
+}
+
+func TestEmitDiagnostic_Error(t *testing.T) {
+	var buf bytes.Buffer
+	printer := ui.New(&buf)
+
+	diag := harness.Diagnostic{
+		Severity: harness.SeverityError,
+		Field:    "agent",
+		Message:  "test error message",
+	}
+	emitDiagnostic(printer, diag)
+
+	output := buf.String()
+	assert.Contains(t, output, "error")
+	assert.Contains(t, output, "agent")
+	assert.Contains(t, output, "test error message")
+}
+
+func TestEmitDiagnosticWithContext(t *testing.T) {
+	var buf bytes.Buffer
+	printer := ui.New(&buf)
+
+	diag := harness.Diagnostic{
+		Severity: harness.SeverityWarning,
+		Field:    "role",
+		Message:  "role is not set",
+	}
+	emitDiagnosticWithContext(printer, "triage", diag)
+
+	output := buf.String()
+	assert.Contains(t, output, "triage")
+	assert.Contains(t, output, "warning")
+	assert.Contains(t, output, "role")
+}
+
+func TestRunAgent_LintWarningOnMissingRole(t *testing.T) {
+	// Verifies that runAgent emits a lint warning when harness has no role,
+	// but the command still proceeds (fails later at sandbox availability).
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "harness"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "agents"), 0o755))
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "agents", "code.md"),
+		[]byte("You are a coding agent."),
+		0o644,
+	))
+	// Harness without role field
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "harness", "code.yaml"),
+		[]byte("agent: agents/code.md\n"),
+		0o644,
+	))
+
+	var buf bytes.Buffer
+	rFlags := resolveFlags{maxDepth: 10, maxResources: 50}
+	printer := ui.New(&buf)
+	err := runAgent(context.Background(), "code", dir, "", "/tmp/repo", "", nil, false, "", "", rFlags, statusOpts{}, printer, false)
+
+	// Command fails later (no openshell), but lint warning should be emitted
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "openshell")
+
+	// Verify lint warning was printed
+	output := buf.String()
+	assert.Contains(t, output, "role")
+	assert.Contains(t, output, "warning")
+}
+
+func TestRunAgent_NoLintWarningWithRole(t *testing.T) {
+	// Verifies that runAgent does NOT emit a lint warning when harness has role set.
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "harness"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "agents"), 0o755))
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "agents", "code.md"),
+		[]byte("You are a coding agent."),
+		0o644,
+	))
+	// Harness with role field
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "harness", "code.yaml"),
+		[]byte("agent: agents/code.md\nrole: coder\n"),
+		0o644,
+	))
+
+	var buf bytes.Buffer
+	rFlags := resolveFlags{maxDepth: 10, maxResources: 50}
+	printer := ui.New(&buf)
+	err := runAgent(context.Background(), "code", dir, "", "/tmp/repo", "", nil, false, "", "", rFlags, statusOpts{}, printer, false)
+
+	// Command fails later (no openshell)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "openshell")
+
+	// Verify no lint warning about role
+	output := buf.String()
+	assert.NotContains(t, output, "role is not set")
+}
