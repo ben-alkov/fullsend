@@ -156,6 +156,6 @@ jobs:
           docker run --rm --entrypoint '' fullsend-code:ci-smoke sh -c '
             LAST=$(echo "$PATH" | tr ":" "\n" | tail -1)
             [ "$LAST" = "/sandbox/go/bin" ] || { echo "FAIL: /sandbox/go/bin not last (got $LAST)"; exit 1; }
-            [ "$(which git)" = "/usr/bin/git" ] || { echo "FAIL: git shadowed ($(which git))"; exit 1; }
-            [ "$(which scan-secrets)" = "/usr/local/bin/scan-secrets" ] || { echo "FAIL: scan-secrets shadowed ($(which scan-secrets))"; exit 1; }
+            [ "$(command -v git)" = "/usr/bin/git" ] || { echo "FAIL: git shadowed ($(command -v git))"; exit 1; }
+            [ "$(command -v scan-secrets)" = "/usr/local/bin/scan-secrets" ] || { echo "FAIL: scan-secrets shadowed ($(command -v scan-secrets))"; exit 1; }
           '
