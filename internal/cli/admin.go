@@ -24,6 +24,7 @@ import (
 	"github.com/fullsend-ai/fullsend/internal/dispatch/gcf"
 	"github.com/fullsend-ai/fullsend/internal/forge"
 	gh "github.com/fullsend-ai/fullsend/internal/forge/github"
+	"github.com/fullsend-ai/fullsend/internal/harness"
 	"github.com/fullsend-ai/fullsend/internal/inference"
 	"github.com/fullsend-ai/fullsend/internal/inference/vertex"
 	"github.com/fullsend-ai/fullsend/internal/layers"
@@ -1331,7 +1332,7 @@ func runAppSetup(ctx context.Context, client forge.Client, printer *ui.Printer, 
 	// of app-set B. Without this, nonflux-triage (app-set "nonflux") would
 	// prevent fullsend-ai-triage (app-set "fullsend-ai") from being detected
 	// and installed.
-	knownSlugs := filterSlugsByAppSet(loadKnownSlugs(ctx, client, org), appSet)
+	knownSlugs := filterSlugsByAppSet(loadKnownSlugs(ctx, client, org, forge.ConfigRepoName, "HEAD", printer), appSet)
 	for role, slug := range filterSlugsByAppSet(sharedSlugs, appSet) {
 		knownSlugs[role] = slug
 	}
@@ -2017,8 +2018,45 @@ func filterSlugsByAppSet(slugs map[string]string, appSet string) map[string]stri
 	return out
 }
 
-// loadKnownSlugs tries to read agent slugs from an existing config.
-func loadKnownSlugs(ctx context.Context, client forge.Client, org string) map[string]string {
+// loadKnownSlugs discovers agent slugs from harness wrapper files in the
+// config repo, falling back to the config.yaml agents: block.
+func loadKnownSlugs(ctx context.Context, client forge.Client, org, configRepo, ref string, printer *ui.Printer) map[string]string {
+	agents, err := harness.DiscoverRemoteAgents(ctx, client, org, configRepo, ref)
+	if err != nil {
+		printer.StepWarn(fmt.Sprintf("harness discovery: %v", err))
+	}
+	if len(agents) > 0 {
+		slugs := make(map[string]string, len(agents))
+		seen := make(map[string]bool, len(agents))
+		for _, a := range agents {
+			if a.Role == "" && a.Slug == "" {
+				continue
+			}
+			if a.Role == "" || a.Slug == "" {
+				printer.StepWarn(fmt.Sprintf("harness %s has role=%q slug=%q; both must be set", a.Filename, a.Role, a.Slug))
+				continue
+			}
+			if seen[a.Role] {
+				printer.StepInfo(fmt.Sprintf("duplicate role %q in harness file %s, using first occurrence", a.Role, a.Filename))
+				continue
+			}
+			seen[a.Role] = true
+			slugs[a.Role] = a.Slug
+		}
+		if len(slugs) > 0 {
+			return slugs
+		}
+	}
+
+	slugs := loadKnownSlugsLegacy(ctx, client, org)
+	if len(slugs) > 0 {
+		printer.StepWarn("config.yaml agents: block is deprecated; agent identity should be in harness files with role/slug fields")
+	}
+	return slugs
+}
+
+// loadKnownSlugsLegacy reads agent slugs from the config.yaml agents: block.
+func loadKnownSlugsLegacy(ctx context.Context, client forge.Client, org string) map[string]string {
 	data, err := client.GetFileContent(ctx, org, forge.ConfigRepoName, "config.yaml")
 	if err != nil {
 		return nil

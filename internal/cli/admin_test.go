@@ -2547,6 +2547,194 @@ func TestApplyPerRepoScaffold_ProtectedBranch_DuplicatePR(t *testing.T) {
 	assert.Contains(t, output, "Merge the PR")
 }
 
+func TestLoadKnownSlugs_HarnessFilesPreferred(t *testing.T) {
+	client := forge.NewFakeClient()
+	client.DirContents["myorg/.fullsend/harness@HEAD"] = []forge.DirectoryEntry{
+		{Path: "harness/triage.yaml", Type: "file"},
+		{Path: "harness/coder.yaml", Type: "file"},
+	}
+	client.FileContentsRef["myorg/.fullsend/harness/triage.yaml@HEAD"] = []byte("role: triage\nslug: fullsend-ai-triage\n")
+	client.FileContentsRef["myorg/.fullsend/harness/coder.yaml@HEAD"] = []byte("role: coder\nslug: fullsend-ai-coder\n")
+
+	// Also set up config.yaml agents: block — should NOT be used.
+	client.FileContents["myorg/.fullsend/config.yaml"] = []byte(`version: "1"
+agents:
+  - role: triage
+    slug: old-triage-slug
+    name: old-triage
+`)
+
+	var buf bytes.Buffer
+	printer := ui.New(&buf)
+	slugs := loadKnownSlugs(context.Background(), client, "myorg", forge.ConfigRepoName, "HEAD", printer)
+
+	assert.Equal(t, map[string]string{
+		"triage": "fullsend-ai-triage",
+		"coder":  "fullsend-ai-coder",
+	}, slugs)
+	assert.NotContains(t, buf.String(), "agents: block")
+}
+
+func TestLoadKnownSlugs_FallbackToAgentsBlock(t *testing.T) {
+	client := forge.NewFakeClient()
+	// No harness/ directory → ErrNotFound from DirContents.
+
+	client.FileContents["myorg/.fullsend/config.yaml"] = []byte(`version: "1"
+agents:
+  - role: triage
+    slug: fullsend-ai-triage
+    name: fullsend-ai-triage
+  - role: coder
+    slug: fullsend-ai-coder
+    name: fullsend-ai-coder
+`)
+
+	var buf bytes.Buffer
+	printer := ui.New(&buf)
+	slugs := loadKnownSlugs(context.Background(), client, "myorg", forge.ConfigRepoName, "HEAD", printer)
+
+	assert.Equal(t, map[string]string{
+		"triage": "fullsend-ai-triage",
+		"coder":  "fullsend-ai-coder",
+	}, slugs)
+	assert.Contains(t, buf.String(), "agents: block")
+}
+
+func TestLoadKnownSlugs_HarnessFilesWithoutRoleSlug_FallsBack(t *testing.T) {
+	client := forge.NewFakeClient()
+	// Harness files exist but lack role/slug (legacy format).
+	client.DirContents["myorg/.fullsend/harness@HEAD"] = []forge.DirectoryEntry{
+		{Path: "harness/triage.yaml", Type: "file"},
+	}
+	client.FileContentsRef["myorg/.fullsend/harness/triage.yaml@HEAD"] = []byte("agent: agents/triage.md\nmodel: opus\n")
+
+	client.FileContents["myorg/.fullsend/config.yaml"] = []byte(`version: "1"
+agents:
+  - role: triage
+    slug: fullsend-ai-triage
+    name: fullsend-ai-triage
+`)
+
+	var buf bytes.Buffer
+	printer := ui.New(&buf)
+	slugs := loadKnownSlugs(context.Background(), client, "myorg", forge.ConfigRepoName, "HEAD", printer)
+
+	assert.Equal(t, map[string]string{
+		"triage": "fullsend-ai-triage",
+	}, slugs)
+	assert.Contains(t, buf.String(), "agents: block")
+}
+
+func TestLoadKnownSlugs_NeitherSource_ReturnsNil(t *testing.T) {
+	client := forge.NewFakeClient()
+	// No harness/ dir, no config.yaml.
+
+	var buf bytes.Buffer
+	printer := ui.New(&buf)
+	slugs := loadKnownSlugs(context.Background(), client, "myorg", forge.ConfigRepoName, "HEAD", printer)
+
+	assert.Nil(t, slugs)
+	assert.NotContains(t, buf.String(), "agents: block")
+}
+
+func TestLoadKnownSlugs_DuplicateRoles_FirstWins(t *testing.T) {
+	client := forge.NewFakeClient()
+	client.DirContents["myorg/.fullsend/harness@HEAD"] = []forge.DirectoryEntry{
+		{Path: "harness/code.yaml", Type: "file"},
+		{Path: "harness/fix.yaml", Type: "file"},
+	}
+	// Both files declare role: coder. DiscoverRemoteAgents sorts by Role then
+	// Filename, so code.yaml comes first.
+	client.FileContentsRef["myorg/.fullsend/harness/code.yaml@HEAD"] = []byte("role: coder\nslug: fullsend-ai-coder\n")
+	client.FileContentsRef["myorg/.fullsend/harness/fix.yaml@HEAD"] = []byte("role: coder\nslug: fullsend-ai-fix\n")
+
+	var buf bytes.Buffer
+	printer := ui.New(&buf)
+	slugs := loadKnownSlugs(context.Background(), client, "myorg", forge.ConfigRepoName, "HEAD", printer)
+
+	assert.Equal(t, map[string]string{
+		"coder": "fullsend-ai-coder",
+	}, slugs)
+	assert.Contains(t, buf.String(), "duplicate role")
+}
+
+func TestLoadKnownSlugs_PartialError_LogsWarning(t *testing.T) {
+	client := forge.NewFakeClient()
+	client.DirContents["myorg/.fullsend/harness@HEAD"] = []forge.DirectoryEntry{
+		{Path: "harness/triage.yaml", Type: "file"},
+		{Path: "harness/bad.yaml", Type: "file"},
+	}
+	client.FileContentsRef["myorg/.fullsend/harness/triage.yaml@HEAD"] = []byte("role: triage\nslug: fullsend-ai-triage\n")
+	// bad.yaml is not in FileContentsRef → GetFileContentAtRef returns ErrNotFound.
+
+	var buf bytes.Buffer
+	printer := ui.New(&buf)
+	slugs := loadKnownSlugs(context.Background(), client, "myorg", forge.ConfigRepoName, "HEAD", printer)
+
+	assert.Equal(t, map[string]string{
+		"triage": "fullsend-ai-triage",
+	}, slugs)
+	assert.Contains(t, buf.String(), "harness discovery")
+}
+
+func TestLoadKnownSlugs_RoleWithoutSlug_WarnsAndSkips(t *testing.T) {
+	client := forge.NewFakeClient()
+	client.DirContents["myorg/.fullsend/harness@HEAD"] = []forge.DirectoryEntry{
+		{Path: "harness/triage.yaml", Type: "file"},
+	}
+	client.FileContentsRef["myorg/.fullsend/harness/triage.yaml@HEAD"] = []byte("role: triage\n")
+
+	client.FileContents["myorg/.fullsend/config.yaml"] = []byte(`version: "1"
+agents:
+  - role: triage
+    slug: fullsend-ai-triage
+    name: fullsend-ai-triage
+`)
+
+	var buf bytes.Buffer
+	printer := ui.New(&buf)
+	slugs := loadKnownSlugs(context.Background(), client, "myorg", forge.ConfigRepoName, "HEAD", printer)
+
+	assert.Equal(t, map[string]string{
+		"triage": "fullsend-ai-triage",
+	}, slugs)
+	assert.Contains(t, buf.String(), "both must be set")
+}
+
+func TestLoadKnownSlugs_HardError_ZeroAgents_FallsBack(t *testing.T) {
+	client := forge.NewFakeClient()
+	client.Errors["ListDirectoryContents"] = fmt.Errorf("network timeout")
+
+	client.FileContents["myorg/.fullsend/config.yaml"] = []byte(`version: "1"
+agents:
+  - role: triage
+    slug: fullsend-ai-triage
+    name: fullsend-ai-triage
+`)
+
+	var buf bytes.Buffer
+	printer := ui.New(&buf)
+	slugs := loadKnownSlugs(context.Background(), client, "myorg", forge.ConfigRepoName, "HEAD", printer)
+
+	assert.Equal(t, map[string]string{
+		"triage": "fullsend-ai-triage",
+	}, slugs)
+	assert.Contains(t, buf.String(), "harness discovery")
+	assert.Contains(t, buf.String(), "deprecated")
+}
+
+func TestLoadKnownSlugs_MalformedConfig_ReturnsNil(t *testing.T) {
+	client := forge.NewFakeClient()
+	// No harness/ dir, malformed config.yaml.
+	client.FileContents["myorg/.fullsend/config.yaml"] = []byte("not: valid: yaml: [")
+
+	var buf bytes.Buffer
+	printer := ui.New(&buf)
+	slugs := loadKnownSlugs(context.Background(), client, "myorg", forge.ConfigRepoName, "HEAD", printer)
+
+	assert.Nil(t, slugs)
+}
+
 func TestApplyPerRepoScaffold_ProtectedBranch_BranchUpToDate(t *testing.T) {
 	client := forge.NewFakeClient()
 	client.Repos = []forge.Repository{{FullName: "acme/widget", DefaultBranch: "main"}}
