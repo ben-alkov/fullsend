@@ -8,7 +8,7 @@ version: 1
 # handles mutations on the runner with a separate write-scoped token.
 
 filesystem_policy:
-  include_workdir: true
+  include_workdir: false
   read_only: [/usr, /lib, /proc, /dev/urandom, /app, /etc, /var/log]
   read_write: [/sandbox, /tmp, /dev/null]
 landlock:
