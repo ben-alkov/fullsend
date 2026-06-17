@@ -14,9 +14,9 @@ pr="${1:-}"
 
 # Resolve PR URL and repo
 if [[ -z "$pr" ]]; then
-  pr_json_init="$(gh pr view --json url,baseRefName,headRepository -q '{url,baseRefName,headRepository}')"
+  pr_json_init="$(gh pr view --json url,baseRefName -q '{url,baseRefName}')"
 else
-  pr_json_init="$(gh pr view "$pr" --json url,baseRefName,headRepository -q '{url,baseRefName,headRepository}')"
+  pr_json_init="$(gh pr view "$pr" --json url,baseRefName -q '{url,baseRefName}')"
 fi
 
 pr_url="$(echo "$pr_json_init" | jq -r .url)"
@@ -25,12 +25,12 @@ base_branch="$(echo "$pr_json_init" | jq -r .baseRefName)"
 # Extract owner/repo from the PR URL
 repo_nwo="$(echo "$pr_url" | sed -E 's|https://github.com/([^/]+/[^/]+)/pull/.*|\1|')"
 
-# Fetch required status checks from branch rulesets
-required_checks="$(gh api "repos/$repo_nwo/rules/branches/$base_branch" \
-  --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | unique | .[]' 2>/dev/null || true)"
+# Fetch required status checks from branch rulesets as a JSON array
+required_json="$(gh api "repos/$repo_nwo/rules/branches/$base_branch" \
+  --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | unique' 2>/dev/null || echo '[]')"
 
-if [[ -n "$required_checks" ]]; then
-  echo "Required checks: $(echo "$required_checks" | tr '\n' ', ' | sed 's/,$//')"
+if [[ "$(echo "$required_json" | jq 'length')" -gt 0 ]]; then
+  echo "Required checks: $(echo "$required_json" | jq -r 'join(", ")')"
 fi
 
 echo "Waiting for checks and approvals on: $pr_url"
@@ -41,46 +41,37 @@ while true; do
 
   review_decision="$(echo "$pr_json" | jq -r '.reviewDecision // "NONE"')"
 
-  # Build a map of check name -> conclusion
-  declare -A check_status=()
-  while IFS=$'\t' read -r state name; do
-    check_status["$name"]="$state"
-  done < <(echo "$pr_json" | jq -r '.statusCheckRollup[] | [(.conclusion // .status // "PENDING"), .name] | @tsv')
+  # Use jq to analyze all check statuses and required check coverage in one pass
+  result="$(echo "$pr_json" | jq -r --argjson required "$required_json" '
+    .statusCheckRollup as $checks |
+    # Build map of name -> conclusion
+    ($checks | map({(.name): (.conclusion // .status // "PENDING")}) | add // {}) as $map |
+    # Check for failures
+    [$map | to_entries[] | select(.value | test("FAILURE|ERROR|CANCELLED|TIMED_OUT|STARTUP_FAILURE|ACTION_REQUIRED")) | .key + " (" + .value + ")"] as $failures |
+    # Check for pending
+    [$map | to_entries[] | select(.value | test("SUCCESS|NEUTRAL|SKIPPED|COMPLETED|FAILURE|ERROR|CANCELLED|TIMED_OUT|STARTUP_FAILURE|ACTION_REQUIRED") | not) | .key] as $pending |
+    # Check for missing required checks
+    [$required[] | select(. as $r | $map | has($r) | not)] as $missing |
+    {failures: $failures, pending: $pending, missing: $missing}
+  ')"
 
-  has_pending=false
-  has_failure=false
+  failures="$(echo "$result" | jq -r '.failures[]' 2>/dev/null || true)"
+  pending="$(echo "$result" | jq -r '.pending[]' 2>/dev/null || true)"
+  missing="$(echo "$result" | jq -r '.missing[]' 2>/dev/null || true)"
 
-  # Check reported statuses
-  for name in "${!check_status[@]}"; do
-    state="${check_status[$name]}"
-    case "$state" in
-      SUCCESS|NEUTRAL|SKIPPED|COMPLETED)
-        ;;
-      FAILURE|ERROR|CANCELLED|TIMED_OUT|STARTUP_FAILURE|ACTION_REQUIRED)
-        echo "FAILED: $name ($state)"
-        has_failure=true
-        ;;
-      *)
-        has_pending=true
-        ;;
-    esac
-  done
-
-  # Check for required checks that haven't appeared yet
-  if [[ -n "$required_checks" ]]; then
-    while IFS= read -r req; do
-      if [[ -z "${check_status[$req]+x}" ]]; then
-        echo "Required check not yet reported: $req"
-        has_pending=true
-      fi
-    done <<< "$required_checks"
-  fi
-
-  unset check_status
-
-  if [[ "$has_failure" == "true" ]]; then
+  if [[ -n "$failures" ]]; then
+    echo "$failures" | while IFS= read -r f; do echo "FAILED: $f"; done
     echo "Aborting — one or more required checks failed."
     exit 1
+  fi
+
+  has_pending=false
+  if [[ -n "$pending" ]]; then
+    has_pending=true
+  fi
+  if [[ -n "$missing" ]]; then
+    echo "$missing" | while IFS= read -r m; do echo "Required check not yet reported: $m"; done
+    has_pending=true
   fi
 
   if [[ "$has_pending" == "true" ]]; then
