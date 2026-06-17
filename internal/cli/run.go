@@ -341,6 +341,11 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 	}
 	printer.StepDone(fmt.Sprintf("Harness loaded (%.1fs)", time.Since(harnessStart).Seconds()))
 
+	// Run lint checks and report any diagnostics (non-fatal).
+	for _, diag := range h.Lint() {
+		emitDiagnostic(printer, diag)
+	}
+
 	// Print plan.
 	printer.KeyValue("Agent", h.Agent)
 	if h.Role != "" {
@@ -1951,4 +1956,28 @@ func prHeadSHAFromEventPath(path string) string {
 		return ""
 	}
 	return payload.PullRequest.Head.SHA
+}
+
+// emitDiagnostic prints a harness lint diagnostic with severity-appropriate formatting.
+// Warnings use StepWarn, errors use StepFail. This ensures future SeverityError
+// diagnostics are visually distinct from warnings.
+func emitDiagnostic(printer *ui.Printer, diag harness.Diagnostic) {
+	switch diag.Severity {
+	case harness.SeverityError:
+		printer.StepFail(diag.String())
+	default:
+		printer.StepWarn(diag.String())
+	}
+}
+
+// emitDiagnosticWithContext prints a diagnostic with additional context (e.g., agent name).
+// Used by lock --all where multiple harnesses are processed and context helps identify which.
+func emitDiagnosticWithContext(printer *ui.Printer, context string, diag harness.Diagnostic) {
+	msg := fmt.Sprintf("%s: %s", context, diag.String())
+	switch diag.Severity {
+	case harness.SeverityError:
+		printer.StepFail(msg)
+	default:
+		printer.StepWarn(msg)
+	}
 }
