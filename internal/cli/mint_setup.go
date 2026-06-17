@@ -453,13 +453,6 @@ func runMintSetupRemoveRole(ctx context.Context, printer *ui.Printer, role, proj
 		}
 	}
 
-	printer.StepStart("Removing role from mint configuration")
-	if err := provisioner.RemoveRoleFromMint(ctx, role); err != nil {
-		printer.StepFail("Failed to update mint env vars")
-		return fmt.Errorf("removing role from mint: %w", err)
-	}
-	printer.StepDone("Role removed from mint env vars")
-
 	if !keepPEM {
 		printer.StepStart("Deleting PEM secret")
 		if err := provisioner.DeleteAgentPEM(ctx, role); err != nil {
@@ -468,6 +461,13 @@ func runMintSetupRemoveRole(ctx context.Context, printer *ui.Printer, role, proj
 		}
 		printer.StepDone("PEM secret deleted")
 	}
+
+	printer.StepStart("Removing role from mint configuration")
+	if err := provisioner.RemoveRoleFromMint(ctx, role); err != nil {
+		printer.StepFail("Failed to update mint env vars")
+		return fmt.Errorf("removing role from mint: %w", err)
+	}
+	printer.StepDone("Role removed from mint env vars")
 
 	printer.Blank()
 	summary := []string{
