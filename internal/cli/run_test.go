@@ -24,6 +24,7 @@ import (
 	"github.com/fullsend-ai/fullsend/internal/fetchsvc"
 	"github.com/fullsend-ai/fullsend/internal/forge"
 	"github.com/fullsend-ai/fullsend/internal/harness"
+	"github.com/fullsend-ai/fullsend/internal/mintclient"
 	"github.com/fullsend-ai/fullsend/internal/ui"
 )
 
@@ -1479,25 +1480,6 @@ func TestSetupStatusNotifier_NoMintURL(t *testing.T) {
 	assert.Contains(t, err.Error(), "no mint URL available")
 }
 
-func TestSetupStatusNotifier_DeprecatedToken(t *testing.T) {
-	tmpDir := t.TempDir()
-	printer := ui.New(io.Discard)
-
-	sOpts := statusOpts{
-		statusRepo:  "org/repo",
-		statusNum:   7,
-		statusToken: "test-static-token",
-	}
-
-	t.Setenv("GITHUB_RUN_ID", "run-42")
-	t.Setenv("FULLSEND_MINT_URL", "")
-
-	n, err := setupStatusNotifier(tmpDir, "code", sOpts, printer)
-	require.NoError(t, err)
-	assert.NotNil(t, n)
-	assert.False(t, n.HasClientFactory(), "client factory should not be set when using deprecated static token")
-}
-
 func TestSetupStatusNotifier_InvalidRepo(t *testing.T) {
 	tmpDir := t.TempDir()
 	printer := ui.New(io.Discard)
@@ -1520,12 +1502,66 @@ func TestRunCommand_HasMintURLFlag(t *testing.T) {
 	assert.Equal(t, "", f.DefValue)
 }
 
-func TestRunCommand_StatusTokenFlagDeprecated(t *testing.T) {
-	cmd := newRunCmd()
+func TestSetupStatusNotifier_FactoryMintSuccess(t *testing.T) {
+	tmpDir := t.TempDir()
+	printer := ui.New(io.Discard)
 
+	origMint := statusMintToken
+	statusMintToken = func(_ context.Context, req mintclient.MintRequest) (*mintclient.MintResult, error) {
+		assert.Equal(t, "coder", req.Role)
+		assert.Equal(t, []string{"repo"}, req.Repos)
+		return &mintclient.MintResult{Token: "ghs_test_minted"}, nil
+	}
+	defer func() { statusMintToken = origMint }()
+
+	sOpts := statusOpts{
+		statusRepo: "org/repo",
+		statusNum:  7,
+		mintURL:    "https://mint.example.com",
+	}
+
+	t.Setenv("GITHUB_RUN_ID", "run-42")
+	t.Setenv("GITHUB_ACTIONS", "true")
+
+	n, err := setupStatusNotifier(tmpDir, "code", sOpts, printer)
+	require.NoError(t, err)
+
+	client, err := n.InvokeClientFactory(context.Background())
+	require.NoError(t, err)
+	assert.NotNil(t, client)
+}
+
+func TestSetupStatusNotifier_FactoryMintError(t *testing.T) {
+	tmpDir := t.TempDir()
+	printer := ui.New(io.Discard)
+
+	origMint := statusMintToken
+	statusMintToken = func(_ context.Context, _ mintclient.MintRequest) (*mintclient.MintResult, error) {
+		return nil, fmt.Errorf("OIDC unavailable")
+	}
+	defer func() { statusMintToken = origMint }()
+
+	sOpts := statusOpts{
+		statusRepo: "org/repo",
+		statusNum:  7,
+		mintURL:    "https://mint.example.com",
+	}
+
+	t.Setenv("GITHUB_RUN_ID", "run-42")
+
+	n, err := setupStatusNotifier(tmpDir, "review", sOpts, printer)
+	require.NoError(t, err)
+
+	client, err := n.InvokeClientFactory(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "OIDC unavailable")
+	assert.Nil(t, client)
+}
+
+func TestRunCommand_StatusTokenFlagRemoved(t *testing.T) {
+	cmd := newRunCmd()
 	f := cmd.Flags().Lookup("status-token")
-	require.NotNil(t, f, "run command should have --status-token flag for backwards compatibility")
-	assert.NotEmpty(t, f.Deprecated, "--status-token flag should be marked deprecated")
+	assert.Nil(t, f, "--status-token flag should no longer exist")
 }
 
 func TestTitleCase(t *testing.T) {
@@ -1572,13 +1608,12 @@ func TestSetupStatusNotifier_RunIDFallback(t *testing.T) {
 	printer := ui.New(io.Discard)
 
 	sOpts := statusOpts{
-		statusRepo:  "org/repo",
-		statusNum:   7,
-		statusToken: "test-static-token",
+		statusRepo: "org/repo",
+		statusNum:  7,
+		mintURL:    "https://mint.example.com",
 	}
 
 	t.Setenv("GITHUB_RUN_ID", "")
-	t.Setenv("FULLSEND_MINT_URL", "")
 
 	n, err := setupStatusNotifier(tmpDir, "code", sOpts, printer)
 	require.NoError(t, err)
@@ -1594,14 +1629,13 @@ func TestSetupStatusNotifier_PRHeadSHA(t *testing.T) {
 	require.NoError(t, os.WriteFile(eventFile, []byte(eventPayload), 0o644))
 
 	sOpts := statusOpts{
-		statusRepo:  "org/repo",
-		statusNum:   7,
-		statusToken: "test-static-token",
+		statusRepo: "org/repo",
+		statusNum:  7,
+		mintURL:    "https://mint.example.com",
 	}
 
 	t.Setenv("GITHUB_EVENT_PATH", eventFile)
 	t.Setenv("GITHUB_RUN_ID", "run-42")
-	t.Setenv("FULLSEND_MINT_URL", "")
 
 	n, err := setupStatusNotifier(tmpDir, "code", sOpts, printer)
 	require.NoError(t, err)

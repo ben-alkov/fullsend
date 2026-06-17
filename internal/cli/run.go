@@ -46,6 +46,8 @@ const (
 // agentWorkingDirExcludes lists directory patterns that agents may create
 // during execution but must never commit. These are added to
 // .git/info/exclude before the agent runs so git ignores them entirely.
+var statusMintToken = mintclient.MintToken
+
 var agentWorkingDirExcludes = []string{
 	".agentready/",
 	".fullsend-workspace/",
@@ -61,11 +63,10 @@ type resolveFlags struct {
 
 // statusOpts holds the optional status notification parameters for a run.
 type statusOpts struct {
-	runURL      string
-	statusRepo  string
-	statusNum   int
-	mintURL     string
-	statusToken string // deprecated: use mintURL
+	runURL     string
+	statusRepo string
+	statusNum  int
+	mintURL    string
 }
 
 func newRunCmd() *cobra.Command {
@@ -110,9 +111,6 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&sOpts.statusRepo, "status-repo", "", "repository (owner/repo) for status comments")
 	cmd.Flags().IntVar(&sOpts.statusNum, "status-number", 0, "issue/PR number for status comments")
 	cmd.Flags().StringVar(&sOpts.mintURL, "mint-url", "", "mint service URL for on-demand status tokens (default: $FULLSEND_MINT_URL)")
-	cmd.Flags().StringVar(&sOpts.statusToken, "status-token", "", "DEPRECATED: use --mint-url instead")
-	_ = cmd.Flags().MarkDeprecated("status-token", "use --mint-url instead")
-	_ = cmd.Flags().MarkHidden("status-token")
 	_ = cmd.MarkFlagRequired("fullsend-dir")
 	_ = cmd.MarkFlagRequired("target-repo")
 
@@ -1861,10 +1859,7 @@ func setupStatusNotifier(fullsendDir string, agentName string, sOpts statusOpts,
 	if mintURL == "" {
 		mintURL = os.Getenv("FULLSEND_MINT_URL")
 	}
-
-	staticToken := sOpts.statusToken
-
-	if mintURL == "" && staticToken == "" {
+	if mintURL == "" {
 		return nil, fmt.Errorf("no mint URL available (set --mint-url or FULLSEND_MINT_URL)")
 	}
 
@@ -1893,33 +1888,26 @@ func setupStatusNotifier(fullsendDir string, agentName string, sOpts statusOpts,
 		runID = fmt.Sprintf("%d", time.Now().UnixNano())
 	}
 
-	var initialClient forge.Client
-	if staticToken != "" {
-		initialClient = gh.New(staticToken)
-	}
-
-	n := statuscomment.New(initialClient, notifyCfg, owner, repo, sOpts.statusNum, sOpts.runURL, sha, runID)
+	n := statuscomment.New(nil, notifyCfg, owner, repo, sOpts.statusNum, sOpts.runURL, sha, runID)
 	n.SetWarnFunc(func(format string, args ...any) {
 		printer.StepWarn(fmt.Sprintf(format, args...))
 	})
 
-	if mintURL != "" {
-		role := resolveRole(agentName)
-		n.SetClientFactory(func(ctx context.Context) (forge.Client, error) {
-			result, err := mintclient.MintToken(ctx, mintclient.MintRequest{
-				MintURL: mintURL,
-				Role:    role,
-				Repos:   []string{repo},
-			})
-			if err != nil {
-				return nil, fmt.Errorf("minting status token: %w", err)
-			}
-			if os.Getenv("GITHUB_ACTIONS") == "true" && mintTokenPattern.MatchString(result.Token) {
-				fmt.Fprintf(os.Stderr, "::add-mask::%s\n", result.Token)
-			}
-			return gh.New(result.Token), nil
+	role := resolveRole(agentName)
+	n.SetClientFactory(func(ctx context.Context) (forge.Client, error) {
+		result, err := statusMintToken(ctx, mintclient.MintRequest{
+			MintURL: mintURL,
+			Role:    role,
+			Repos:   []string{repo},
 		})
-	}
+		if err != nil {
+			return nil, fmt.Errorf("minting status token: %w", err)
+		}
+		if os.Getenv("GITHUB_ACTIONS") == "true" && mintTokenPattern.MatchString(result.Token) {
+			fmt.Fprintf(os.Stderr, "::add-mask::%s\n", result.Token)
+		}
+		return gh.New(result.Token), nil
+	})
 
 	return n, nil
 }
