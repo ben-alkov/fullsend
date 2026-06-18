@@ -522,6 +522,99 @@ func TestHasAgentsMD_OtherFiles(t *testing.T) {
 	assert.False(t, hasAgentsMD(dir))
 }
 
+func TestHasClaudeMD_UpperCase(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("# claude"), 0o644))
+	assert.True(t, hasClaudeMD(dir))
+}
+
+func TestHasClaudeMD_LowerCase(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "claude.md"), []byte("# claude"), 0o644))
+	assert.True(t, hasClaudeMD(dir))
+}
+
+func TestHasClaudeMD_TitleCase(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Claude.md"), []byte("# claude"), 0o644))
+	assert.True(t, hasClaudeMD(dir))
+}
+
+func TestHasClaudeMD_Missing(t *testing.T) {
+	dir := t.TempDir()
+	assert.False(t, hasClaudeMD(dir))
+}
+
+func TestHasClaudeMD_OtherFiles(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("# agents"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# readme"), 0o644))
+	assert.False(t, hasClaudeMD(dir))
+}
+
+func TestHasClaudeMD_DotPrefixed(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude.md"), []byte("# claude"), 0o644))
+	assert.True(t, hasClaudeMD(dir))
+}
+
+func TestClaudeMDPointerContent(t *testing.T) {
+	// Verify the injected CLAUDE.md content references AGENTS.md and
+	// ends with a newline (so the file is well-formed).
+	assert.Contains(t, claudeMDPointerContent, "AGENTS.md")
+	assert.True(t, strings.HasSuffix(claudeMDPointerContent, "\n"), "content should end with newline")
+}
+
+func TestDoInjectClaudeMDPointer_Success(t *testing.T) {
+	var cmds []string
+	mockExec := func(_ string, cmd string, _ time.Duration) (string, string, int, error) {
+		cmds = append(cmds, cmd)
+		return "", "", 0, nil
+	}
+
+	printer := ui.New(io.Discard)
+	doInjectClaudeMDPointer("test-sandbox", "/workspace/repo", printer, mockExec)
+
+	require.Len(t, cmds, 2)
+	assert.Contains(t, cmds[0], "CLAUDE.md")
+	assert.Contains(t, cmds[0], "/workspace/repo/CLAUDE.md")
+	assert.Contains(t, cmds[0], "AGENTS.md") // content references AGENTS.md
+	assert.Contains(t, cmds[1], ".git/info/exclude")
+	assert.Contains(t, cmds[1], "CLAUDE.md")
+}
+
+func TestDoInjectClaudeMDPointer_WriteFails(t *testing.T) {
+	var cmds []string
+	mockExec := func(_ string, cmd string, _ time.Duration) (string, string, int, error) {
+		cmds = append(cmds, cmd)
+		return "", "write error", 1, fmt.Errorf("write failed")
+	}
+
+	printer := ui.New(io.Discard)
+	doInjectClaudeMDPointer("test-sandbox", "/workspace/repo", printer, mockExec)
+
+	// Should have attempted only the write, not the exclude.
+	require.Len(t, cmds, 1)
+}
+
+func TestDoInjectClaudeMDPointer_ExcludeFails(t *testing.T) {
+	callCount := 0
+	mockExec := func(_ string, cmd string, _ time.Duration) (string, string, int, error) {
+		callCount++
+		if callCount == 2 {
+			return "", "exclude error", 1, fmt.Errorf("exclude failed")
+		}
+		return "", "", 0, nil
+	}
+
+	printer := ui.New(io.Discard)
+	doInjectClaudeMDPointer("test-sandbox", "/workspace/repo", printer, mockExec)
+
+	// Both commands should have been attempted (write succeeds, exclude fails
+	// but function continues).
+	assert.Equal(t, 2, callCount)
+}
+
 func TestEnvToList_Sorted(t *testing.T) {
 	env := map[string]string{
 		"Z_VAR": "z",
