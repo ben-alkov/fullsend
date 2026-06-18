@@ -1063,6 +1063,12 @@ func (f *FakeClient) MergeChangeProposal(_ context.Context, _, _ string, _ int) 
 	return f.err("MergeChangeProposal")
 }
 
+func (f *FakeClient) UpdatePullRequestBranch(_ context.Context, _, _ string, _ int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.err("UpdatePullRequestBranch")
+}
+
 func (f *FakeClient) ListWorkflowRuns(_ context.Context, owner, repo, workflowFile string) ([]WorkflowRun, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -2063,6 +2063,21 @@ func (c *LiveClient) MergeChangeProposal(ctx context.Context, owner, repo string
 	return nil
 }
 
+// UpdatePullRequestBranch updates a PR's head branch by merging the base
+// branch into it (GitHub's PUT /repos/{owner}/{repo}/pulls/{number}/update-branch).
+// The GitHub API returns 202 Accepted for this endpoint.
+func (c *LiveClient) UpdatePullRequestBranch(ctx context.Context, owner, repo string, number int) error {
+	resp, err := c.do(ctx, http.MethodPut, fmt.Sprintf("/repos/%s/%s/pulls/%d/update-branch", owner, repo, number), nil)
+	if err != nil {
+		return fmt.Errorf("update pull request branch #%d: %w", number, err)
+	}
+	if err := checkStatus(resp, http.StatusAccepted); err != nil {
+		return fmt.Errorf("update pull request branch #%d: %w", number, err)
+	}
+	resp.Body.Close()
+	return nil
+}
+
 // ListWorkflowRuns returns recent workflow runs for a workflow file.
 func (c *LiveClient) ListWorkflowRuns(ctx context.Context, owner, repo, workflowFile string) ([]forge.WorkflowRun, error) {
 	resp, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/actions/workflows/%s/runs?per_page=10", owner, repo, workflowFile))

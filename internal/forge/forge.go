@@ -312,6 +312,12 @@ type Client interface {
 	// Change proposal merge
 	MergeChangeProposal(ctx context.Context, owner, repo string, number int) error
 
+	// UpdatePullRequestBranch updates a pull request's head branch by
+	// merging the base branch into it (equivalent to clicking "Update branch"
+	// on GitHub). This is needed when the base branch has advanced and the
+	// PR branch is out of date, which causes merge 409 errors.
+	UpdatePullRequestBranch(ctx context.Context, owner, repo string, number int) error
+
 	// Workflow run listing
 	ListWorkflowRuns(ctx context.Context, owner, repo, workflowFile string) ([]WorkflowRun, error)
 

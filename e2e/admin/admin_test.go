@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -260,8 +261,32 @@ func mergeEnrollmentPR(t *testing.T, env *e2eEnv) {
 	require.NotNil(t, enrollmentPR, "enrollment PR should exist for %s", testRepo)
 
 	t.Logf("Merging enrollment PR #%d: %s", enrollmentPR.Number, enrollmentPR.URL)
-	err := env.client.MergeChangeProposal(ctx, env.org, testRepo, enrollmentPR.Number)
-	require.NoError(t, err, "merging enrollment PR")
+
+	// Retry the merge up to 3 times to handle 409 "Head branch is out of date"
+	// errors that occur when the base branch advances between PR creation and
+	// the merge attempt (e.g., from a reconcile workflow push).
+	const mergeRetries = 3
+	var mergeErr error
+	for attempt := range mergeRetries {
+		mergeErr = env.client.MergeChangeProposal(ctx, env.org, testRepo, enrollmentPR.Number)
+		if mergeErr == nil {
+			break
+		}
+
+		var apiErr *gh.APIError
+		if !errors.As(mergeErr, &apiErr) || apiErr.StatusCode != http.StatusConflict {
+			break // not a 409, fail immediately
+		}
+
+		t.Logf("Merge attempt %d: 409 conflict, updating PR branch and retrying", attempt+1)
+		if updateErr := env.client.UpdatePullRequestBranch(ctx, env.org, testRepo, enrollmentPR.Number); updateErr != nil {
+			t.Logf("Warning: could not update PR branch: %v", updateErr)
+		}
+
+		// Wait for GitHub to process the branch update before retrying.
+		time.Sleep(5 * time.Second)
+	}
+	require.NoError(t, mergeErr, "merging enrollment PR")
 
 	time.Sleep(5 * time.Second)
 	t.Log("Enrollment PR merged")
