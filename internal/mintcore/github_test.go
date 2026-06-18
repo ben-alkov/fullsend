@@ -115,6 +115,22 @@ func TestRolePermissions_AllRolesPresent(t *testing.T) {
 	}
 }
 
+func TestRolePermissions_E2e(t *testing.T) {
+	perms := RolePermissionsFor("e2e")
+	require.NotNil(t, perms)
+	assert.Equal(t, "write", perms["actions"])
+	assert.Equal(t, "read", perms["actions_variables"])
+	assert.Equal(t, "write", perms["administration"])
+	assert.Equal(t, "write", perms["contents"])
+	assert.Equal(t, "write", perms["issues"])
+	assert.Equal(t, "write", perms["members"])
+	assert.Equal(t, "read", perms["metadata"])
+	assert.Equal(t, "write", perms["organization_administration"])
+	assert.Equal(t, "write", perms["pull_requests"])
+	assert.Equal(t, "write", perms["secrets"])
+	assert.Equal(t, "write", perms["workflows"])
+}
+
 func TestRolePermissions_ReturnsCopy(t *testing.T) {
 	// Mutating the returned map must not affect the canonical definitions.
 	perms := RolePermissions()

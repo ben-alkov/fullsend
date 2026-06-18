@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/fullsend-ai/fullsend/internal/mintcore"
 )
 
 func TestValidRoles(t *testing.T) {
@@ -19,6 +21,13 @@ func TestValidRoles(t *testing.T) {
 	assert.Contains(t, roles, "retro")
 	assert.Contains(t, roles, "prioritize")
 	assert.Contains(t, roles, "e2e")
+}
+
+func TestValidRoles_RecognizedByMintcore(t *testing.T) {
+	for _, role := range ValidRoles() {
+		assert.True(t, mintcore.HasRole(role),
+			"ValidRoles() contains %q but mintcore.HasRole is false — role lists may have drifted (see issue tracking consolidation)", role)
+	}
 }
 
 func TestPerRepoDefaultRoles(t *testing.T) {
