@@ -202,12 +202,12 @@ Observability is a cross-cutting concern that touches every other component. Eac
 
 - JSONL reasoning trace exposure: raw JSONL conversation transcripts are extracted from sandboxes and stored with owner-scoped access. Credential scanning acts as an invariant check on [ADR 0017](ADRs/0017-credential-isolation-for-sandboxed-agents.md)'s isolation model. Agents handling data from protected sources beyond the target repo can opt in to JSONL suppression via configuration ([ADR 0021](ADRs/0021-jsonl-reasoning-trace-exposure.md)).
 - Event-driven stage dispatch remains traceable end-to-end in the GitHub Actions UI by using synchronous `workflow_call` dispatch (see [ADR 0041](ADRs/0041-synchronous-workflow-call-event-dispatch.md)).
-- Distributed tracing: framework-native OpenTelemetry instrumentation with zero-configuration baseline. Every run produces `run-telemetry.jsonl` and `run-summary.json` locally; optional OTLP export to any compatible backend. W3C trace context propagation links multi-agent pipelines into unified traces. OTEL GenAI semantic conventions enable LLM-aware backends ([ADR 0050](ADRs/0050-distributed-tracing-instrumentation.md)).
+- Distributed tracing: framework-native OpenTelemetry instrumentation with zero-configuration baseline. Every run produces `run-telemetry.jsonl` and `run-summary.json` locally; optional OTLP export to any compatible backend. W3C trace context propagation links multi-agent pipelines into unified traces. OTEL GenAI semantic conventions enable LLM-aware backends ([ADR 0051](ADRs/0050-distributed-tracing-instrumentation.md)).
 
 **Open questions:**
 
 - What signals matter most — cost, latency, token usage, action logs, decision traces, or something else?
-- ~~How do we balance detailed tracing (useful for debugging) with the volume of data agents will produce?~~ Decided in [ADR 0050](ADRs/0050-distributed-tracing-instrumentation.md): instrument all lifecycle steps comprehensively; volume is managed by backends not by suppressing data at the source.
+- ~~How do we balance detailed tracing (useful for debugging) with the volume of data agents will produce?~~ Decided in [ADR 0051](ADRs/0050-distributed-tracing-instrumentation.md): instrument all lifecycle steps comprehensively; volume is managed by backends not by suppressing data at the source.
 - What is the retention and access model for agent logs? Who can see what? (JSONL trace access model decided in [ADR 0021](ADRs/0021-jsonl-reasoning-trace-exposure.md); retention policy and broader log access remain open.)
 - How does observability interact with the security requirement that "every action is logged, attributable, and reviewable"? (See [security-threat-model.md](problems/security-threat-model.md).)
 - Is there a real-time monitoring requirement (agent is stuck, agent is behaving anomalously), or is observability primarily forensic?
@@ -237,7 +237,7 @@ ADR 0002: [Building block 1](ADRs/0002-initial-fullsend-design.md#1-webhook--dis
 
 ### 2. Slash-command parser + ACL
 
-Parses `/fs-triage`, `/fs-code`, `/fs-review`, and related commands and enforces who is allowed to invoke each. All slash commands and event-triggered dispatch paths require OWNER, MEMBER, or COLLABORATOR association ([ADR 0050](ADRs/0050-require-authorization-on-all-agent-dispatch-paths.md)).
+Parses `/fs-triage`, `/fs-code`, `/fs-review`, and related commands and enforces who is allowed to invoke each. All slash commands and event-triggered dispatch paths require OWNER, MEMBER, or COLLABORATOR association ([ADR 0051](ADRs/0051-require-authorization-on-all-agent-dispatch-paths.md)).
 ADR 0002: [Building block 2](ADRs/0002-initial-fullsend-design.md#2-slash-command-parser--acl).
 
 ### 3. Label state machine guard
