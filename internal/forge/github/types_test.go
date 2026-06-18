@@ -102,6 +102,23 @@ func TestAgentAppConfig_Retro(t *testing.T) {
 	assert.Empty(t, cfg.Events)
 }
 
+func TestAgentAppConfig_E2e(t *testing.T) {
+	cfg := AgentAppConfig("myorg", "e2e", "fullsend-ai")
+
+	assert.Equal(t, "fullsend-ai-e2e", cfg.Name)
+	assert.Equal(t, "write", cfg.Permissions.Actions)
+	assert.Equal(t, "read", cfg.Permissions.Variables)
+	assert.Equal(t, "write", cfg.Permissions.Administration)
+	assert.Equal(t, "write", cfg.Permissions.Contents)
+	assert.Equal(t, "write", cfg.Permissions.Issues)
+	assert.Equal(t, "write", cfg.Permissions.Members)
+	assert.Equal(t, "write", cfg.Permissions.OrganizationAdministration)
+	assert.Equal(t, "write", cfg.Permissions.PullRequests)
+	assert.Equal(t, "write", cfg.Permissions.Secrets)
+	assert.Equal(t, "write", cfg.Permissions.Workflows)
+	assert.Empty(t, cfg.Events)
+}
+
 func TestAgentAppConfig_UnknownRole(t *testing.T) {
 	cfg := AgentAppConfig("myorg", "custom-bot", "fullsend")
 
