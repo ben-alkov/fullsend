@@ -142,8 +142,8 @@ for yaml_file in "$HARNESS_DIR"/*.yaml; do
         continue
     fi
 
-    # Look for ### Variables outside fenced code blocks
-    if ! awk 'BEGIN{f=0} /^```/{f=1-f; next} f==0 && /^### Variables/{found=1} END{exit !found}' "$doc_path"; then
+    # Look for ### Variables under ## Configuration and extension (not just anywhere)
+    if ! awk 'BEGIN{f=0;c=0} /^```/{f=1-f;next} f{next} /^## Configuration and extension/{c=1;next} /^## /{c=0} c && /^### Variables/{found=1} END{exit !found}' "$doc_path"; then
         echo "  $doc_basename: missing \"### Variables\" subsection under \"## Configuration and extension\""
         errors=$((errors + 1))
     else
