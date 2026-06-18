@@ -374,8 +374,9 @@ func submitFormalReview(ctx context.Context, client forge.Client, owner, repo st
 // When diffHunks is non-nil, findings referencing files outside the PR
 // diff are omitted to avoid GitHub 422 errors. Findings whose file is
 // in the diff but whose line falls outside any diff hunk are posted as
-// file-level comments (subject_type: "file") so they remain visible on
-// the PR code. Files with empty hunk lists (binary files, truncated
+// file-level comments (Line=0) so they remain visible on the PR code;
+// the original line number is included in the comment body since file-
+// level comments have no line annotation in the UI. Files with empty hunk lists (binary files, truncated
 // patches) skip line-level filtering — the file is known to be in the
 // diff but hunk coverage is unavailable.
 //
@@ -398,11 +399,13 @@ func findingsToReviewComments(findings []ReviewFinding, diffHunks map[string][][
 			if len(hunks) > 0 && !lineInHunks(f.Line, hunks) {
 				// Fall back to file-level comments so findings
 				// remain visible on the PR even when the exact
-				// line is outside the changed region.
+				// line is outside the changed region. Include the
+				// original line number in the body since file-level
+				// comments have no line annotation in the UI.
+				body := fmt.Sprintf("_Line %d_ · %s", f.Line, formatFindingComment(f))
 				comments = append(comments, forge.ReviewComment{
-					Path:        f.File,
-					Body:        formatFindingComment(f),
-					SubjectType: "file",
+					Path: f.File,
+					Body: body,
 				})
 				fileLevelFallback++
 				continue

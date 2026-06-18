@@ -863,7 +863,7 @@ func TestFindingsToReviewComments_FiltersByDiffHunks(t *testing.T) {
 	// The out-of-hunk low finding now falls back to file-level.
 	assert.Equal(t, "changed.go", comments[1].Path)
 	assert.Equal(t, 0, comments[1].Line)
-	assert.Equal(t, "file", comments[1].SubjectType)
+	assert.Contains(t, comments[1].Body, "Line 50", "file-level fallback should include original line number")
 	assert.Equal(t, "also-changed.go", comments[2].Path)
 	assert.Equal(t, 3, comments[2].Line)
 }
@@ -892,7 +892,7 @@ func TestFindingsToReviewComments_EmptyPatchSkipsLineFiltering(t *testing.T) {
 	// The info finding outside the hunk now falls back to file-level.
 	assert.Equal(t, "changed.go", comments[3].Path)
 	assert.Equal(t, 0, comments[3].Line)
-	assert.Equal(t, "file", comments[3].SubjectType)
+	assert.Contains(t, comments[3].Body, "Line 50", "file-level fallback should include original line number")
 }
 
 func TestFindingsToReviewComments_AllSeveritiesPassThrough(t *testing.T) {
@@ -934,15 +934,15 @@ func TestFindingsToReviewComments_AllSeveritiesFallbackToFileLevel(t *testing.T)
 	// First comment: in-hunk high finding with line number.
 	assert.Equal(t, "changed.go", comments[0].Path)
 	assert.Equal(t, 10, comments[0].Line)
-	assert.Empty(t, comments[0].SubjectType)
 
 	// Remaining: file-level fallback comments for all out-of-hunk findings.
+	expectedLines := []int{50, 60, 70, 75, 80}
 	for i, desc := range []string{"Medium outside hunk", "Critical outside hunk", "Low outside hunk", "Info outside hunk", "High outside hunk case insensitive"} {
 		idx := i + 1
 		assert.Equal(t, "changed.go", comments[idx].Path)
 		assert.Equal(t, 0, comments[idx].Line, "file-level comment should have Line=0")
-		assert.Equal(t, "file", comments[idx].SubjectType)
 		assert.Contains(t, comments[idx].Body, desc)
+		assert.Contains(t, comments[idx].Body, fmt.Sprintf("Line %d", expectedLines[i]), "file-level fallback should include original line number")
 	}
 }
 
@@ -974,7 +974,7 @@ func TestSubmitFormalReview_FiltersByPRFileDiffs(t *testing.T) {
 	// Out-of-hunk low finding falls back to file-level comment.
 	assert.Equal(t, "changed.go", fc.CreatedReviews[0].Comments[1].Path)
 	assert.Equal(t, 0, fc.CreatedReviews[0].Comments[1].Line)
-	assert.Equal(t, "file", fc.CreatedReviews[0].Comments[1].SubjectType)
+	assert.Contains(t, fc.CreatedReviews[0].Comments[1].Body, "Line 50", "file-level fallback should include original line number")
 	assert.Equal(t, "also-changed.go", fc.CreatedReviews[0].Comments[2].Path)
 	assert.Contains(t, out.String(), "1 inline comment(s) omitted (file not in PR diff) — findings still count toward verdict")
 	assert.Contains(t, out.String(), "1 finding(s) posted as file-level comment(s) (line outside diff hunk)")

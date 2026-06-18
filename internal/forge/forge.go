@@ -117,14 +117,15 @@ type PullRequestReview struct {
 // pull request diff. These are submitted as part of a formal PR review
 // via the GitHub "Create a review" API.
 //
-// When SubjectType is "file", the comment is attached to the file as a
-// whole rather than a specific line. This is used for findings that
-// reference a file in the diff but a line outside any diff hunk.
+// When Line is 0, the comment is attached to the file as a whole rather
+// than a specific line. This is used for findings that reference a file
+// in the diff but a line outside any diff hunk. Forge implementations
+// translate Line==0 into the appropriate API representation (e.g.,
+// GitHub's subject_type: "file").
 type ReviewComment struct {
-	Path        string // relative file path in the repository
-	Line        int    // line number in the diff (right side); 0 for file-level comments
-	Body        string // comment body (Markdown)
-	SubjectType string // "file" for file-level comments; empty for line-level
+	Path string // relative file path in the repository
+	Line int    // line number in the diff (right side); 0 for file-level comments
+	Body string // comment body (Markdown)
 }
 
 // PullRequestFileDiff represents a file changed in a pull request along
