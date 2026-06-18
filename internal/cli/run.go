@@ -660,6 +660,37 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 		}
 	}
 
+	// 8a-1. Inject a minimal CLAUDE.md pointer when running Claude Code
+	// against repos that have AGENTS.md but no CLAUDE.md. Claude Code
+	// auto-loads CLAUDE.md into its system context but does not read
+	// AGENTS.md by default. Without this bridge file, agents are
+	// effectively context-blind in repos that only have AGENTS.md.
+	if rt.Name() == "claude" && hasAgentsMD(hostRepositoryDir) && !hasClaudeMD(hostRepositoryDir) {
+		claudeMDContent := "Project rules and instructions live in [AGENTS.md](AGENTS.md). Read that file now — it is the single source of truth for all agent-facing guidance in this repo.\n"
+		tmpClaudeMD, err := os.CreateTemp("", "fullsend-claude-md-*")
+		if err != nil {
+			printer.StepWarn("Could not create temp CLAUDE.md: " + err.Error())
+		} else {
+			if _, err := tmpClaudeMD.WriteString(claudeMDContent); err != nil {
+				tmpClaudeMD.Close()
+				os.Remove(tmpClaudeMD.Name())
+				printer.StepWarn("Could not write temp CLAUDE.md: " + err.Error())
+			} else {
+				tmpClaudeMD.Close()
+				if err := sandbox.UploadFile(sandboxName, tmpClaudeMD.Name(), remoteRepositoryDir+"/CLAUDE.md"); err != nil {
+					printer.StepWarn("Could not inject CLAUDE.md: " + err.Error())
+				} else {
+					excludeCmd := fmt.Sprintf("echo 'CLAUDE.md' >> %s/.git/info/exclude", remoteRepositoryDir)
+					if _, _, _, err := sandbox.Exec(sandboxName, excludeCmd, 5*time.Second); err != nil {
+						printer.StepWarn("Could not add CLAUDE.md to git exclude: " + err.Error())
+					}
+					printer.StepDone("Injected CLAUDE.md pointer to AGENTS.md (target repo has none)")
+				}
+				os.Remove(tmpClaudeMD.Name())
+			}
+		}
+	}
+
 	// 8a-2. Exclude agent working directories from git tracking.
 	// Agents may create working directories (e.g. .agentready/) during
 	// execution. These must never appear in commits. Adding them to
@@ -1580,6 +1611,17 @@ func excludeAgentWorkingDirs(sandboxName, repoDir string, printer *ui.Printer) e
 // in any common casing.
 func hasAgentsMD(repoDir string) bool {
 	for _, name := range []string{"AGENTS.md", "agents.md", "Agents.md"} {
+		if _, err := os.Stat(filepath.Join(repoDir, name)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// hasClaudeMD checks whether the repo directory contains a CLAUDE.md file
+// in any common casing.
+func hasClaudeMD(repoDir string) bool {
+	for _, name := range []string{"CLAUDE.md", "claude.md", "Claude.md"} {
 		if _, err := os.Stat(filepath.Join(repoDir, name)); err == nil {
 			return true
 		}

@@ -522,6 +522,36 @@ func TestHasAgentsMD_OtherFiles(t *testing.T) {
 	assert.False(t, hasAgentsMD(dir))
 }
 
+func TestHasClaudeMD_UpperCase(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("# claude"), 0o644))
+	assert.True(t, hasClaudeMD(dir))
+}
+
+func TestHasClaudeMD_LowerCase(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "claude.md"), []byte("# claude"), 0o644))
+	assert.True(t, hasClaudeMD(dir))
+}
+
+func TestHasClaudeMD_TitleCase(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Claude.md"), []byte("# claude"), 0o644))
+	assert.True(t, hasClaudeMD(dir))
+}
+
+func TestHasClaudeMD_Missing(t *testing.T) {
+	dir := t.TempDir()
+	assert.False(t, hasClaudeMD(dir))
+}
+
+func TestHasClaudeMD_OtherFiles(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("# agents"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# readme"), 0o644))
+	assert.False(t, hasClaudeMD(dir))
+}
+
 func TestEnvToList_Sorted(t *testing.T) {
 	env := map[string]string{
 		"Z_VAR": "z",
