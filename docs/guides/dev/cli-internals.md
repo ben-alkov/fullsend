@@ -1,6 +1,6 @@
 # CLI Internals
 
-This guide provides implementation details for fullsend CLI internals: command structure, installation pipeline, sandbox runtime, and key source files. For local development setup, see [Local Development](local-dev.md).
+This guide provides implementation details for fullsend CLI internals: command structure, installation pipeline, sandbox runtime, and key source files. For running agents locally, see [Running agents locally](../user/running-agents-locally.md).
 
 ## CLI Command Tree
 
@@ -14,11 +14,18 @@ fullsend
 │   │   └── repos    <org> [repo...]         # Enable agent on repos
 │   └── disable
 │       └── repos    <org> [repo...]         # Disable agent on repos
-├── mint                                     # GCP: token mint management
+├── mint                                     # Token mint management
 │   ├── deploy                               # Deploy/update mint Cloud Function
+│   ├── add-role       <role>                # Register role PEM + ROLE_APP_IDS entry
+│   ├── remove-role    <role>                # Remove role from mint
 │   ├── enroll       <org|owner/repo>        # Register org/repo in mint
 │   ├── unenroll     <org|owner/repo>        # Remove org/repo from mint
-│   └── status       [org]                   # Inspect mint state and PEM health
+│   ├── status       [org]                   # Inspect mint state and PEM health
+│   └── token                                # Mint a short-lived token via OIDC
+│       ├── --role <name>                    #   Agent role (triage, coder, review)
+│       ├── --repos <list>                   #   Comma-separated repo names
+│       ├── --mint-url <url>                 #   Mint service URL ($FULLSEND_MINT_URL)
+│       └── --audience <string>              #   OIDC audience (default: fullsend-mint)
 ├── inference                                # GCP: inference WIF management
 │   ├── provision    <org|owner/repo>        # Create WIF pool/provider for Agent Platform
 │   ├── deprovision  <org|owner/repo>        # Remove WIF access for org or repo
@@ -31,8 +38,10 @@ fullsend
 │   ├── status       <org>                   # Analyze GitHub-side state
 │   ├── uninstall    <org>                   # Remove fullsend GitHub configuration
 │   └── sync-scaffold <org>                  # Update workflow templates
-├── lock             <agent-name>             # Pin remote deps to lock.yaml
+├── lock             [agent-name]              # Pin remote deps to lock.yaml
+│   ├── --all                                #   Lock all harnesses in the harness directory
 │   ├── --fullsend-dir <path>                #   Base directory with .fullsend layout
+│   ├── --forge <platform>                   #   Lock only this forge variant; omit for all
 │   ├── --update                             #   Force re-resolve even if current
 │   ├── --offline                            #   Reject network fetches
 │   ├── --max-depth <int>                    #   Max transitive dependency depth
@@ -42,6 +51,7 @@ fullsend
 │   ├── --target-repo <path>                 #   Path to the target repository
 │   ├── --output-dir <path>                  #   Base directory for run output
 │   ├── --env-file <path>                    #   Load env vars from dotenv file (repeatable)
+│   ├── --forge <platform>                   #   Forge platform (github, gitlab); auto-detected from CI env
 │   ├── --no-post-script                     #   Skip post-script execution
 │   ├── --debug [filter]                     #   Enable Claude Code debug logging
 │   ├── --offline                            #   Reject network fetches
@@ -50,14 +60,24 @@ fullsend
 │   ├── --run-url <url>                      #   CI/CD run URL for status comments
 │   ├── --status-repo <owner/repo>           #   Repository for status comments
 │   ├── --status-number <int>                #   Issue/PR number for status comments
-│   └── --status-token <token>               #   Token for status comments (default: GH_TOKEN)
+│   └── --mint-url <url>                     #   Mint service URL for on-demand status tokens
+├── fetch-skill      <url>                    # Fetch a skill at runtime (in-sandbox)
 ├── scan                                     # Run security scanner on input/output
 │   ├── input                                # Scan event payload for prompt injection
 │   ├── output                               # Scan agent output for leaked secrets
 │   ├── context                              # Scan context files for prompt injection
 │   └── url                                  # Validate URLs against SSRF attacks
 ├── post-review                              # Post PR review comments to GitHub
-└── post-comment                             # Post issue/PR comments to GitHub
+├── post-comment                             # Post issue/PR comments to GitHub
+└── reconcile-status                         # Finalize orphaned status comments
+    ├── --repo <owner/repo>                  #   Repository in owner/repo format
+    ├── --number <int>                       #   Issue/PR number
+    ├── --run-id <string>                    #   Workflow run ID (marker key)
+    ├── --run-url <url>                      #   Workflow run URL (optional)
+    ├── --sha <string>                       #   Commit SHA (optional)
+    ├── --reason <string>                    #   Termination reason: terminated or cancelled (default: terminated)
+    ├── --mint-url <url>                     #   Mint service URL for on-demand token (default: $FULLSEND_MINT_URL)
+    └── --role <string>                      #   Agent role for minting (required with --mint-url)
 ```
 
 ### Command Decomposition
@@ -71,7 +91,7 @@ The `admin install` command performs all setup in a single invocation. The `mint
 | Phase 4: WIF provisioning | `fullsend inference provision` | GCP project (inference): `roles/iam.workloadIdentityPoolAdmin`, `roles/resourcemanager.projectIamAdmin` |
 | Phases 5-7: GitHub setup + enrollment | `fullsend github setup` | GitHub only |
 
-The typical handoff: a GCP admin runs `mint deploy`, `mint enroll`, and `inference provision`, then passes the mint URL and WIF provider resource name to a GitHub maintainer who runs `github setup --mint-url=... --inference-wif-provider=...`. See [Setting up with pre-provisioned infrastructure](../getting-started/github-setup.md).
+The typical handoff: a GCP admin runs `mint deploy`, `mint enroll`, and `inference provision`, then passes the mint URL and WIF provider resource name to a GitHub maintainer who runs `github setup --mint-url=... --inference-wif-provider=...`. See [Setting up with pre-provisioned infrastructure](../../reference/github-setup.md).
 
 ### Token Resolution Chain
 
@@ -116,7 +136,8 @@ Both per-org and per-repo modes share the same core pipeline. The code follows t
 │  │  a. Discover mint   --mint-url / --mint-project / default  │ │
 │  │     └─ DiscoverMint() → check if GCF exists, get URL      │ │
 │  │  b. Resolve existing app IDs from mint env vars            │ │
-│  │     └─ ROLE_APP_IDS → skip app creation if all present     │ │
+│  │     └─ ROLE_APP_IDS (role → app ID, shared) → skip app     │ │
+│  │        creation when all roles are present                 │ │
 │  └──────────┬─────────────────────────────────────────────────┘ │
 │             ▼                                                   │
 │  ┌────────────────────────────────────────────────────────────┐ │
@@ -159,6 +180,11 @@ Both per-org and per-repo modes share the same core pipeline. The code follows t
 │  │ Phase 5: Write scaffold + config files                     │ │
 │  │                                                            │ │
 │  │  Both modes: write workflow files + customized/ dirs       │ │
+│  │  CommitScaffoldFiles() handles protected-branch fallback:  │ │
+│  │    1. Try CommitFiles (default branch)                     │ │
+│  │    2. If ErrBranchProtected → create feature branch        │ │
+│  │    3. CommitFilesToBranch on feature branch                 │ │
+│  │    4. Open PR back to default branch                        │ │
 │  │  ┌──────────────────────────────────────────┐              │ │
 │  │  │ Per-org:  create .fullsend config repo    │              │ │
 │  │  │           push reusable workflows         │              │ │
@@ -230,12 +256,12 @@ type Layer interface {
 ```
 
 ```
-Stack order:  ConfigRepo → Workflows → VendorBinary → Secrets → Inference → Dispatch → Enrollment
-Install:      process 1→7 (forward)
-Uninstall:    process 7→1 (reverse)
+Stack order:  ConfigRepo → Workflows → HarnessWrappers → VendorBinary → Secrets → Inference → Dispatch → Enrollment
+Install:      process 1→8 (forward)
+Uninstall:    process 8→1 (reverse)
 ```
 
-Per-repo mode does not use the layer stack — it runs the same phases inline in `runPerRepoInstall()` and `runGitHubSetupPerRepo()` since there's no need for composable uninstall ordering with a single repo. Binary vendoring (when `--vendor-fullsend-binary` is set) and stale binary cleanup are handled inline or via shared helpers; per-org mode uses `VendorBinaryLayer`.
+Per-repo mode does not use the layer stack — it runs the same phases inline in `runPerRepoInstall()` and `runGitHubSetupPerRepo()` since there's no need for composable uninstall ordering with a single repo. Vendoring (when `--vendor` is set) and stale asset cleanup are handled inline or via shared helpers; per-org mode uses `VendorBinaryLayer`.
 
 ### Binary acquisition (`internal/binary`)
 
@@ -247,7 +273,7 @@ Linux binary resolution for `fullsend run` and vendoring lives in `internal/bina
 | `ResolveForVendor` | Cross-compile → matching release (released CLI only) → fail (no latest) |
 | `ResolveExplicit` | Validate linux/{arch} ELF for `--fullsend-binary` |
 
-Vendoring commit messages use title + body (upload and stale delete). `admin analyze` reports stale vendored binaries at `bin/fullsend` or `.fullsend/bin/fullsend` without install-intent flags.
+Vendoring commit messages use title + body (upload and stale delete). `admin analyze` reports stale vendored assets at `bin/fullsend` or `.fullsend/bin/fullsend` without install-intent flags.
 
 ---
 
@@ -261,7 +287,8 @@ Vendoring commit messages use title + body (upload and stale delete). `admin ana
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  ┌─────────────┐                                                │
-│  │ Load harness │ Parse YAML config for agent                   │
+│  │ Load harness │ LoadWithBase: unmarshal → compose base →       │
+│  │              │ ResolveForge(--forge / env) → Validate        │
 │  └──────┬──────┘                                                │
 │         ▼                                                       │
 │  ┌──────────────────┐                                           │
@@ -303,6 +330,8 @@ Vendoring commit messages use title + body (upload and stale delete). `admin ana
 │  │  ├── PATH=/sandbox/workspace/bin:$PATH   │                   │
 │  │  ├── CLAUDE_CONFIG_DIR=/sandbox/claude-config│               │
 │  │  ├── FULLSEND_OUTPUT_DIR=...             │                   │
+│  │  ├── FULLSEND_FETCH_URL=... (if allow_runtime_fetch)│        │
+│  │  ├── FULLSEND_FETCH_TOKEN=<per-run token> (if above)│       │
 │  │  └── sources .env.d/*.env files          │                   │
 │  └──────────┬───────────────────────────────┘                   │
 │             ▼                                                   │
@@ -427,8 +456,10 @@ fullsend-repo/                      (embedded template)
 | Category | Installed? | Source | Purpose |
 |----------|-----------|--------|---------|
 | **Installed** | Yes | Scaffold → `.fullsend` repo | Workflows, configs, static files |
-| **Layered** | No (runtime) | Upstream reusable workflows | agents/, skills/, harness/, plugins/, policies/, scripts/, schemas/, env/ |
-| **Upstream-only** | No | Referenced directly | .github/actions/, .github/scripts/ |
+| **Layered** | No (runtime) or yes with `--vendor` | Upstream `@v0` sparse checkout, or vendored at install | agents/, skills/, harness/, plugins/, policies/, scripts/, schemas/, env/ |
+| **Upstream-only** | No (layered) or yes with `--vendor` | Referenced directly or vendored at install | .github/actions/, .github/scripts/ |
+
+Runtime skips upstream fetch when `.defaults/action.yml` is present (vendored); layered installs sparse-checkout `fullsend-ai/fullsend@v0` into `.defaults/`.
 
 ### File Mode Tracking
 
@@ -529,9 +560,9 @@ var executableFiles = map[string]struct{}{
 
 ## See Also
 
-- [Local Development](local-dev.md) — Development environment setup
-- [Installing fullsend](../getting-started/installation.md) — End-user setup and all-in-one admin install
-- [Setting up with pre-provisioned infrastructure](../getting-started/github-setup.md) — GitHub-only setup guide
+- [Running agents locally](../user/running-agents-locally.md) — Run agents locally (binary download, GCP credentials, per-agent env vars)
+- [Installing fullsend](../../reference/installation.md) — End-user setup and all-in-one admin install
+- [Setting up with pre-provisioned infrastructure](../../reference/github-setup.md) — GitHub-only setup guide
 - [Mint service administration](../infrastructure/mint-administration.md) — Deploying and managing the token mint
 - [Infrastructure Reference](../infrastructure/infrastructure-reference.md) — Infrastructure details
 - [Customizing Agents](../user/customizing-agents.md) — User customization guide

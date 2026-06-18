@@ -12,7 +12,7 @@ For the all-in-one setup that provisions both GCP and GitHub in a single command
 - **GitHub CLI** (`gh`) authenticated — the installer runs a preflight check and tells you which scopes are missing. When prompted, run the `gh auth refresh -s <scopes>` command it suggests.
 - **fullsend CLI** — download the latest binary from [GitHub Releases](https://github.com/fullsend-ai/fullsend/releases)
 - **From your Mint service provider admin** (currently GCP-managed; other providers planned):
-  - Token mint URL (`--mint-url`) — the HTTPS endpoint of the deployed mint Cloud Function. If you are using the fullsend hosted mint, the URL is `https://fullsend-mint-gljhbkcloq-uc.a.run.app` (see [Hosted mint](../infrastructure/mint-administration.md#hosted-mint)).
+  - Token mint URL (`--mint-url`) — the HTTPS endpoint of the deployed mint Cloud Function. If you are using the fullsend hosted mint, the URL is `https://fullsend-mint-gljhbkcloq-uc.a.run.app` (see [Hosted mint](../guides/infrastructure/mint-administration.md#hosted-mint)).
 - **From your Inference provider admin** (currently GCP Agent Platform, formerly Vertex AI; other providers planned):
   - GCP project ID (`--inference-project`) — the project where Agent Platform is enabled (e.g., `my-gcp-project`)
   - WIF provider resource name (`--inference-wif-provider`) — the full resource path, e.g., `projects/123456789/locations/global/workloadIdentityPools/fullsend-inference/providers/github-oidc` (note: the leading number is the GCP **project number**, not the project ID string; your GCP admin can find it with `gcloud projects describe <project-id> --format='value(projectNumber)'`)
@@ -26,7 +26,7 @@ This guide covers the **GitHub Maintainer** role. The GCP-side work (token mint 
 
 | Role | What they do | Covered in |
 |------|-------------|------------|
-| **GCP Admin (Mint)** | Deploy token mint, enroll orgs | [Mint service administration](../infrastructure/mint-administration.md) |
+| **GCP Admin (Mint)** | Deploy token mint, enroll orgs | [Mint service administration](../guides/infrastructure/mint-administration.md) |
 | **GCP Admin (Inference)** | Provision WIF and Agent Platform access | [Installing fullsend — standalone commands](installation.md#standalone-commands) |
 | **GitHub Maintainer (org)** | Configure GitHub org — Apps, config repo, enrollment | **This guide** |
 | **GitHub Maintainer (repo)** | Configure a single repo — secrets, variables, shim workflow | **This guide** ([per-repo setup](#per-repo-setup)) |
@@ -118,15 +118,16 @@ fullsend github setup acme-corp \
 | `--app-set` | No | `fullsend-ai` | App set name prefix for GitHub Apps |
 | `--enroll-all` | No | `false` | Enroll all repositories without prompting (per-org only) |
 | `--enroll-none` | No | `false` | Skip enrollment without prompting (per-org only) |
-| `--vendor-fullsend-binary` | No | `false` | Resolve and upload a linux/amd64 fullsend binary for CI (see [Vendoring the CLI binary](#vendoring-the-cli-binary)) |
+| `--vendor` | No | `false` | Vendor binary, reusable workflows, actions, and agent content (see [Vendored vs layered installs](#vendored-vs-layered-installs)) |
+| `--fullsend-source` | No | | Fullsend source checkout for content and cross-compile (requires `--vendor`) |
 | `--fullsend-binary` | No | | Path to a Linux fullsend binary when vendoring (skips auto-resolution) |
 | `--dry-run` | No | `false` | Preview changes without making them |
 
-### Vendoring the CLI binary
+### Vendored vs layered installs
 
-Same policy as [admin install](installation.md#vendoring-the-cli-binary): `--fullsend-binary` → checkout cross-compile → matching release (released CLI only) → fail. Per-repo setup now wires vendoring and stale-binary cleanup when the flag is off.
+Same behavior as [admin install](installation.md#vendored-vs-layered-installs): layered (default) fetches upstream at runtime; `--vendor` installs binary plus workflow/action/agent content and runtime detects vendored installs via `action.yml` presence.
 
-`fullsend admin analyze <org>` reports when a stale vendored binary is present (no install-intent flags on analyze).
+`fullsend admin analyze <org>` reports when stale vendored assets are present (analyze has no install flags).
 
 ## Per-repo setup
 
@@ -254,6 +255,6 @@ Use `admin install` when one person has both GCP and GitHub access. Use the stan
 ## See Also
 
 - [Installing fullsend](installation.md) — End-user setup (inference + GitHub) and all-in-one admin install
-- [Mint service administration](../infrastructure/mint-administration.md) — Deploying and managing the token mint
-- [Infrastructure Reference](../infrastructure/infrastructure-reference.md) — Token mint, WIF, and secrets details
-- [CLI Internals](../dev/cli-internals.md) — Command structure and implementation details
+- [Mint service administration](../guides/infrastructure/mint-administration.md) — Deploying and managing the token mint
+- [Infrastructure Reference](../guides/infrastructure/infrastructure-reference.md) — Token mint, WIF, and secrets details
+- [CLI Internals](../guides/dev/cli-internals.md) — Command structure and implementation details

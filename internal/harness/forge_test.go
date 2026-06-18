@@ -95,8 +95,8 @@ func TestResolveForge_RunnerEnvMerge(t *testing.T) {
 		Forge: map[string]*ForgeConfig{
 			"github": {
 				RunnerEnv: map[string]string{
-					"OVERRIDE":  "forge_val",
-					"GH_TOKEN":  "${GH_TOKEN}",
+					"OVERRIDE": "forge_val",
+					"GH_TOKEN": "${GH_TOKEN}",
 				},
 			},
 		},
@@ -254,7 +254,7 @@ func TestValidate_ForgeUnrecognizedKey(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unrecognized key")
 	assert.Contains(t, err.Error(), "gihub")
-	assert.Contains(t, err.Error(), "valid keys are: github, gitlab")
+	assert.Contains(t, err.Error(), "valid: github, gitlab")
 }
 
 func TestValidate_ForgeScriptURL(t *testing.T) {

@@ -338,7 +338,7 @@ harnesses:
 
 **Rationale:** Lock files provide dependency pinning (reproducible builds), transitive closure visibility (auditability), and automated updates (tools can rewrite lock files when dependencies change). Similar to `package-lock.json` in npm.
 
-**Lock file workflow:** `fullsend lock <harness>` resolves all dependencies, generates/updates the lock file. `fullsend run <harness>` prefers lock file entries if present, warns if lock file is stale (resource hash doesn't match).
+**Lock file workflow:** `fullsend lock <harness>` (or `fullsend lock --all`) resolves all dependencies, generates/updates the lock file. `fullsend run <harness>` prefers lock file entries if present, warns if lock file is stale (resource hash doesn't match).
 
 #### 7. URL scheme: bare https:// vs git+https://
 

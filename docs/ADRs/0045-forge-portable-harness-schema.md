@@ -142,8 +142,9 @@ agent definition `.md` file). `agent` describes *how* the agent behaves;
 `role` describes *what function* the agent serves in the pipeline; `slug`
 describes *who* the agent authenticates as. During Phase 1-2, `role` and
 `slug` are optional — `Validate()` does not require them. In Phase 3,
-`Validate()` emits warnings when `role` is missing. In Phase 4,
-`Validate()` requires `role`.
+`Validate()` continues to allow missing `role`, but `Lint()` emits
+warnings when `role` is missing. In Phase 4, `Validate()` requires
+`role`.
 
 `base` references another harness file whose fields serve as defaults for
 this harness. Any field set in the child overrides the corresponding base
@@ -516,11 +517,10 @@ func (h *Harness) ResolveForge(platform string) error { ... }
    Note: `role`/`slug` becoming required is independent of the `forge:`
    section — a harness that only targets one platform still needs `role`
    and `slug` but does not need `forge:`.
-   Implementation note: the current `Validate()` method returns hard errors
-   only — there is no warning/advisory path. Phase 3 will need a separate
-   `Lint()` method or log-level warnings to emit non-fatal diagnostics
-   without breaking existing callers that treat any `Validate()` error as
-   a hard stop.
+   Implementation note: `Validate()` returns hard errors only. Phase 3
+   adds a separate `Lint()` method that returns non-fatal `[]Diagnostic`
+   warnings without breaking existing callers that treat any `Validate()`
+   error as a hard stop.
 
 4. **Phase 4 (remove):** Require `role` in all harness files. Remove the
    `agents:` block from config.yaml entirely. Agent identity and
@@ -581,6 +581,21 @@ forge-specific artifact. The harness and agent definition are portable.
   Default agents and custom agents use the same delivery mechanism —
   removing an agent is deleting a file, adding one is creating a thin
   wrapper with `base:`.
+
+- **Default URL allowlist for `base` composition.** `fullsend install`
+  sets `allowed_remote_resources` in `config.yaml` to include the
+  fullsend scaffold URL prefix
+  (`https://raw.githubusercontent.com/fullsend-ai/fullsend/`), ensuring
+  generated `base:` URLs pass the allowlist without manual configuration.
+  Integrity is enforced by the mandatory `#sha256=...` hash in each URL.
+
+- **Phase 2 dual-write.** During Phase 2, agent identity (`role`, `slug`)
+  is written to both `config.yaml`'s `agents:` block and harness wrapper
+  files. The `agents:` block remains the source of truth for existing
+  consumers (`loadKnownSlugs`, `runUninstall`, `SecretsLayer`). Phase 3
+  migrates consumers to harness-file discovery; Phase 4 removes the
+  `agents:` block. Reconciliation between the two is not needed because
+  both are written atomically during `fullsend install`.
 
 - **Merge semantics add complexity.** The inheritance rules (scalars
   override, skills concatenate, runner_env merges, validation_loop replaces)

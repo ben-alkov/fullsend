@@ -115,14 +115,49 @@ func EnsureProvider(name, providerType string, credentials, config map[string]st
 	cmd.Env = append(os.Environ(), extraEnv...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		// Redact known credential values from error output.
 		outStr := string(out)
+		// openshell emits: code: 'Some entity that we attempted to create already exists', message: "provider already exists"
+		if strings.Contains(strings.ToLower(outStr), "provider already exists") {
+			// Provider exists from a prior run — update it with current credentials.
+			return updateProvider(name, credentials, config, extraEnv, secrets)
+		}
+		// Redact known credential values from error output.
 		for _, s := range secrets {
 			outStr = strings.ReplaceAll(outStr, s, "***")
 		}
 		return fmt.Errorf("provider create %q failed: %s", name, outStr)
 	}
 	return nil
+}
+
+// updateProvider runs openshell provider update for an already-existing provider.
+func updateProvider(name string, credentials, config map[string]string, extraEnv, secrets []string) error {
+	args := buildProviderUpdateArgs(name, credentials, config)
+	cmd := exec.Command("openshell", args...)
+	cmd.Env = append(os.Environ(), extraEnv...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		outStr := string(out)
+		for _, s := range secrets {
+			outStr = strings.ReplaceAll(outStr, s, "***")
+		}
+		return fmt.Errorf("provider update %q failed: %s", name, outStr)
+	}
+	return nil
+}
+
+// buildProviderUpdateArgs constructs CLI args for openshell provider update.
+// The update subcommand takes a positional name (not --name/--type).
+func buildProviderUpdateArgs(name string, credentials, config map[string]string) []string {
+	args := []string{"provider", "update", name}
+	for k := range credentials {
+		args = append(args, "--credential", k)
+	}
+	for k, v := range config {
+		expanded := os.ExpandEnv(v)
+		args = append(args, "--config", k+"="+expanded)
+	}
+	return args
 }
 
 // buildProviderArgs constructs the CLI args and child environment entries for
@@ -314,8 +349,15 @@ func Delete(name string) error {
 }
 
 // Exec runs a command inside a sandbox and returns stdout, stderr, and exit code.
+// It uses context.Background() internally. Use ExecContext for cancellation support.
 func Exec(sandboxName, command string, timeout time.Duration) (stdout, stderr string, exitCode int, err error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout+10*time.Second)
+	return ExecContext(context.Background(), sandboxName, command, timeout)
+}
+
+// ExecContext is like Exec but accepts a parent context for cancellation.
+// Cancelling the parent (e.g. on SIGTERM) terminates the subprocess.
+func ExecContext(ctx context.Context, sandboxName, command string, timeout time.Duration) (stdout, stderr string, exitCode int, err error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout+10*time.Second)
 	defer cancel()
 
 	timeoutSecs := fmt.Sprintf("%d", int(timeout.Seconds()))
@@ -352,8 +394,13 @@ func Exec(sandboxName, command string, timeout time.Duration) (stdout, stderr st
 // ExecStreamReader runs a command inside a sandbox, returning an io.ReadCloser for
 // stdout so the caller can parse structured output. Stderr is forwarded to the
 // given writer. The caller must read stdout to completion, then call cmd.Wait().
-func ExecStreamReader(sandboxName, command string, timeout time.Duration, stderrW io.Writer) (io.ReadCloser, *exec.Cmd, context.CancelFunc, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+//
+// The parent context is used as the base for the timeout context, so
+// cancelling the parent (e.g. on SIGTERM) terminates the subprocess. This
+// allows CLI-level signal handling to propagate into long-running sandbox
+// commands.
+func ExecStreamReader(ctx context.Context, sandboxName, command string, timeout time.Duration, stderrW io.Writer) (io.ReadCloser, *exec.Cmd, context.CancelFunc, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	timeoutSecs := fmt.Sprintf("%d", int(timeout.Seconds()))
 
 	cmd := exec.CommandContext(ctx, "openshell", "sandbox", "exec",

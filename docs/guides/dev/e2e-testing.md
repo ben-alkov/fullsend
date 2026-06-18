@@ -91,7 +91,10 @@ use repository secrets. Because that exposes credentials to untrusted code, a
 
 E2E tests run without maintainer action when the PR author is an org/repo
 **member** or **collaborator** (`author_association` of `OWNER`, `MEMBER`, or
-`COLLABORATOR` on the base repo).
+`COLLABORATOR` on the base repo). The gate uses the frozen
+`github.event.pull_request.author_association` from the workflow event — not a
+live REST lookup — because `GITHUB_TOKEN` lacks `read:org` and cannot see org
+membership for members with private visibility.
 
 ### Who needs `ok-to-test`
 

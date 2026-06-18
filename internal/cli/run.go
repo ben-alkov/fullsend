@@ -21,10 +21,12 @@ import (
 	"github.com/fullsend-ai/fullsend/internal/config"
 	"github.com/fullsend-ai/fullsend/internal/envfile"
 	"github.com/fullsend-ai/fullsend/internal/fetch"
+	"github.com/fullsend-ai/fullsend/internal/fetchsvc"
 	"github.com/fullsend-ai/fullsend/internal/forge"
 	gh "github.com/fullsend-ai/fullsend/internal/forge/github"
 	"github.com/fullsend-ai/fullsend/internal/harness"
 	"github.com/fullsend-ai/fullsend/internal/lock"
+	"github.com/fullsend-ai/fullsend/internal/mintclient"
 	"github.com/fullsend-ai/fullsend/internal/resolve"
 	agentruntime "github.com/fullsend-ai/fullsend/internal/runtime"
 	"github.com/fullsend-ai/fullsend/internal/sandbox"
@@ -44,6 +46,8 @@ const (
 // agentWorkingDirExcludes lists directory patterns that agents may create
 // during execution but must never commit. These are added to
 // .git/info/exclude before the agent runs so git ignores them entirely.
+var statusMintToken = mintclient.MintToken
+
 var agentWorkingDirExcludes = []string{
 	".agentready/",
 	".fullsend-workspace/",
@@ -59,10 +63,10 @@ type resolveFlags struct {
 
 // statusOpts holds the optional status notification parameters for a run.
 type statusOpts struct {
-	runURL      string
-	statusRepo  string
-	statusNum   int
-	statusToken string
+	runURL     string
+	statusRepo string
+	statusNum  int
+	mintURL    string
 }
 
 func newRunCmd() *cobra.Command {
@@ -74,6 +78,7 @@ func newRunCmd() *cobra.Command {
 	var noPostScript bool
 	var debugFilter string
 	var keepSandbox bool
+	var forgeFlag string
 	var rFlags resolveFlags
 	var sOpts statusOpts
 
@@ -85,7 +90,7 @@ func newRunCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			agentName := args[0]
 			printer := ui.New(os.Stdout)
-			return runAgent(cmd.Context(), agentName, fullsendDir, outputBase, targetRepo, fullsendBinary, envFiles, noPostScript, debugFilter, rFlags, sOpts, printer, keepSandbox)
+			return runAgent(cmd.Context(), agentName, fullsendDir, outputBase, targetRepo, fullsendBinary, envFiles, noPostScript, debugFilter, forgeFlag, rFlags, sOpts, printer, keepSandbox)
 		},
 	}
 
@@ -98,20 +103,21 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&keepSandbox, "keep-sandbox", false, "skip sandbox deletion after the run (useful for post-failure inspection)")
 	cmd.Flags().StringVar(&debugFilter, "debug", "", `enable Claude Code debug logging with optional category filter (e.g. "api,hooks")`)
 	cmd.Flags().Lookup("debug").NoOptDefVal = "*"
+	cmd.Flags().StringVar(&forgeFlag, "forge", "", `forge platform to use (e.g. "github", "gitlab"); auto-detected from CI env vars when omitted`)
 	cmd.Flags().BoolVar(&rFlags.offline, "offline", false, "reject network fetches; only use cached remote resources")
 	cmd.Flags().IntVar(&rFlags.maxDepth, "max-depth", resolve.DefaultMaxDepth, "maximum dependency depth for transitive resolution (0 disables)")
 	cmd.Flags().IntVar(&rFlags.maxResources, "max-resources", resolve.DefaultMaxResources, "maximum total remote resources per harness")
 	cmd.Flags().StringVar(&sOpts.runURL, "run-url", "", "URL of the CI/CD run for status comments")
 	cmd.Flags().StringVar(&sOpts.statusRepo, "status-repo", "", "repository (owner/repo) for status comments")
 	cmd.Flags().IntVar(&sOpts.statusNum, "status-number", 0, "issue/PR number for status comments")
-	cmd.Flags().StringVar(&sOpts.statusToken, "status-token", "", "token for status comments (defaults to GH_TOKEN)")
+	cmd.Flags().StringVar(&sOpts.mintURL, "mint-url", "", "mint service URL for on-demand status tokens (default: $FULLSEND_MINT_URL)")
 	_ = cmd.MarkFlagRequired("fullsend-dir")
 	_ = cmd.MarkFlagRequired("target-repo")
 
 	return cmd
 }
 
-func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRepo, fullsendBinary string, envFiles []string, noPostScript bool, debug string, rFlags resolveFlags, sOpts statusOpts, printer *ui.Printer, keepSandbox bool) (runErr error) {
+func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRepo, fullsendBinary string, envFiles []string, noPostScript bool, debug string, forgeFlag string, rFlags resolveFlags, sOpts statusOpts, printer *ui.Printer, keepSandbox bool) (runErr error) {
 	printer.Banner(Version())
 	printer.Blank()
 	printer.Header("Running agent: " + agentName)
@@ -131,40 +137,84 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 		}
 	}
 
+	absFullsendDir, err := filepath.Abs(fullsendDir)
+	if err != nil {
+		return fmt.Errorf("resolving fullsend dir: %w", err)
+	}
+
 	// 1. Resolve and load harness.
-	harnessPath := filepath.Join(fullsendDir, "harness", agentName+".yaml")
+	harnessPath, err := resolveHarnessPath(absFullsendDir, agentName, printer)
+	if err != nil {
+		return err
+	}
 	harnessStart := time.Now()
 	printer.StepStart("Loading harness: " + harnessPath)
 
-	h, err := harness.Load(harnessPath)
+	forgePlatform, err := detectForgePlatform(forgeFlag)
+	if err != nil {
+		printer.StepFail("Invalid --forge flag")
+		return err
+	}
+
+	policy := fetch.DefaultPolicy
+	policy.Offline = rFlags.offline
+
+	// Best-effort org config loading — provides the allowlist for base
+	// harness fetching. If the file is missing or unparseable we proceed
+	// without it; HasURLReferences will enforce its presence later if needed.
+	orgConfigPath := filepath.Join(absFullsendDir, "config.yaml")
+	orgCfg := tryLoadOrgConfig(orgConfigPath, printer)
+	var orgAllowlist []string
+	if orgCfg != nil {
+		orgAllowlist = orgCfg.AllowedRemoteResources
+	}
+
+	// If the harness has a URL base and org config failed to load,
+	// load it strictly now so LoadWithBase gets a proper error path
+	// rather than an unhelpful "URL base requires allowed_remote_resources".
+	if orgCfg == nil {
+		if rawH, rawErr := harness.LoadRaw(harnessPath); rawErr == nil && rawH.Base != "" && harness.IsURL(rawH.Base) {
+			var err error
+			orgCfg, err = requireOrgConfig(orgConfigPath, printer)
+			if err != nil {
+				return err
+			}
+			orgAllowlist = orgCfg.AllowedRemoteResources
+		}
+	}
+
+	h, baseDeps, err := harness.LoadWithBase(ctx, harnessPath, harness.ComposeOpts{
+		WorkspaceRoot: absFullsendDir,
+		FetchPolicy:   policy,
+		AuditLogPath:  filepath.Join(absFullsendDir, ".fullsend-cache", "fetch-audit.jsonl"),
+		ForgePlatform: forgePlatform,
+		OrgAllowlist:  orgAllowlist,
+	})
 	if err != nil {
 		printer.StepFail("Failed to load harness")
 		return fmt.Errorf("loading harness: %w", err)
 	}
 
-	absFullsendDir, err := filepath.Abs(fullsendDir)
-	if err != nil {
-		return fmt.Errorf("resolving fullsend dir: %w", err)
+	for _, dep := range baseDeps {
+		if dep.CacheHit {
+			printer.StepInfo(fmt.Sprintf("Base: %s (cache hit)", dep.URL))
+		} else {
+			printer.StepInfo(fmt.Sprintf("Base: %s (fetched)", dep.URL))
+		}
 	}
+
 	if err := h.ResolveRelativeTo(absFullsendDir); err != nil {
 		printer.StepFail("Path validation failed")
 		return fmt.Errorf("resolving paths: %w", err)
 	}
 
 	if h.HasURLReferences() {
-		orgConfigPath := filepath.Join(absFullsendDir, "config.yaml")
-		orgConfigData, err := os.ReadFile(orgConfigPath)
-		if err != nil {
-			printer.StepFail("Failed to load org config")
-			if os.IsNotExist(err) {
-				return fmt.Errorf("URL-referenced resources require an org-level config.yaml with allowed_remote_resources (expected at %s)", orgConfigPath)
+		if orgCfg == nil {
+			var err error
+			orgCfg, err = requireOrgConfig(orgConfigPath, printer)
+			if err != nil {
+				return err
 			}
-			return fmt.Errorf("reading org config for remote resource validation: %w", err)
-		}
-		orgCfg, err := config.ParseOrgConfig(orgConfigData)
-		if err != nil {
-			printer.StepFail("Failed to parse org config")
-			return fmt.Errorf("parsing org config: %w", err)
 		}
 
 		if err := h.ValidateAllowedRemoteResources(orgCfg.AllowedRemoteResources); err != nil {
@@ -208,9 +258,6 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 		}
 
 		if !usedLock {
-			policy := fetch.DefaultPolicy
-			policy.Offline = rFlags.offline
-
 			var forgeClient forge.Client
 			if h.HasURLSkills() {
 				if rFlags.forgeClient != nil {
@@ -292,8 +339,19 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 	}
 	printer.StepDone(fmt.Sprintf("Harness loaded (%.1fs)", time.Since(harnessStart).Seconds()))
 
+	// Run lint checks and report any diagnostics (non-fatal).
+	for _, diag := range h.Lint() {
+		emitDiagnostic(printer, diag)
+	}
+
 	// Print plan.
 	printer.KeyValue("Agent", h.Agent)
+	if h.Role != "" {
+		printer.KeyValue("Role", h.Role)
+	}
+	if h.Slug != "" {
+		printer.KeyValue("Slug", h.Slug)
+	}
 	if h.Policy != "" {
 		printer.KeyValue("Policy", h.Policy)
 	}
@@ -350,7 +408,7 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 	// post-script — and can report cancellation/failure even when the
 	// sandbox never starts. See #1859.
 	if sOpts.statusRepo != "" && sOpts.statusNum > 0 {
-		notifier, notifyErr := setupStatusNotifier(absFullsendDir, sOpts, printer)
+		notifier, notifyErr := setupStatusNotifier(absFullsendDir, agentName, sOpts, printer)
 		if notifyErr != nil {
 			printer.StepWarn("Status notifications disabled: " + notifyErr.Error())
 		} else {
@@ -514,6 +572,35 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 	repoName := filepath.Base(hostRepositoryDir)
 	remoteRepositoryDir := fmt.Sprintf("%s/%s", sandbox.SandboxWorkspace, repoName)
 
+	// 5. Generate trace ID for security finding and audit log correlation.
+	traceID := security.GenerateTraceID()
+
+	// 6. Start runtime fetch service (Phase 4, ADR-0038).
+	var fetchEnvVal fetchServiceEnv
+	startFetch, deprecationWarning := shouldStartFetchService(h)
+	if deprecationWarning != "" {
+		printer.StepWarn(deprecationWarning)
+	}
+	if startFetch {
+		env, fetchShutdown, fetchErr := setupFetchService(ctx, rFlags.forgeClient, h, resolveToken, fetchsvc.ServiceConfig{
+			Harness:       h,
+			FetchPolicy:   fetch.DefaultPolicy,
+			WorkspaceRoot: absFullsendDir,
+			AuditLogPath:  filepath.Join(absFullsendDir, ".fullsend-cache", "fetch-audit.jsonl"),
+			TraceID:       traceID,
+			SandboxName:   sandboxName,
+			MaxFetches:    h.EffectiveMaxRuntimeFetches(),
+			Uploader:      &fetchsvc.SandboxUploader{},
+			SkillDestDir:  sandbox.SandboxClaudeConfig + "/skills",
+		}, printer.StepWarn)
+		if fetchErr != nil {
+			printer.StepWarn("Runtime fetch service failed to start: " + fetchErr.Error())
+		} else {
+			defer fetchShutdown()
+			fetchEnvVal = env
+		}
+	}
+
 	// 7. Bootstrap sandbox.
 	backend := agentruntime.Default()
 	rt := backend.Runtime
@@ -533,7 +620,7 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 		printer.StepFail("Failed to bootstrap sandbox")
 		return err
 	}
-	if err := bootstrapEnv(sandboxName, remoteRepositoryDir, h, rt.EnvExports()); err != nil {
+	if err := bootstrapEnv(sandboxName, remoteRepositoryDir, h, rt.EnvExports(), fetchEnvVal); err != nil {
 		printer.StepFail("Failed to bootstrap sandbox")
 		return err
 	}
@@ -616,8 +703,7 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 		}
 	}
 
-	// 9a. Generate trace ID for security finding correlation.
-	traceID := security.GenerateTraceID()
+	// 9a. Display trace ID (generated earlier for fetch service audit logging).
 	printer.KeyValue("Trace ID", traceID)
 	if err := injectTraceID(sandboxName, traceID); err != nil {
 		printer.StepWarn("Could not inject trace ID into sandbox: " + err.Error())
@@ -648,6 +734,25 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 			printer.StepWarn("Continuing despite findings (fail_mode: open)")
 		} else {
 			printer.StepDone("Pre-agent scan passed")
+		}
+	}
+
+	// 9b-2. Pre-flight GitHub API connectivity check.
+	// Validates that the sandbox can reach api.github.com through the proxy
+	// before starting the agent. Without this, agents that depend on gh CLI
+	// burn their entire timeout on doomed API calls. See #2143.
+	{
+		preflightStart := time.Now()
+		printer.StepStart("Checking GitHub API connectivity from sandbox")
+		result, connectErr := checkSandboxGitHubConnectivity(sandboxName)
+		if connectErr != nil {
+			printer.StepFail("GitHub API unreachable from sandbox")
+			return fmt.Errorf("pre-flight connectivity check: %w", connectErr)
+		}
+		if result.Skipped {
+			printer.StepInfo("GitHub API check skipped: " + result.SkipReason)
+		} else {
+			printer.StepDone(fmt.Sprintf("GitHub API reachable from sandbox (%.1fs)", time.Since(preflightStart).Seconds()))
 		}
 	}
 
@@ -727,7 +832,7 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 		go runHeartbeat(printer, agentStart, timeout, heartbeatDone)
 
 		var metrics agentruntime.RunMetrics
-		exitCode, runErr := rt.Run(agentruntime.RunParams{
+		exitCode, runErr := rt.Run(ctx, agentruntime.RunParams{
 			SandboxName:   sandboxName,
 			AgentBaseName: agentBaseName,
 			Model:         h.Model,
@@ -996,7 +1101,54 @@ func bootstrapCommon(sandboxName, fullsendBinary string, h *harness.Harness) err
 // host_files entries copy files from the host into the sandbox at specified
 // destination paths. Src values may contain ${VAR} references expanded from
 // the host environment. When expand is true, file content is also expanded.
-func bootstrapEnv(sandboxName, remoteRepositoryDir string, h *harness.Harness, runtimeEnvExports []string) error {
+// fetchServiceEnv holds the address and token of the runtime fetch service
+// started by the runner. When non-empty, bootstrapEnv injects them as
+// environment variables so the in-sandbox fullsend fetch-skill subcommand
+// can reach the runner.
+type fetchServiceEnv struct {
+	addr  string // host:port
+	token string // bearer token
+}
+
+const deprecatedImplicitFetchWarning = "Harness declares allowed_remote_resources without allow_runtime_fetch: true; " +
+	"the runtime fetch service will start for backward compatibility, but this behavior is " +
+	"deprecated — add allow_runtime_fetch: true to the harness to silence this warning"
+
+// shouldStartFetchService decides whether the runtime fetch HTTP service
+// should be started, and returns a deprecation warning if the harness relies
+// on the legacy implicit opt-in via allowed_remote_resources.
+func shouldStartFetchService(h *harness.Harness) (start bool, deprecationWarning string) {
+	if h.HasURLSkills() || h.AllowRuntimeFetch {
+		return true, ""
+	}
+	if len(h.AllowedRemoteResources) > 0 {
+		return true, deprecatedImplicitFetchWarning
+	}
+	return false, ""
+}
+
+// setupFetchService resolves a forge client for runtime fetching and starts
+// the HTTP fetch service. It returns the service address/token as a
+// fetchServiceEnv, a shutdown function, and any error.
+func setupFetchService(ctx context.Context, forgeClient forge.Client, h *harness.Harness, resolveToken func() (string, error), cfg fetchsvc.ServiceConfig, warn func(string)) (fetchServiceEnv, func(), error) {
+	if forgeClient != nil {
+		cfg.ForgeClient = forgeClient
+	} else if h.HasURLSkills() || h.AllowRuntimeFetch || len(h.AllowedRemoteResources) > 0 {
+		if token, err := resolveToken(); err == nil {
+			cfg.ForgeClient = gh.New(token)
+		} else {
+			warn(fmt.Sprintf("Forge token unavailable, runtime fetches for uncached skills will fail: %v", err))
+		}
+	}
+
+	addr, token, shutdown, err := startFetchService(ctx, cfg)
+	if err != nil {
+		return fetchServiceEnv{}, nil, err
+	}
+	return fetchServiceEnv{addr: addr, token: token}, shutdown, nil
+}
+
+func bootstrapEnv(sandboxName, remoteRepositoryDir string, h *harness.Harness, runtimeEnvExports []string, fetchEnv ...fetchServiceEnv) error {
 	remoteEnvFile := sandbox.SandboxWorkspace + "/.env"
 	outputDir := sandbox.SandboxWorkspace + "/output"
 
@@ -1033,6 +1185,14 @@ func bootstrapEnv(sandboxName, remoteRepositoryDir string, h *harness.Harness, r
 	}
 	if outputFile, ok := h.RunnerEnv["FULLSEND_OUTPUT_FILE"]; ok && outputFile != "" {
 		lines = append(lines, fmt.Sprintf("export FULLSEND_OUTPUT_FILE='%s'", strings.ReplaceAll(outputFile, "'", "'\\''")))
+	}
+
+	// Runtime fetch service env vars (Phase 4, ADR-0038).
+	if len(fetchEnv) > 0 && fetchEnv[0].addr != "" {
+		escAddr := strings.ReplaceAll(fetchEnv[0].addr, "'", "'\\''")
+		escToken := strings.ReplaceAll(fetchEnv[0].token, "'", "'\\''")
+		lines = append(lines, fmt.Sprintf("export FULLSEND_FETCH_URL='http://%s/fetch'", escAddr))
+		lines = append(lines, fmt.Sprintf("export FULLSEND_FETCH_TOKEN='%s'", escToken))
 	}
 
 	// Source all env files from .env.d/ (populated by host_files with expand: true).
@@ -1659,6 +1819,25 @@ func sandboxArch() string {
 	return runtime.GOARCH
 }
 
+// detectForgePlatform determines the forge platform from the CLI flag or CI
+// environment variables. Precedence: explicit flag > GITHUB_ACTIONS > GITLAB_CI.
+// Returns an error if the flag value is not a recognized forge key.
+func detectForgePlatform(flag string) (string, error) {
+	if flag != "" {
+		if !harness.ValidForgePlatform(flag) {
+			return "", fmt.Errorf("--forge: %q is not a valid forge platform (valid: %s)", flag, harness.ForgeKeyList())
+		}
+		return flag, nil
+	}
+	if os.Getenv("GITHUB_ACTIONS") == "true" {
+		return "github", nil
+	}
+	if os.Getenv("GITLAB_CI") == "true" {
+		return "gitlab", nil
+	}
+	return "", nil
+}
+
 func titleCase(s string) string {
 	words := strings.Fields(s)
 	for i, w := range words {
@@ -1669,19 +1848,19 @@ func titleCase(s string) string {
 	return strings.Join(words, " ")
 }
 
-func setupStatusNotifier(fullsendDir string, sOpts statusOpts, printer *ui.Printer) (*statuscomment.Notifier, error) {
+func setupStatusNotifier(fullsendDir string, agentName string, sOpts statusOpts, printer *ui.Printer) (*statuscomment.Notifier, error) {
 	parts := strings.SplitN(sOpts.statusRepo, "/", 2)
 	if len(parts) != 2 {
 		return nil, fmt.Errorf("--status-repo must be in owner/repo format, got %q", sOpts.statusRepo)
 	}
 	owner, repo := parts[0], parts[1]
 
-	token := sOpts.statusToken
-	if token == "" {
-		token = os.Getenv("GH_TOKEN")
+	mintURL := sOpts.mintURL
+	if mintURL == "" {
+		mintURL = os.Getenv("FULLSEND_MINT_URL")
 	}
-	if token == "" {
-		return nil, fmt.Errorf("no status token available (set --status-token or GH_TOKEN)")
+	if mintURL == "" {
+		return nil, fmt.Errorf("no mint URL available (set --mint-url or FULLSEND_MINT_URL)")
 	}
 
 	var notifyCfg config.StatusNotificationConfig
@@ -1697,8 +1876,6 @@ func setupStatusNotifier(fullsendDir string, sOpts statusOpts, printer *ui.Print
 		printer.StepWarn("Failed to read config.yaml for status notifications: " + err.Error())
 	}
 
-	client := gh.New(token)
-
 	sha := os.Getenv("GITHUB_SHA")
 	// In cross-repo workflow_dispatch mode, GITHUB_SHA is the dispatching
 	// repo's default branch HEAD — not the PR's head commit. Prefer the
@@ -1711,10 +1888,27 @@ func setupStatusNotifier(fullsendDir string, sOpts statusOpts, printer *ui.Print
 		runID = fmt.Sprintf("%d", time.Now().UnixNano())
 	}
 
-	n := statuscomment.New(client, notifyCfg, owner, repo, sOpts.statusNum, sOpts.runURL, sha, runID)
+	n := statuscomment.New(nil, notifyCfg, owner, repo, sOpts.statusNum, sOpts.runURL, sha, runID)
 	n.SetWarnFunc(func(format string, args ...any) {
 		printer.StepWarn(fmt.Sprintf(format, args...))
 	})
+
+	role := resolveRole(agentName)
+	n.SetClientFactory(func(ctx context.Context) (forge.Client, error) {
+		result, err := statusMintToken(ctx, mintclient.MintRequest{
+			MintURL: mintURL,
+			Role:    role,
+			Repos:   []string{repo},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("minting status token: %w", err)
+		}
+		if os.Getenv("GITHUB_ACTIONS") == "true" && mintTokenPattern.MatchString(result.Token) {
+			fmt.Fprintf(os.Stderr, "::add-mask::%s\n", result.Token)
+		}
+		return gh.New(result.Token), nil
+	})
+
 	return n, nil
 }
 
@@ -1750,4 +1944,28 @@ func prHeadSHAFromEventPath(path string) string {
 		return ""
 	}
 	return payload.PullRequest.Head.SHA
+}
+
+// emitDiagnostic prints a harness lint diagnostic with severity-appropriate formatting.
+// Warnings use StepWarn, errors use StepFail. This ensures future SeverityError
+// diagnostics are visually distinct from warnings.
+func emitDiagnostic(printer *ui.Printer, diag harness.Diagnostic) {
+	switch diag.Severity {
+	case harness.SeverityError:
+		printer.StepFail(diag.String())
+	default:
+		printer.StepWarn(diag.String())
+	}
+}
+
+// emitDiagnosticWithContext prints a diagnostic with additional context (e.g., agent name).
+// Used by lock --all where multiple harnesses are processed and context helps identify which.
+func emitDiagnosticWithContext(printer *ui.Printer, context string, diag harness.Diagnostic) {
+	msg := fmt.Sprintf("%s: %s", context, diag.String())
+	switch diag.Severity {
+	case harness.SeverityError:
+		printer.StepFail(msg)
+	default:
+		printer.StepWarn(msg)
+	}
 }

@@ -4,14 +4,14 @@ This guide walks through running agents with fullsend on your machine. It
 sets the base to help you run any agent, default or custom. Both macOS and
 Linux are supported with Podman as the container runtime.
 
-> For building fullsend from source or contributing to the CLI, see [Local development](../dev/local-dev.md).
+> For building fullsend from source, see the "Building from source" section in CONTRIBUTING.md.
 
 ## Prerequisites
 
 | Requirement | macOS | Linux |
 |-------------|-------|-------|
 | Container runtime | Podman Desktop with a running machine | Podman |
-| [OpenShell](https://github.com/NVIDIA/OpenShell) | 0.0.54 | 0.0.54 |
+| [OpenShell](https://github.com/NVIDIA/OpenShell) | 0.0.63 | 0.0.63 |
 | GCP project | [Agent Platform API](https://console.cloud.google.com/apis/library/aiplatform.googleapis.com) enabled with [Claude models](https://console.cloud.google.com/vertex-ai/model-garden) enabled | Same |
 | GCP credentials | Service account key (see section below) | Same |
 | GitHub PAT | Classic PAT with `repo` scope (see section below) | Same |
@@ -51,7 +51,7 @@ to install it, here we use one similar to how we download it on Fullsend. Use th
 printed on your Fullsend workflow for better reproducibility.
 
 ```bash
-export OPENSHELL_VERSION=0.0.54
+export OPENSHELL_VERSION=0.0.63
 curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/v${OPENSHELL_VERSION}/install.sh | OPENSHELL_VERSION=v${OPENSHELL_VERSION} sh
 openshell --version
 ```
@@ -193,6 +193,7 @@ resolution limits:
 
 | Flag | Default | Description |
 |------|---------|-------------|
+| `--forge` | (auto-detect) | Forge platform to use (`github`, `gitlab`). Auto-detected from CI env vars (`GITHUB_ACTIONS`, `GITLAB_CI`) when omitted |
 | `--max-depth` | 10 | Maximum dependency depth for transitive resolution (0 disables) |
 | `--max-resources` | 50 | Maximum total remote resources fetched per harness |
 | `--offline` | false | Reject network fetches; only use cached remote resources |
@@ -206,6 +207,16 @@ generated. Generate or update a lock file with:
 ```bash
 fullsend lock code --fullsend-dir /path/to/.fullsend
 ```
+
+To lock all harnesses in the directory at once:
+
+```bash
+fullsend lock --all --fullsend-dir /path/to/.fullsend
+```
+
+When `--forge` is specified, only that platform variant is locked. When omitted,
+all forge variants defined in the harness are resolved and the union of their
+dependencies is locked.
 
 When the lock entry is current (harness SHA256 matches), dependencies are
 resolved from the local cache without network access. If the harness has changed
@@ -224,7 +235,7 @@ target issue/PR. These flags mirror what the CI workflows pass automatically:
 | `--run-url` | URL of the CI/CD run shown in the status comment |
 | `--status-repo` | Repository (`owner/repo`) to post status comments on |
 | `--status-number` | Issue or PR number for status comments |
-| `--status-token` | Token for posting comments (defaults to `GH_TOKEN`) |
+| `--mint-url` | Mint service URL for on-demand status comment tokens (default: `$FULLSEND_MINT_URL`) |
 
 Example:
 
@@ -240,7 +251,7 @@ fullsend run triage \
 ```
 
 Status comment behavior is configured via `status_notifications` in
-`config.yaml`. See the [installation guide](../getting-started/installation.md#status-notifications).
+`config.yaml`. See the [installation guide](../../reference/installation.md#status-notifications).
 
 ## Simulating Fullsend's real customization layers
 
@@ -311,8 +322,6 @@ to the server (gateway). It is likely that you need to bind the gateway to `0.0.
 **arm64 sandbox image pull fails**
 - The default `:latest` tag is amd64-only. Add `FULLSEND_SANDBOX_IMAGE=ghcr.io/fullsend-ai/fullsend-sandbox:dev` to your env file
 
-**`L7 policy validation failed: unknown protocol 'tcp'`**
-- OpenShell 0.0.54 uses `protocol: rest` (not `tcp`) and `access: read-write`/`read-only` (not `allow`). Update your policy YAML files to use the new schema. See the built-in policies in `policies/` for examples.
 
 **`unable to replace "host-gateway"` on macOS**
 - Set `host_containers_internal_ip = "192.168.127.254"` under `[containers]` in `~/.config/containers/containers.conf` and restart the Podman machine

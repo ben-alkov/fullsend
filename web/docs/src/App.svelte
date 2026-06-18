@@ -321,9 +321,13 @@
     loading = true;
 
     void loadPage(key)
-      .then((p) => {
+      .then(async (p) => {
         if (pageRouteKey === key) {
           page = p;
+          if (!slug && mainEl) {
+            await tick();
+            mainEl.scrollTop = 0;
+          }
         }
       })
       .catch(() => {
