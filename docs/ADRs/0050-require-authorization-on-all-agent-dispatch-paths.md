@@ -1,5 +1,5 @@
 ---
-title: "49. Require authorization on all agent dispatch paths"
+title: "50. Require authorization on all agent dispatch paths"
 status: Accepted
 relates_to:
   - agent-architecture
@@ -10,7 +10,7 @@ topics:
   - dispatch
 ---
 
-# 49. Require authorization on all agent dispatch paths
+# 50. Require authorization on all agent dispatch paths
 
 Date: 2026-05-29
 
