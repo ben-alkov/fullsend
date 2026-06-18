@@ -104,7 +104,7 @@ func TestCreateInstallationToken_UnknownRole(t *testing.T) {
 }
 
 func TestRolePermissions_AllRolesPresent(t *testing.T) {
-	expectedRoles := []string{"triage", "coder", "review", "fix", "retro", "prioritize", "fullsend"}
+	expectedRoles := []string{"triage", "coder", "review", "fix", "retro", "prioritize", "fullsend", "e2e"}
 	allPerms := RolePermissions()
 	for _, role := range expectedRoles {
 		perms, ok := allPerms[role]

@@ -983,6 +983,10 @@ func TestValidateMintSetupRole(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "coder", role)
 
+	role, err = validateMintSetupRole("e2e")
+	require.NoError(t, err)
+	assert.Equal(t, "e2e", role)
+
 	_, err = validateMintSetupRole("fix")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "coder")

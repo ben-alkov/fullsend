@@ -91,7 +91,7 @@ type OrgConfig struct {
 
 // ValidRoles returns the set of recognized agent roles.
 func ValidRoles() []string {
-	return []string{"fullsend", "triage", "coder", "review", "fix", "retro", "prioritize"}
+	return []string{"fullsend", "triage", "coder", "review", "fix", "retro", "prioritize", "e2e"}
 }
 
 // ValidProviders returns the set of recognized inference providers.
