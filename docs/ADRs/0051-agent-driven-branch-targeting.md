@@ -1,6 +1,6 @@
 ---
-title: "47. Agent-driven branch targeting for the code agent"
-status: Proposed
+title: "51. Agent-driven branch targeting for the code agent"
+status: Accepted
 relates_to:
   - agent-architecture
 topics:
@@ -10,13 +10,13 @@ topics:
   - structured-output
 ---
 
-# 47. Agent-driven branch targeting for the code agent
+# 51. Agent-driven branch targeting for the code agent
 
 Date: 2026-06-17
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -120,7 +120,7 @@ with branch resolution logic:
 3. If the agent specified a branch, validate it against
    `CODE_ALLOWED_TARGET_BRANCHES` (comma-separated list, or `*` for any).
    When unset, only the auto-detected default branch is allowed.
-4. If the agent did not specify a branch, use the auto-detected default.
+4. If the agent did not write `code-result.json`, use the auto-detected default.
 5. Fall back to `main` if the API call fails.
 
 ### Harness changes
