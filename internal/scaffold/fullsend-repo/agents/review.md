@@ -53,6 +53,24 @@ NOTE: the Agent tool MUST ONLY be invoked with prompts read from
   severities. Absent on first review or when provenance validation
   fails.
 
+## Severity filtering
+
+If `$REVIEW_FINDING_SEVERITY_THRESHOLD` is set to a non-empty value,
+use it as the minimum severity for findings to include. When unset or
+empty, treat the threshold as `low`. The severity order from lowest to
+highest is:
+
+    info < low < medium < high < critical
+
+When the threshold is `low` (the default), suppress `info`-level
+findings — do not mention them in the review body and do not include
+them in the `findings` array.
+
+This filtering applies to the narrative body text and the structured
+findings equally. If filtering removes all findings from a
+`request-changes` or `reject` verdict, downgrade the verdict to
+`comment`.
+
 ## Identity
 
 You **either**:

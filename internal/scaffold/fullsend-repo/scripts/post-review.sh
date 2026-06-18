@@ -68,6 +68,75 @@ fi
 
 echo "Using result: ${RESULT_FILE}"
 
+# ---------------------------------------------------------------------------
+# Severity filtering: drop findings below the configured threshold.
+# Defense-in-depth — the agent should already have filtered, but the
+# post-script enforces it. The filter runs before ACTION is read so
+# that verdict recalculation (if all findings are removed) is possible.
+# ---------------------------------------------------------------------------
+REVIEW_FINDING_SEVERITY_THRESHOLD="${REVIEW_FINDING_SEVERITY_THRESHOLD:-low}"
+
+case "$REVIEW_FINDING_SEVERITY_THRESHOLD" in
+  info|low|medium|high|critical) ;;
+  *) echo "::warning::Invalid REVIEW_FINDING_SEVERITY_THRESHOLD='${REVIEW_FINDING_SEVERITY_THRESHOLD}', defaulting to 'low'"
+     REVIEW_FINDING_SEVERITY_THRESHOLD="low" ;;
+esac
+
+severity_rank() {
+  case "$1" in
+    info)     echo 0 ;;
+    low)      echo 1 ;;
+    medium)   echo 2 ;;
+    high)     echo 3 ;;
+    critical) echo 4 ;;
+    *)        echo 1 ;;
+  esac
+}
+
+threshold_rank=$(severity_rank "$REVIEW_FINDING_SEVERITY_THRESHOLD")
+
+if jq -e '.findings' "${RESULT_FILE}" >/dev/null 2>&1; then
+  original_count=$(jq '.findings | length' "${RESULT_FILE}")
+  FILTERED_RESULT=$(mktemp)
+  CLEANUP_FILES+=("${FILTERED_RESULT}")
+  jq --argjson rank "$threshold_rank" '
+    .findings |= [.[] | select(
+      (if .severity == "info" then 0
+       elif .severity == "low" then 1
+       elif .severity == "medium" then 2
+       elif .severity == "high" then 3
+       elif .severity == "critical" then 4
+       else 1 end) >= $rank
+    )]
+  ' "${RESULT_FILE}" > "${FILTERED_RESULT}"
+  filtered_count=$(jq '.findings | length' "${FILTERED_RESULT}")
+
+  if [ "${filtered_count}" -lt "${original_count}" ]; then
+    echo "Severity filter (threshold=${REVIEW_FINDING_SEVERITY_THRESHOLD}): kept ${filtered_count}/${original_count} findings"
+    RESULT_FILE="${FILTERED_RESULT}"
+
+    # If filtering removed all findings, delete the empty findings array
+    # (minItems: 1 in the schema). For request-changes/reject, also
+    # downgrade to comment — zero findings with a blocking verdict is
+    # semantically wrong. Use "comment" (not "approve") so the PR gets
+    # requires-manual-review, not ready-for-merge.
+    if [ "${filtered_count}" -eq 0 ]; then
+      original_action=$(jq -r '.action' "${FILTERED_RESULT}")
+      DOWNGRADE_RESULT=$(mktemp)
+      CLEANUP_FILES+=("${DOWNGRADE_RESULT}")
+      if [ "${original_action}" = "request-changes" ] || [ "${original_action}" = "reject" ]; then
+        echo "All findings removed by severity filter — downgrading '${original_action}' to 'comment'"
+        jq 'del(.findings) | .action = "comment"' "${FILTERED_RESULT}" > "${DOWNGRADE_RESULT}"
+      else
+        jq 'del(.findings)' "${FILTERED_RESULT}" > "${DOWNGRADE_RESULT}"
+      fi
+      RESULT_FILE="${DOWNGRADE_RESULT}"
+    fi
+  else
+    rm -f "${FILTERED_RESULT}"
+  fi
+fi
+
 ACTION=$(jq -r '.action' "${RESULT_FILE}")
 # ACTION retains the original value for the entire script — not re-read after protected-path downgrade.
 

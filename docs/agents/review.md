@@ -70,6 +70,22 @@ the upstream default -- no other configuration needed.
 See [Customizing with AGENTS.md](../guides/user/customizing-with-agents-md.md) and
 [Customizing with Skills](../guides/user/customizing-with-skills.md).
 
+### Variables
+
+| Variable | Description | Default | Valid values |
+|----------|-------------|---------|--------------|
+| `REVIEW_FINDING_SEVERITY_THRESHOLD` | Minimum severity for findings to include in the review. Findings below this level are omitted from both the narrative body and the posted inline comments. | `low` | `info`, `low`, `medium`, `high`, `critical` |
+
+Set this in the CI workflow `env:` block. The env file passes it to the
+sandbox automatically, and the post-script reads it from the runner
+environment directly — no separate configuration is needed.
+
+The review agent omits findings below the threshold from its output. The
+post-script also filters the structured `findings` array as
+defense-in-depth. When filtering removes all findings from a
+`request-changes` or `reject` verdict, the post-script downgrades the
+verdict to `comment` (applying the `requires-manual-review` label).
+
 ## Source
 
 [`internal/scaffold/fullsend-repo/harness/review.yaml`](../../internal/scaffold/fullsend-repo/harness/review.yaml)
