@@ -692,6 +692,10 @@ forge-specific artifact. The harness and agent definition are portable.
   Phase 3 (deprecation), but full removal in Phase 4 may warrant a v2
   schema. Consumers that assume `Agents` is always populated need
   auditing.
+  *Note: Phase 3 PR 6 added `omitempty` to the `Agents` field. The
+  Phase 4 plan (`docs/plans/adr-0045-forge-portable-harness-phase4.md`)
+  recommends staying on v1 — removal is backward-compatible since
+  `yaml.Unmarshal` silently ignores unknown keys.*
 
 - **config.yaml agents: block removal timeline.** The `agents:` block is
   removed entirely in Phase 4. Consumers that read it directly need

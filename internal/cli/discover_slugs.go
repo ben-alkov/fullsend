@@ -46,7 +46,7 @@ func discoverAgentSlugs(ctx context.Context, client forge.Client, owner, configR
 		}
 	}
 
-	if cfg != nil && len(cfg.Agents) > 0 {
+	if cfg != nil && cfg.HasAgentsBlock() {
 		printer.StepWarn("agent identity read from config.yaml agents: block; migrate to harness files with role/slug fields")
 		var slugs []string
 		seen := make(map[string]bool, len(cfg.Agents))
