@@ -10,7 +10,7 @@
 #   - SOURCE_REPO
 set -euo pipefail
 
-PRIOR_FILE=${GITHUB_WORKSPACE}/prior-review.txt
+PRIOR_FILE=${GITHUB_WORKSPACE:-/tmp}/prior-review.txt
 REVIEW_BOT="${ORG_NAME}-review[bot]"
 PROVENANCE="none"
 
