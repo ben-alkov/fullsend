@@ -39,9 +39,80 @@ type callerWorkflow struct {
 }
 
 type callerJob struct {
-	Uses    string            `yaml:"uses"`
-	With    map[string]string `yaml:"with"`
-	Secrets map[string]string `yaml:"secrets"`
+	Uses        string            `yaml:"uses"`
+	With        map[string]string `yaml:"with"`
+	Secrets     map[string]string `yaml:"secrets"`
+	Concurrency *jobConcurrency   `yaml:"concurrency"`
+}
+
+type jobConcurrency struct {
+	Group            string `yaml:"group"`
+	CancelInProgress bool   `yaml:"cancel-in-progress"`
+}
+
+// reusableStageWorkflow includes workflow-level concurrency on reusable agent workflows.
+type reusableStageWorkflow struct {
+	Concurrency *jobConcurrency `yaml:"concurrency"`
+	On          reusableWorkflow `yaml:"on"`
+}
+
+type stageConcurrencyExpectation struct {
+	groupPrefix string
+	groupMust   []string
+}
+
+var reusableStageConcurrencyExpectations = map[string]stageConcurrencyExpectation{
+	"triage": {
+		groupPrefix: "fullsend-triage-",
+		groupMust:   []string{"inputs.source_repo", "issue.number"},
+	},
+	"code": {
+		groupPrefix: "fullsend-code-",
+		groupMust:   []string{"inputs.source_repo", "issue.number"},
+	},
+	"review": {
+		groupPrefix: "fullsend-review-",
+		groupMust:   []string{"inputs.source_repo", "pull_request.number", "issue.number"},
+	},
+	"fix": {
+		groupPrefix: "fullsend-fix-",
+		groupMust:   []string{"inputs.source_repo", "pull_request.number", "issue.number", "inputs.pr_number"},
+	},
+	"retro": {
+		groupPrefix: "fullsend-retro-",
+		groupMust:   []string{"inputs.source_repo", "pull_request.number", "issue.number"},
+	},
+	"prioritize": {
+		groupPrefix: "fullsend-prioritize-",
+		groupMust:   []string{"inputs.source_repo", "issue.number"},
+	},
+}
+
+var dispatchStageConcurrencyExpectations = map[string]stageConcurrencyExpectation{
+	"triage": {
+		groupPrefix: "fullsend-triage-",
+		groupMust:   []string{"github.repository", "github.event.issue.number"},
+	},
+	"code": {
+		groupPrefix: "fullsend-code-",
+		groupMust:   []string{"github.repository", "github.event.issue.number"},
+	},
+	"review": {
+		groupPrefix: "fullsend-review-",
+		groupMust:   []string{"github.repository", "github.event.pull_request.number", "github.event.issue.number"},
+	},
+	"fix": {
+		groupPrefix: "fullsend-fix-",
+		groupMust:   []string{"github.repository", "github.event.pull_request.number", "github.event.issue.number"},
+	},
+	"retro": {
+		groupPrefix: "fullsend-retro-",
+		groupMust:   []string{"github.repository", "github.event.pull_request.number", "github.event.issue.number"},
+	},
+	"prioritize": {
+		groupPrefix: "fullsend-prioritize-",
+		groupMust:   []string{"github.repository", "github.event.issue.number"},
+	},
 }
 
 // reusableWorkflowRef extracts the reusable workflow filename from a uses: reference.
@@ -225,6 +296,54 @@ func TestReusableDispatchProjectNumberInput(t *testing.T) {
 	s := string(content)
 	assert.True(t, strings.Contains(s, "project_number: ${{ inputs.project_number }}"),
 		"prioritize job should thread project_number from dispatch inputs")
+}
+
+// TestReusableDispatchStageConcurrency validates per-role cancel-in-progress groups
+// on all stage jobs in reusable-dispatch.yml (#981, #982, ADR 0033).
+func TestReusableDispatchStageConcurrency(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "reusable-dispatch.yml"))
+	require.NoError(t, err)
+
+	var caller callerWorkflow
+	require.NoError(t, yaml.Unmarshal(content, &caller))
+
+	for stage, expect := range dispatchStageConcurrencyExpectations {
+		t.Run(stage, func(t *testing.T) {
+			job, ok := caller.Jobs[stage]
+			require.True(t, ok, "job %q should exist", stage)
+			require.NotNil(t, job.Concurrency, "job %q should declare a concurrency group", stage)
+			assert.Contains(t, job.Concurrency.Group, expect.groupPrefix)
+			for _, fragment := range expect.groupMust {
+				assert.Contains(t, job.Concurrency.Group, fragment,
+					"job %q concurrency group should reference %q", stage, fragment)
+			}
+			assert.True(t, job.Concurrency.CancelInProgress,
+				"job %q should cancel in-progress runs when a newer dispatch arrives", stage)
+		})
+	}
+}
+
+// TestReusableWorkflowConcurrency validates workflow-level concurrency on all
+// reusable stage workflows (defense-in-depth; mirrors dispatch stage jobs).
+func TestReusableWorkflowConcurrency(t *testing.T) {
+	for stage, expect := range reusableStageConcurrencyExpectations {
+		t.Run(stage, func(t *testing.T) {
+			path := filepath.Join("..", "..", ".github", "workflows", fmt.Sprintf("reusable-%s.yml", stage))
+			content, err := os.ReadFile(path)
+			require.NoError(t, err)
+
+			var wf reusableStageWorkflow
+			require.NoError(t, yaml.Unmarshal(content, &wf))
+			require.NotNil(t, wf.Concurrency, "reusable-%s.yml should declare workflow-level concurrency", stage)
+			assert.Contains(t, wf.Concurrency.Group, expect.groupPrefix)
+			for _, fragment := range expect.groupMust {
+				assert.Contains(t, wf.Concurrency.Group, fragment,
+					"reusable-%s.yml concurrency group should reference %q", stage, fragment)
+			}
+			assert.True(t, wf.Concurrency.CancelInProgress,
+				"reusable-%s.yml should cancel in-progress runs", stage)
+		})
+	}
 }
 
 // TestReusableDispatchUsesFullyQualifiedPaths validates that reusable-dispatch.yml
