@@ -94,7 +94,9 @@ jobs:
                   fi
                   ;;
                 /fs-review)
-                  STAGE="review"
+                  if [[ "${ISSUE_HAS_PR}" == "true" ]]; then
+                    STAGE="review"
+                  fi
                   ;;
                 /fs-fix)
                   if [[ "${ISSUE_HAS_PR}" == "true" ]]; then
@@ -141,8 +143,6 @@ jobs:
               elif [[ "${EVENT_ACTION}" == "labeled" ]]; then
                 if [[ "${TRIGGERING_LABEL}" == "ready-to-code" ]]; then
                   STAGE="code"
-                elif [[ "${TRIGGERING_LABEL}" == "ready-for-review" ]]; then
-                  STAGE="review"
                 fi
               fi
               ;;

@@ -102,11 +102,16 @@ a stage name:
 - `issue_comment` with `/fs-triage`, `/fs-code`, `/fs-review`, `/fs-fix`, `/fs-retro`, `/fs-prioritize`
   commands → corresponding stage
 - `issue_comment` on `needs-info` issue from non-bot → `triage`
-- `issues` + `labeled` with `ready-to-code` or `ready-for-review` → `code`
-  or `review`
+- `issues` + `labeled` with `ready-to-code` → `code`
 - `pull_request_target` opened/synchronize/ready_for_review → `review`
 - `pull_request_target` closed → `retro`
 - `pull_request_review` with bot `changes_requested` → `fix`
+
+> **Note (2026-06):** Review and fix no longer dispatch from `issues` events.
+> Review requires PR context: `pull_request_target` or `/fs-review` on a PR
+> comment (`issue_comment` with linked PR). Fix dispatches from
+> `pull_request_review` or `/fs-fix` on a PR comment. The `ready-for-review`
+> label remains a workflow-state marker, not a dispatch trigger.
 
 If no stage matches, `dispatch.yml` exits early with no fan-out. The existing
 kill switch, role enablement, and `# fullsend-stage:` marker scanning
