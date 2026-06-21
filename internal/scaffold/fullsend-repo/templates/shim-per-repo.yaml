@@ -15,8 +15,8 @@
 # branch in reusable-dispatch.yml — zero changes to this repo.
 #
 # Concurrency: per-role cancel-in-progress groups live in reusable-dispatch.yml
-# stage jobs and reusable-{stage}.yml workflows — not on this shim. A monolithic
-# shim group would serialize unrelated roles and drop pending runs (#2452).
+# stage jobs — not on this shim or reusable stage workflows. A monolithic shim
+# group would serialize unrelated roles and drop pending runs (#2452).
 name: fullsend
 
 permissions:

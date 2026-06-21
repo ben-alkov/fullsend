@@ -3,9 +3,11 @@
 # workflow_call jobs. This is the per-repo equivalent of the per-org
 # dispatch.yml + thin caller pair.
 #
-# Concurrency: each stage job declares a per-role cancel-in-progress group
-# (mirrored on reusable-{stage}.yml). Roles operate independently — review
-# dispatches do not cancel triage, code, fix, etc.
+# Concurrency: each stage job declares a per-role cancel-in-progress group.
+# Reusable stage workflows intentionally omit workflow-level concurrency —
+# the same group on a workflow_call parent and child cancels the parent (#981).
+# Per-org thin callers (triage.yml, etc.) declare matching groups. Roles operate
+# independently — review dispatches do not cancel triage, code, fix, etc.
 #
 # Flow: shim (per-repo) → reusable-dispatch.yml → reusable-{stage}.yml
 # Nesting: 3 levels of workflow_call (within GitHub's 4-level limit)

@@ -139,10 +139,10 @@ The `stage` input to `dispatch.yml` becomes optional. When provided
   on each stage (triage, code, review, fix, retro, prioritize). Groups are keyed
   by `{repo}-{issue|pr}` per stage so roles operate independently — a new review
   dispatch cancels an in-flight review but does not cancel triage or code on the
-  same issue. Per-org: thin caller workflows (`review.yml`, etc.) and
-  `dispatch.yml` stage jobs; per-repo: `reusable-dispatch.yml` stage jobs and
-  matching `reusable-{stage}.yml` workflows (two-layer defense-in-depth).
-  The per-org shim retains a single queue group (`cancel-in-progress: false`);
+  same issue. Per-org: thin caller workflows (`review.yml`, etc.); per-repo:
+  `reusable-dispatch.yml` stage jobs. Reusable stage workflows omit concurrency
+  (same group on a workflow_call parent and child cancels the parent). The
+  per-org shim retains a single queue group (`cancel-in-progress: false`);
   the per-repo shim has no monolithic group (#2452).
 - Events that don't match any stage still trigger a `workflow_call` to
   `dispatch.yml`, which exits early. Cost: one runner spin-up (~20s). The

@@ -323,10 +323,13 @@ func TestReusableDispatchStageConcurrency(t *testing.T) {
 	}
 }
 
-// TestReusableWorkflowConcurrency validates workflow-level concurrency on all
-// reusable stage workflows (defense-in-depth; mirrors dispatch stage jobs).
-func TestReusableWorkflowConcurrency(t *testing.T) {
-	for stage, expect := range reusableStageConcurrencyExpectations {
+// TestReusableWorkflowsNoWorkflowConcurrency ensures reusable stage workflows
+// do not declare workflow-level concurrency. Callers (reusable-dispatch stage
+// jobs or per-org thin callers) own the per-role group; duplicating the same
+// group on a workflow_call child cancels the parent immediately (#981).
+func TestReusableWorkflowsNoWorkflowConcurrency(t *testing.T) {
+	stages := []string{"triage", "code", "review", "fix", "retro", "prioritize"}
+	for _, stage := range stages {
 		t.Run(stage, func(t *testing.T) {
 			path := filepath.Join("..", "..", ".github", "workflows", fmt.Sprintf("reusable-%s.yml", stage))
 			content, err := os.ReadFile(path)
@@ -334,14 +337,30 @@ func TestReusableWorkflowConcurrency(t *testing.T) {
 
 			var wf reusableStageWorkflow
 			require.NoError(t, yaml.Unmarshal(content, &wf))
-			require.NotNil(t, wf.Concurrency, "reusable-%s.yml should declare workflow-level concurrency", stage)
+			assert.Nil(t, wf.Concurrency,
+				"reusable-%s.yml must not declare workflow-level concurrency (callers own the group)", stage)
+		})
+	}
+}
+
+// TestThinCallerStageConcurrency validates per-role cancel-in-progress groups on
+// per-org thin caller workflows in the scaffold (#981, ADR 0033).
+func TestThinCallerStageConcurrency(t *testing.T) {
+	for stage, expect := range reusableStageConcurrencyExpectations {
+		t.Run(stage, func(t *testing.T) {
+			path := fmt.Sprintf(".github/workflows/%s.yml", stage)
+			content := loadRenderedScaffoldCaller(path)(t)
+
+			var wf reusableStageWorkflow
+			require.NoError(t, yaml.Unmarshal(content, &wf))
+			require.NotNil(t, wf.Concurrency, "%s should declare workflow-level concurrency", path)
 			assert.Contains(t, wf.Concurrency.Group, expect.groupPrefix)
 			for _, fragment := range expect.groupMust {
 				assert.Contains(t, wf.Concurrency.Group, fragment,
-					"reusable-%s.yml concurrency group should reference %q", stage, fragment)
+					"%s concurrency group should reference %q", path, fragment)
 			}
 			assert.True(t, wf.Concurrency.CancelInProgress,
-				"reusable-%s.yml should cancel in-progress runs", stage)
+				"%s should cancel in-progress runs when a newer dispatch arrives", path)
 		})
 	}
 }

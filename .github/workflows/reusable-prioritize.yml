@@ -1,13 +1,9 @@
 # Reusable prioritize agent workflow. Called by dispatch workflows via workflow_call.
 # Runs in the caller's repo context (secrets, checkout).
 #
-# Concurrency: per-role cancel-in-progress group (mirrored on reusable-dispatch
-# stage job). Latest prioritize dispatch for an issue wins.
+# Concurrency: per-role cancel-in-progress groups live on callers only
+# (reusable-dispatch stage jobs or per-org thin callers like prioritize.yml).
 name: Prioritize Agent
-
-concurrency:
-  group: fullsend-prioritize-${{ inputs.source_repo }}-${{ fromJSON(inputs.event_payload).issue.number }}
-  cancel-in-progress: true
 
 on:
   workflow_call:

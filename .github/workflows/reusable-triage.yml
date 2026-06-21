@@ -1,13 +1,11 @@
 # Reusable triage agent workflow. Called by dispatch workflows via workflow_call.
 # Runs in the caller's repo context (secrets, checkout).
 #
-# Concurrency: per-role cancel-in-progress group (mirrored on reusable-dispatch
-# stage job). Latest triage dispatch for an issue wins.
+# Concurrency: per-role cancel-in-progress groups live on callers only
+# (reusable-dispatch stage jobs or per-org thin callers like triage.yml).
+# Do not add workflow-level concurrency here — the same group on parent and
+# child workflow_call runs causes instant cancellation (#981).
 name: Triage Agent
-
-concurrency:
-  group: fullsend-triage-${{ inputs.source_repo }}-${{ fromJSON(inputs.event_payload).issue.number }}
-  cancel-in-progress: true
 
 on:
   workflow_call:
