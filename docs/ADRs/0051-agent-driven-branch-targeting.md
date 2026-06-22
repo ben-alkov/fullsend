@@ -158,7 +158,16 @@ branches configure `CODE_ALLOWED_TARGET_BRANCHES` via their harness override
 - The code agent now has a structured output contract. Agent definitions must
   be updated to instruct the agent to write `code-result.json`.
 - Repos that override `harness/code.yaml` via `.fullsend/customized/` must
-  update their override to include the new `runner_env` fields.
+  update their override to include the new `runner_env` fields. Specifically,
+  replace `TARGET_BRANCH: "${TARGET_BRANCH}"` with the new keys:
+  ```yaml
+  runner_env:
+    CODE_ALLOWED_TARGET_BRANCHES: "${CODE_ALLOWED_TARGET_BRANCHES}"
+    FULLSEND_OUTPUT_SCHEMA: ${FULLSEND_DIR}/schemas/code-result.schema.json
+    FULLSEND_OUTPUT_FILE: code-result.json
+  ```
+  Customized harnesses that still reference `${TARGET_BRANCH}` will fail
+  harness validation because the workflow no longer provides the variable.
 - The `TARGET_BRANCH` env var is removed. Any tooling that reads it directly
   (outside the post-script) must be updated.
 
