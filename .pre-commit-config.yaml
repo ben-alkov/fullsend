@@ -57,6 +57,19 @@ repos:
       - id: shellcheck
         args: ["-x", "-e", "SC1091,SC2001,SC2016"]
 
+  - repo: local
+    hooks:
+      - id: pinact
+        name: pinact (SHA-pin check)
+        entry: pinact run --fix=false --no-api
+        language: system
+        files: |
+          (?x)^(
+            \.github/workflows/
+            |internal/scaffold/fullsend-repo/\.github/workflows/
+          )
+        pass_filenames: false
+
   - repo: https://github.com/rhysd/actionlint
     rev: v1.7.11
     hooks:
