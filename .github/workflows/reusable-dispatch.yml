@@ -102,17 +102,11 @@ jobs:
           STAGE=""
           TRIGGER_SOURCE=""
 
-          is_authorized() {
-            case "${COMMENT_AUTHOR_ASSOC}" in
-              OWNER|MEMBER|COLLABORATOR) return 0 ;;
-              *) return 1 ;;
-            esac
-          }
-
-          # Helper: check actor has write+ permission on the repo (for non-comment triggers).
-          # Uses the collaborator permission API which correctly resolves org membership
-          # regardless of membership visibility (private vs public).
-          is_event_actor_authorized() {
+          # Helper: check actor has write+ permission on the repo.
+          # Uses the collaborator permission API which correctly resolves org
+          # membership regardless of visibility (private vs public).
+          # See: github/gh-aw-mcpg#2862
+          has_write_permission() {
             local username="${1:-}"
             if [[ -z "${username}" ]]; then
               return 1
@@ -124,6 +118,16 @@ jobs:
               admin|maintain|write) return 0 ;;
               *) return 1 ;;
             esac
+          }
+
+          # Slash command authorization (comment-triggered paths)
+          is_authorized() {
+            has_write_permission "${COMMENT_USER_LOGIN}"
+          }
+
+          # Event-level authorization (non-comment triggers)
+          is_event_actor_authorized() {
+            has_write_permission "${1:-}"
           }
 
           is_issue_author() {

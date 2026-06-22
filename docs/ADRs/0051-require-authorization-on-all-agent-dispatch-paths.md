@@ -31,8 +31,8 @@ implements the platform-level enforcement that principle requires).
 
 The dispatch routing logic (`dispatch.yml` / `reusable-dispatch.yml`)
 defines an `is_authorized` helper that checks whether the acting user
-has an `author_association` of OWNER, MEMBER, or COLLABORATOR. Today,
-only a subset of dispatch paths gate on this check:
+has write-level permission on the repository. Today, only a subset of
+dispatch paths gate on this check:
 
 | Trigger | Gated? | Notes |
 |---------|--------|-------|
@@ -65,9 +65,14 @@ contributor who sees `/fs-fix` rejected would reasonably expect
 
 ## Decision
 
-All agent dispatch paths require `is_authorized` before dispatching.
-The authorization check applies universally — to slash commands and to
-automatic event triggers where the acting user may be external.
+All agent dispatch paths require authorization before dispatching.
+The check applies universally — to slash commands and to automatic
+event triggers where the acting user may be external.
+
+Both `is_authorized` (slash commands) and `is_event_actor_authorized`
+(event triggers) delegate to a shared `has_write_permission` helper that
+calls the collaborator permission API. This ensures consistent behavior
+across all paths.
 
 ### Slash commands
 
@@ -81,22 +86,21 @@ if [[ "${COMMENT_USER_TYPE}" != "Bot" ]] && is_authorized; then
 fi
 ```
 
-### Automatic event triggers
-
-For events where the acting user may be external, the dispatch logic
-must verify the actor has write-level access before setting a `STAGE`.
+### Authorization mechanism: collaborator permission API
 
 **Why not `author_association`?** The `author_association` field in
 webhook payloads does not correctly reflect private org membership — an
 org admin with private membership gets `CONTRIBUTOR` instead of `MEMBER`
 (see [github/gh-aw-mcpg#2862](https://github.com/github/gh-aw-mcpg/issues/2862)).
-Instead, we use the collaborator permission API
+
+Instead, all authorization checks (both slash commands and event
+triggers) use the collaborator permission API
 (`GET /repos/{owner}/{repo}/collaborators/{username}/permission`) which
 returns the user's **effective** permission level including inherited org
 grants regardless of membership visibility.
 
 ```bash
-is_event_actor_authorized() {
+has_write_permission() {
   local username="${1:-}"
   local perm
   perm=$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${username}/permission" \
@@ -106,7 +110,16 @@ is_event_actor_authorized() {
     *) return 1 ;;
   esac
 }
+
+is_authorized() { has_write_permission "${COMMENT_USER_LOGIN}"; }
+is_event_actor_authorized() { has_write_permission "${1:-}"; }
 ```
+
+Users with `admin`, `maintain`, or `write` permission are authorized.
+Users with only `triage` or `read` permission are denied. This maps to
+"users with push access to the repository."
+
+### Automatic event triggers
 
 | Event | Actor checked | Gated? |
 |-------|---------------|--------|
@@ -167,13 +180,13 @@ disable `/fs-code` entirely, but it cannot make `/fs-code` available to
 unauthorized users.
 
 If a future per-repo configuration system needs to customize
-authorization rules (e.g., allowing CONTRIBUTOR association in addition
-to OWNER/MEMBER/COLLABORATOR), it should do so by extending the
-`is_authorized` function's association list, not by bypassing the check.
+authorization rules (e.g., allowing `triage` or `read` permission), it
+should do so by extending the `has_write_permission` function's allowed
+permission list, not by bypassing the check.
 
 ## Consequences
 
-- All dispatch paths require OWNER, MEMBER, or COLLABORATOR association,
+- All dispatch paths require write-level repository permission,
   closing the cost-exposure and abuse-surface gaps for both slash
   commands and automatic triggers.
 - External users can no longer trigger agent runs by opening issues, PRs,
