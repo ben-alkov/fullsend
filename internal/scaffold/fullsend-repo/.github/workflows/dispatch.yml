@@ -45,6 +45,7 @@ jobs:
           PR_BASE_REPO: ${{ github.event.pull_request.base.repo.full_name }}
           PR_USER_LOGIN: ${{ github.event.pull_request.user.login }}
           PR_AUTHOR_ASSOC: ${{ github.event.pull_request.author_association }}
+          ISSUE_AUTHOR_ASSOC: ${{ github.event.issue.author_association }}
           ORG_NAME: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
@@ -153,7 +154,9 @@ jobs:
 
             issues)
               if [[ "${EVENT_ACTION}" == "opened" || "${EVENT_ACTION}" == "edited" ]]; then
-                STAGE="triage"
+                if is_event_actor_authorized "${ISSUE_AUTHOR_ASSOC}"; then
+                  STAGE="triage"
+                fi
               elif [[ "${EVENT_ACTION}" == "labeled" ]]; then
                 if [[ "${TRIGGERING_LABEL}" == "ready-to-code" ]]; then
                   STAGE="code"
