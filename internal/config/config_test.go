@@ -47,11 +47,8 @@ func TestNewOrgConfig(t *testing.T) {
 	allRepos := []string{"repo-a", "repo-b", "repo-c"}
 	enabledRepos := []string{"repo-a", "repo-c"}
 	roles := []string{"fullsend", "triage", "coder", "review"}
-	agents := []AgentEntry{
-		{Role: "fullsend", Name: "test", Slug: "test-slug"},
-	}
 
-	cfg := NewOrgConfig(allRepos, enabledRepos, roles, agents, "", "")
+	cfg := NewOrgConfig(allRepos, enabledRepos, roles, "", "")
 
 	assert.Equal(t, "1", cfg.Version)
 	assert.Equal(t, "github-actions", cfg.Dispatch.Platform)
@@ -63,10 +60,7 @@ func TestNewOrgConfig(t *testing.T) {
 	assert.False(t, cfg.Repos["repo-b"].Enabled)
 	assert.True(t, cfg.Repos["repo-c"].Enabled)
 
-	assert.Len(t, cfg.Agents, 1)
-	assert.Equal(t, "fullsend", cfg.Agents[0].Role)
-	assert.Equal(t, "test", cfg.Agents[0].Name)
-	assert.Equal(t, "test-slug", cfg.Agents[0].Slug)
+	assert.Empty(t, cfg.Agents)
 
 	assert.Equal(t, []string{"https://raw.githubusercontent.com/fullsend-ai/fullsend/"}, cfg.AllowedRemoteResources)
 }
@@ -295,12 +289,12 @@ repos:
 }
 
 func TestNewOrgConfig_WithInferenceProvider(t *testing.T) {
-	cfg := NewOrgConfig(nil, nil, nil, nil, "vertex", "")
+	cfg := NewOrgConfig(nil, nil, nil, "vertex", "")
 	assert.Equal(t, "vertex", cfg.Inference.Provider)
 }
 
 func TestNewOrgConfig_WithoutInferenceProvider(t *testing.T) {
-	cfg := NewOrgConfig(nil, nil, nil, nil, "", "")
+	cfg := NewOrgConfig(nil, nil, nil, "", "")
 	assert.Empty(t, cfg.Inference.Provider)
 }
 
@@ -457,7 +451,7 @@ func TestOrgConfigValidate_FixRole(t *testing.T) {
 }
 
 func TestNewOrgConfig_KillSwitchDefaultFalse(t *testing.T) {
-	cfg := NewOrgConfig(nil, nil, []string{"fullsend"}, nil, "", "")
+	cfg := NewOrgConfig(nil, nil, []string{"fullsend"}, "", "")
 	assert.False(t, cfg.KillSwitch)
 }
 
@@ -1149,7 +1143,7 @@ func TestOrgConfigMarshal_EmptyAgentsOmitted(t *testing.T) {
 }
 
 func TestNewOrgConfig_CreateIssuesDefaults(t *testing.T) {
-	cfg := NewOrgConfig(nil, nil, []string{"fullsend"}, nil, "", "my-org")
+	cfg := NewOrgConfig(nil, nil, []string{"fullsend"}, "", "my-org")
 	require.NotNil(t, cfg.CreateIssues)
 	assert.Equal(t, []string{"my-org"}, cfg.CreateIssues.AllowTargets.Orgs)
 	assert.Equal(t, []string{"fullsend-ai/fullsend"}, cfg.CreateIssues.AllowTargets.Repos)
