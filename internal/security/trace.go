@@ -118,8 +118,8 @@ func AppendFinding(path string, tf TracedFinding) error {
 
 // ChainVerification holds the result of verifying a findings JSONL file.
 type ChainVerification struct {
-	Valid      bool
-	Entries    int
+	Valid     bool
+	Entries   int
 	BrokenAt  int    // 0-indexed; -1 if valid
 	BrokenMsg string // empty if valid
 }
