@@ -1,5 +1,5 @@
 ---
-# lint-workflow-size: max-lines=445
+# lint-workflow-size: max-lines=455
 # Dispatcher workflow that routes events to agent workflows based on stage.
 # Routing logic determines the stage from event context — the shim only
 # forwards the raw event.  Adding a new stage requires only a case branch
@@ -61,9 +61,15 @@ jobs:
             if [[ -z "${username}" ]]; then
               return 1
             fi
-            local perm
+            local perm api_err
+            api_err=$(mktemp)
             perm=$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${username}/permission" \
-              --jq '.permission' 2>/dev/null || echo "none")
+              --jq '.permission' 2>"${api_err}") || {
+              echo "::warning::Permission API call failed for ${username}: $(cat "${api_err}")" >&2
+              rm -f "${api_err}"
+              return 1
+            }
+            rm -f "${api_err}"
             case "${perm}" in
               admin|maintain|write) return 0 ;;
               *) return 1 ;;

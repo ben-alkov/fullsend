@@ -111,9 +111,15 @@ jobs:
             if [[ -z "${username}" ]]; then
               return 1
             fi
-            local perm
+            local perm api_err
+            api_err=$(mktemp)
             perm=$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${username}/permission" \
-              --jq '.permission' 2>/dev/null || echo "none")
+              --jq '.permission' 2>"${api_err}") || {
+              echo "::warning::Permission API call failed for ${username}: $(cat "${api_err}")" >&2
+              rm -f "${api_err}"
+              return 1
+            }
+            rm -f "${api_err}"
             case "${perm}" in
               admin|maintain|write) return 0 ;;
               *) return 1 ;;

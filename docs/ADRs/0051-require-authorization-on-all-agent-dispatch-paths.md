@@ -198,9 +198,10 @@ permission list, not by bypassing the check.
   do not pass through the slash command authorization gate.
 - The dispatch routing logic becomes consistent: every dispatch path
   checks authorization of the acting user, reducing cognitive load.
-- Unauthorized slash command attempts get visible feedback (reaction +
-  comment), improving UX for legitimate contributors who don't yet have
-  the required association.
+- Unauthorized slash command attempts currently fail silently (STAGE
+  remains empty). Visible feedback (reaction + comment) is desirable
+  future work to improve UX for legitimate contributors who don't yet
+  have the required permission.
 - External contributors who don't want to become members will depend on
   maintainers to trigger agents on their behalf — an acceptable
   trade-off to keep the abuse surface minimal.
