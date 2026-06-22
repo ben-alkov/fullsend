@@ -18,7 +18,7 @@ type AppPermissions struct {
 	// OrganizationActionsVariables is org-level Actions variables (distinct from
 	// repository actions_variables). Required to read FULLSEND_FOREIGN_* via the org API.
 	OrganizationActionsVariables string `json:"organization_actions_variables,omitempty"`
-	Secrets                    string `json:"secrets,omitempty"`
+	Secrets                      string `json:"secrets,omitempty"`
 }
 
 // HookAttributes configures the webhook for a GitHub App.
