@@ -61,12 +61,8 @@ jobs:
       - name: Add bin to PATH
         run: echo "${{ github.workspace }}/bin" >> "$GITHUB_PATH"
 
-      # TODO: The openshell setup below (version, CLI, gateway, Podman,
-      # gateway start) is duplicated from action.yml. Extract into a
-      # shared script (e.g. .github/scripts/setup-openshell.sh) so the
-      # version and config stay in sync across both places.
       - name: Set OpenShell version
-        run: echo "OPENSHELL_VERSION=0.0.38" >> "${GITHUB_ENV}"
+        run: source .github/scripts/openshell-version.sh
 
       - name: Install OpenShell CLI
         run: |
@@ -118,7 +114,7 @@ jobs:
           OPENSHELL_SSH_HANDSHAKE_SECRET="ci-$(openssl rand -hex 16)"
           export OPENSHELL_SSH_HANDSHAKE_SECRET
           echo "::add-mask::${OPENSHELL_SSH_HANDSHAKE_SECRET}"
-          export OPENSHELL_SUPERVISOR_IMAGE="ghcr.io/nvidia/openshell/supervisor:dfd47683e7da4f1a4a8fa5d77f92d3696e6a41f9"
+          export OPENSHELL_SUPERVISOR_IMAGE="ghcr.io/nvidia/openshell/supervisor:${OPENSHELL_SHA}"
           "${{ runner.temp }}/openshell-gateway" \
             --bind-address 0.0.0.0 \
             --health-port 8081 \
