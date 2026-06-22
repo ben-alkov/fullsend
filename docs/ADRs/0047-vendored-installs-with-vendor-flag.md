@@ -9,7 +9,7 @@ topics:
   - workflows
 ---
 
-# ADR 0047: Vendored installs with `--vendor`
+# 47. Vendored installs with --vendor
 
 ## Status
 

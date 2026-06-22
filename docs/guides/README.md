@@ -17,6 +17,7 @@ Advanced guides for platform operators who deploy and manage the GCP-side infras
 - [Mint service administration](infrastructure/mint-administration.md) — Deploying and managing the token mint Cloud Function
 - [Infrastructure reference](infrastructure/infrastructure-reference.md) — Token mint, WIF, and secrets deployment details
 - [Enabling fullsend on private repositories](infrastructure/private-repositories.md) — Additional guardrails and configuration for private repos
+- [Distributed tracing](infrastructure/distributed-tracing.md) — Configuring OpenTelemetry instrumentation and OTLP backends
 
 ## User guides
 
