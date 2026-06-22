@@ -83,7 +83,7 @@ See [architecture.md](architecture.md) and [agent-architecture.md](problems/agen
 
 ### Label State Machine
 
-The set of valid label transitions on issues and PRs that encode workflow state. Labels like `ready-to-code` drive agent dispatch; others such as `ready-for-review`, `ready-for-merge`, and `requires-manual-review` encode workflow state and review outcomes. The `ready-for-review` label is not a dispatch trigger — review runs on `pull_request_target` events instead. The label state machine guard validates that transitions are legal and enforces mutual exclusion — for example, starting a triage run clears downstream labels so stale state does not carry forward.
+The set of valid label transitions on issues and PRs that encode workflow state. Labels like `ready-to-code` and `ready-for-review` (on PRs only) drive agent dispatch; others such as `ready-for-merge` and `requires-manual-review` encode review outcomes. Applying `ready-for-review` to a standalone issue does not trigger review — only PR-backed issues qualify. The label state machine guard validates that transitions are legal and enforces mutual exclusion — for example, starting a triage run clears downstream labels so stale state does not carry forward.
 See [ADR 0002](ADRs/0002-initial-fullsend-design.md) building block 3.
 
 ## M

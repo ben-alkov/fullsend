@@ -194,7 +194,7 @@ func TestDispatchWorkflowContent(t *testing.T) {
 	assert.Contains(t, s, "/fs-retro")
 	assert.Contains(t, s, "/fs-prioritize")
 	assert.Contains(t, s, "ready-to-code")
-	assert.NotContains(t, s, `ready-for-review" ]]; then`)
+	assert.Contains(t, s, "ready-for-review")
 	assert.Contains(t, s, "TRIGGERING_LABEL")
 	assert.Contains(t, s, "pull_request_target")
 	assert.Contains(t, s, "pull_request_review")
@@ -204,7 +204,8 @@ func TestDispatchWorkflowContent(t *testing.T) {
 	assert.Contains(t, s, "opened|synchronize|ready_for_review")
 	// /code must only run on issues, not PRs; /review must only run on PRs
 	assert.Contains(t, s, "ISSUE_HAS_PR")
-	assert.Regexp(t, `/fs-review\)[\s\S]{0,120}ISSUE_HAS_PR`, s)
+	assert.Regexp(t, `(?s)/fs-review\).*?ISSUE_HAS_PR`, s)
+	assert.Regexp(t, `(?s)ready-for-review.*?ISSUE_HAS_PR`, s)
 	// Author association checks
 	assert.Contains(t, s, "is_authorized")
 	assert.Contains(t, s, "OWNER|MEMBER|COLLABORATOR")

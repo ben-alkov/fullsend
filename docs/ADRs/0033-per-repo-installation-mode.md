@@ -170,15 +170,15 @@ The org-level `.fullsend` config repo tier is skipped — the in-repo `.fullsend
 This is the key new artifact, published in `fullsend-ai/fullsend/.github/workflows/`. It is a reusable version of the per-org `dispatch.yml` (ADR 0034), accepting event context via `workflow_call` inputs and performing the same routing and dispatch logic.
 
 The routing logic (identical to per-org `dispatch.yml`) maps:
-- `issues` + `labeled` → `ready-to-code` → code
+- `issues` + `labeled` → `ready-to-code` → code; `ready-for-review` on a PR → review
 - `issue_comment` + slash commands → `/fs-triage`, `/fs-code`, `/fs-review`, `/fs-fix`, `/fs-retro`, `/fs-prioritize`
 - `issue_comment` + `needs-info` label (non-command) → auto-triage
 - `pull_request_target` + `opened`/`synchronize`/`ready_for_review` → review
 - `pull_request_target` + `closed` → retro
 - `pull_request_review` + `changes_requested` from review bot → fix (same-repo PRs only)
 
-> **Note (2026-06):** Review no longer dispatches from `issues` labeled
-> `ready-for-review` or from `/fs-review` on standalone issues. See
+> **Note (2026-06):** Review and fix require PR context. `ready-for-review` and
+> `/fs-review` only dispatch when `issue.pull_request` is present. See
 > [ADR 0034](0034-centralized-shim-routing-via-dispatch.md) routing note.
 
 In per-org mode, `dispatch.yml` routes events and dispatches to thin callers via `workflow_call`. In per-repo mode, `reusable-dispatch.yml` routes events and dispatches to per-stage reusable workflows directly via conditional `workflow_call` jobs, keeping the entire pipeline within a single `workflow_call` chain.

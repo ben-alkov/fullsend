@@ -186,6 +186,10 @@ jobs:
               elif [[ "${EVENT_ACTION}" == "labeled" ]]; then
                 if [[ "${TRIGGERING_LABEL}" == "ready-to-code" ]]; then
                   STAGE="code"
+                elif [[ "${TRIGGERING_LABEL}" == "ready-for-review" ]]; then
+                  if [[ "${ISSUE_HAS_PR}" == "true" ]]; then
+                    STAGE="review"
+                  fi
                 fi
               fi
               ;;
