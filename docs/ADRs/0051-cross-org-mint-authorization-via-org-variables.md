@@ -1,5 +1,5 @@
 ---
-title: "46. Cross-org mint authorization via org variables"
+title: "51. Cross-org mint authorization via org variables"
 status: Accepted
 relates_to:
   - agent-infrastructure
@@ -11,7 +11,7 @@ topics:
   - cross-org
 ---
 
-# 46. Cross-org mint authorization via org variables
+# 51. Cross-org mint authorization via org variables
 
 Date: 2026-06-07
 
@@ -39,7 +39,7 @@ orgs control over their own policy.
 ## Decision
 
 1. **Optional `target_org` on mint requests.** When omitted, or when equal to the caller's
-   `repository_owner` (case-insensitive), behavior is unchanged from pre-0046 mint: same
+   `repository_owner` (case-insensitive), behavior is unchanged from pre-0051 mint: same
    `mintToken` path, repo-based installation lookup, no FOREIGN check.
 
 2. **Cross-org path** applies only when `target_org` is set and differs from the caller org:
