@@ -108,11 +108,10 @@ a stage name:
 - `pull_request_target` closed → `retro`
 - `pull_request_review` with bot `changes_requested` → `fix`
 
-> **Note (2026-06):** Review and fix require PR context. Review dispatches from
-> `pull_request_target`, `/fs-review` on a PR comment, or `ready-for-review`
-> labeled on a PR (`issue.pull_request` present). Fix dispatches from
-> `pull_request_review` or `/fs-fix` on a PR comment. Standalone issues no
-> longer trigger review or fix.
+> **Note (2026-06):** Review now requires PR context for label and slash-command
+> triggers: `ready-for-review` and `/fs-review` dispatch only when
+> `issue.pull_request` is present. Fix dispatch was already PR-only via
+> `pull_request_review` and PR-gated `/fs-fix`; unchanged by this work.
 
 If no stage matches, `dispatch.yml` exits early with no fan-out. The existing
 kill switch, role enablement, and `# fullsend-stage:` marker scanning

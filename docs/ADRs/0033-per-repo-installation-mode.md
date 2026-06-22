@@ -177,8 +177,9 @@ The routing logic (identical to per-org `dispatch.yml`) maps:
 - `pull_request_target` + `closed` → retro
 - `pull_request_review` + `changes_requested` from review bot → fix (same-repo PRs only)
 
-> **Note (2026-06):** Review and fix require PR context. `ready-for-review` and
-> `/fs-review` only dispatch when `issue.pull_request` is present. See
+> **Note (2026-06):** Review label and slash-command triggers require PR context:
+> `ready-for-review` and `/fs-review` dispatch only when `issue.pull_request`
+> is present. Fix dispatch was already PR-only. See
 > [ADR 0034](0034-centralized-shim-routing-via-dispatch.md) routing note.
 
 In per-org mode, `dispatch.yml` routes events and dispatches to thin callers via `workflow_call`. In per-repo mode, `reusable-dispatch.yml` routes events and dispatches to per-stage reusable workflows directly via conditional `workflow_call` jobs, keeping the entire pipeline within a single `workflow_call` chain.
