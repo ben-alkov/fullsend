@@ -79,6 +79,7 @@ func TestFullsendRepoFilesExist(t *testing.T) {
 		"scripts/validate-output-schema.sh",
 		"scripts/fullsend-check-output",
 		"scripts/validate-source-repo.sh",
+		"skills/autonomy-readiness/SKILL.md",
 		"skills/code-implementation/SKILL.md",
 		"skills/issue-labels/SKILL.md",
 		"templates/shim-workflow-call.yaml",
