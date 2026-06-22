@@ -4,6 +4,7 @@ version: 3
 
 files:
   - pattern: "internal/scaffold/fullsend-repo/.github/workflows/*.yml"
+  - pattern: ".github/actions/*/action.yml"
 
 rules:
   # Ignore self-references to this repo's own reusable workflows and actions.
