@@ -114,7 +114,6 @@ jobs:
           OPENSHELL_SSH_HANDSHAKE_SECRET="ci-$(openssl rand -hex 16)"
           export OPENSHELL_SSH_HANDSHAKE_SECRET
           echo "::add-mask::${OPENSHELL_SSH_HANDSHAKE_SECRET}"
-          export OPENSHELL_SUPERVISOR_IMAGE="ghcr.io/nvidia/openshell/supervisor:${OPENSHELL_SHA}"
           "${{ runner.temp }}/openshell-gateway" \
             --bind-address 0.0.0.0 \
             --health-port 8081 \
