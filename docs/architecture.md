@@ -96,6 +96,11 @@ The harness draws its configuration from the adopting organization's **`.fullsen
   mechanisms (`.env` files, `runner_env`). Each agent documents its config
   vars in `docs/agents/<agent>.md`
   ([ADR 0049](ADRs/0049-agent-configuration-env-var-convention.md)).
+- Agent-driven branch targeting: the code agent writes its chosen target
+  branch to structured output. The post-script validates the choice against
+  an allowlist and falls back to the repo's auto-detected default branch.
+  Branch-targeting logic lives in the portable post-script, not in workflow
+  YAML ([ADR 0053](ADRs/0053-agent-driven-branch-targeting.md)).
 
 **Open questions:**
 
