@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/fullsend-ai/fullsend/internal/forge"
 	"github.com/fullsend-ai/fullsend/internal/mintclient"
 )
 
@@ -36,13 +35,9 @@ func runningInGitHubActions() bool {
 	return os.Getenv("GITHUB_ACTIONS") == "true"
 }
 
-// poolMintRepos returns repo names for cross-org e2e mint tokens.
-// test-repo is first for installation lookup; .fullsend is required for admin install tests.
-func poolMintRepos() []string {
-	return []string{testRepo, forge.ConfigRepoName, lockRepo}
-}
-
 // resolveE2EToken mints a cross-org e2e installation token for targetOrg.
+// Repos are omitted so the token covers the full installation (needed to
+// create and operate on e2e-lock and .fullsend at runtime).
 func resolveE2EToken(ctx context.Context, mintURL, targetOrg string) (string, error) {
 	if mintURL == "" {
 		return "", fmt.Errorf("E2E_MINT_URL not set")
@@ -51,7 +46,6 @@ func resolveE2EToken(ctx context.Context, mintURL, targetOrg string) (string, er
 		MintURL:   mintURL,
 		Role:      "e2e",
 		TargetOrg: targetOrg,
-		Repos:     poolMintRepos(),
 	})
 	if err != nil {
 		return "", err

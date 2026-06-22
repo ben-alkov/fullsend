@@ -352,8 +352,10 @@ func CreateInstallationToken(ctx context.Context, httpClient HTTPDoer, githubBas
 		return "", "", nil, fmt.Errorf("no permissions defined for role %q", role)
 	}
 	tokenReqBody := map[string]interface{}{
-		"repositories": repos,
-		"permissions":  perms,
+		"permissions": perms,
+	}
+	if len(repos) > 0 {
+		tokenReqBody["repositories"] = repos
 	}
 
 	tokenReqBytes, err := json.Marshal(tokenReqBody)

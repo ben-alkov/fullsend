@@ -190,11 +190,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(req.Repos) == 0 {
-		writeError(w, http.StatusBadRequest, "repos is required (at least one repo must be specified)")
-		return
-	}
-
 	if len(req.Repos) > maxRepos {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("too many repos (max %d)", maxRepos))
 		return
@@ -228,6 +223,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		targetOrg = callerOrg
 	}
 
+	if len(req.Repos) == 0 {
+		log.Printf("WARNING: mint request omitted repos; issuing installation-wide token for target_org=%s role=%s caller_org=%s source_repo=%s",
+			targetOrg, req.Role, callerOrg, claims.Repository)
+	}
+
 	var token, expiresAt string
 	var granted *GrantedScope
 
@@ -252,7 +252,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			callerOrg, targetOrg, req.Role, granted.AppID, granted.InstallationID, req.Repos, claims.Repository, claims.JobWorkflowRef)
 		log.Printf("granted scope: repos=%v permissions=%v repo_selection=%s",
 			granted.Repos, granted.Permissions, granted.RepoSelection)
-		if granted.RepoSelection == "all" {
+		if len(req.Repos) == 0 {
+			log.Printf("WARNING: installation-wide token granted for target_org=%s role=%s repo_selection=%s",
+				targetOrg, req.Role, granted.RepoSelection)
+		} else if granted.RepoSelection == "all" {
 			log.Printf("WARNING: token granted with repository_selection=all (requested specific repos: %v)", req.Repos)
 		}
 		requested := RolePermissionsFor(req.Role)
@@ -336,7 +339,12 @@ func (h *Handler) mintToken(ctx context.Context, org, role string, repos []strin
 		return "", "", nil, &mintError{status: http.StatusInternalServerError, msg: fmt.Sprintf("generating app JWT: %v", err)}
 	}
 
-	installationID, err := FindInstallation(ctx, h.httpClient, h.githubBaseURL, jwt, org, repos[0])
+	var installationID int64
+	if len(repos) == 0 {
+		installationID, err = FindOrgInstallation(ctx, h.httpClient, h.githubBaseURL, jwt, org)
+	} else {
+		installationID, err = FindInstallation(ctx, h.httpClient, h.githubBaseURL, jwt, org, repos[0])
+	}
 	if err != nil {
 		return "", "", nil, &mintError{status: http.StatusBadGateway, msg: err.Error()}
 	}

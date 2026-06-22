@@ -76,6 +76,48 @@ func TestFindInstallation_OrgMismatch(t *testing.T) {
 	assert.Contains(t, err.Error(), "belongs to other-org")
 }
 
+func TestCreateInstallationToken_Unscoped(t *testing.T) {
+	mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/app/installations/42/access_tokens", r.URL.Path)
+		var body map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&body)
+		assert.Contains(t, body, "permissions")
+		assert.NotContains(t, body, "repositories")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(installationTokenResponse{
+			Token:               "ghs_test_token",
+			ExpiresAt:           "2099-01-01T00:00:00Z",
+			RepositorySelection: "all",
+		})
+	}))
+	defer mockGH.Close()
+
+	token, expiresAt, granted, err := CreateInstallationToken(t.Context(), http.DefaultClient, mockGH.URL, "fake-jwt", 42, "coder", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "ghs_test_token", token)
+	assert.Equal(t, "2099-01-01T00:00:00Z", expiresAt)
+	require.NotNil(t, granted)
+	assert.Equal(t, "all", granted.RepoSelection)
+}
+
+func TestFindOrgInstallation(t *testing.T) {
+	mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/orgs/myorg/installation", r.URL.Path)
+		assert.Contains(t, r.Header.Get("Authorization"), "Bearer ")
+		json.NewEncoder(w).Encode(installationResponse{
+			ID: 42,
+			Account: struct {
+				Login string `json:"login"`
+			}{Login: "myorg"},
+		})
+	}))
+	defer mockGH.Close()
+
+	id, err := FindOrgInstallation(t.Context(), http.DefaultClient, mockGH.URL, "fake-jwt", "myorg")
+	require.NoError(t, err)
+	assert.Equal(t, int64(42), id)
+}
+
 func TestCreateInstallationToken(t *testing.T) {
 	mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/app/installations/42/access_tokens", r.URL.Path)
