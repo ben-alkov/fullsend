@@ -171,8 +171,10 @@ jobs:
                   fi
                   ;;
                 /fs-review)
-                  if [[ "${COMMENT_USER_TYPE}" != "Bot" ]] && is_authorized; then
-                    STAGE="review"
+                  if [[ "${ISSUE_IS_PR}" == "true" ]]; then
+                    if [[ "${COMMENT_USER_TYPE}" != "Bot" ]] && is_authorized; then
+                      STAGE="review"
+                    fi
                   fi
                   ;;
                 /fs-fix)
