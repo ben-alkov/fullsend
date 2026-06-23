@@ -462,26 +462,25 @@ func mergeBaseIntoChild(base, child *Harness) {
 	// Env: merge sub-maps independently, child keys win (ADR 0055)
 	if base.Env != nil {
 		if child.Env == nil {
-			child.Env = base.Env
-		} else {
-			if base.Env.Runner != nil {
-				if child.Env.Runner == nil {
-					child.Env.Runner = make(map[string]string, len(base.Env.Runner))
-				}
-				for k, v := range base.Env.Runner {
-					if _, exists := child.Env.Runner[k]; !exists {
-						child.Env.Runner[k] = v
-					}
+			child.Env = &EnvConfig{}
+		}
+		if base.Env.Runner != nil {
+			if child.Env.Runner == nil {
+				child.Env.Runner = make(map[string]string, len(base.Env.Runner))
+			}
+			for k, v := range base.Env.Runner {
+				if _, exists := child.Env.Runner[k]; !exists {
+					child.Env.Runner[k] = v
 				}
 			}
-			if base.Env.Sandbox != nil {
-				if child.Env.Sandbox == nil {
-					child.Env.Sandbox = make(map[string]string, len(base.Env.Sandbox))
-				}
-				for k, v := range base.Env.Sandbox {
-					if _, exists := child.Env.Sandbox[k]; !exists {
-						child.Env.Sandbox[k] = v
-					}
+		}
+		if base.Env.Sandbox != nil {
+			if child.Env.Sandbox == nil {
+				child.Env.Sandbox = make(map[string]string, len(base.Env.Sandbox))
+			}
+			for k, v := range base.Env.Sandbox {
+				if _, exists := child.Env.Sandbox[k]; !exists {
+					child.Env.Sandbox[k] = v
 				}
 			}
 		}
@@ -888,26 +887,25 @@ func mergeForgeConfigInto(base, child *ForgeConfig) {
 	// Env: merge sub-maps, child keys win (ADR 0055)
 	if base.Env != nil {
 		if child.Env == nil {
-			child.Env = base.Env
-		} else {
-			if base.Env.Runner != nil {
-				if child.Env.Runner == nil {
-					child.Env.Runner = make(map[string]string, len(base.Env.Runner))
-				}
-				for k, v := range base.Env.Runner {
-					if _, exists := child.Env.Runner[k]; !exists {
-						child.Env.Runner[k] = v
-					}
+			child.Env = &EnvConfig{}
+		}
+		if base.Env.Runner != nil {
+			if child.Env.Runner == nil {
+				child.Env.Runner = make(map[string]string, len(base.Env.Runner))
+			}
+			for k, v := range base.Env.Runner {
+				if _, exists := child.Env.Runner[k]; !exists {
+					child.Env.Runner[k] = v
 				}
 			}
-			if base.Env.Sandbox != nil {
-				if child.Env.Sandbox == nil {
-					child.Env.Sandbox = make(map[string]string, len(base.Env.Sandbox))
-				}
-				for k, v := range base.Env.Sandbox {
-					if _, exists := child.Env.Sandbox[k]; !exists {
-						child.Env.Sandbox[k] = v
-					}
+		}
+		if base.Env.Sandbox != nil {
+			if child.Env.Sandbox == nil {
+				child.Env.Sandbox = make(map[string]string, len(base.Env.Sandbox))
+			}
+			for k, v := range base.Env.Sandbox {
+				if _, exists := child.Env.Sandbox[k]; !exists {
+					child.Env.Sandbox[k] = v
 				}
 			}
 		}
