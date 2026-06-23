@@ -38,5 +38,19 @@ func (d Diagnostic) String() string {
 // results are meaningless on an invalid harness.
 // Returns nil when no diagnostics are found.
 func (h *Harness) Lint() []Diagnostic {
-	return nil
+	var diags []Diagnostic
+
+	if len(h.RunnerEnv) > 0 {
+		msg := "runner_env is deprecated; use env.runner instead (see ADR 0055)"
+		if h.Env != nil && len(h.Env.Runner) > 0 {
+			msg = "runner_env is deprecated and env.runner takes precedence; migrate to env.runner (see ADR 0055)"
+		}
+		diags = append(diags, Diagnostic{
+			Severity: SeverityWarning,
+			Field:    "runner_env",
+			Message:  msg,
+		})
+	}
+
+	return diags
 }
