@@ -524,6 +524,18 @@ func (h *Harness) ValidateRunnerEnvWith(lookup func(string) (string, bool)) erro
 			return err
 		}
 	}
+	if h.Env != nil {
+		for k, v := range h.Env.Runner {
+			if err := checkVarRefs(fmt.Sprintf("env.runner[%s]", k), v); err != nil {
+				return err
+			}
+		}
+		for k, v := range h.Env.Sandbox {
+			if err := checkVarRefs(fmt.Sprintf("env.sandbox[%s]", k), v); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 

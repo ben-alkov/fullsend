@@ -346,6 +346,39 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 	for k, v := range h.RunnerEnv {
 		h.RunnerEnv[k] = os.Expand(v, expander)
 	}
+
+	// Expand ${VAR} references in env.runner and env.sandbox (ADR 0055).
+	if h.Env != nil {
+		for k, v := range h.Env.Runner {
+			h.Env.Runner[k] = os.Expand(v, expander)
+		}
+		for k, v := range h.Env.Sandbox {
+			h.Env.Sandbox[k] = os.Expand(v, expander)
+		}
+	}
+
+	// ADR 0055: env.runner takes precedence over runner_env.
+	// Emit deprecation warning when runner_env is present.
+	if len(h.RunnerEnv) > 0 {
+		if h.Env != nil && len(h.Env.Runner) > 0 {
+			fmt.Fprintln(os.Stderr, "WARNING: runner_env is deprecated and env.runner takes precedence; migrate to env.runner (see ADR 0055)")
+		} else {
+			fmt.Fprintln(os.Stderr, "WARNING: runner_env is deprecated; use env.runner instead (see ADR 0055)")
+		}
+	}
+
+	// Build effective runner env: start with runner_env, overlay env.runner.
+	effectiveRunnerEnv := make(map[string]string)
+	for k, v := range h.RunnerEnv {
+		effectiveRunnerEnv[k] = v
+	}
+	if h.Env != nil {
+		for k, v := range h.Env.Runner {
+			effectiveRunnerEnv[k] = v
+		}
+	}
+	h.RunnerEnv = effectiveRunnerEnv
+
 	if err := h.ValidateFilesExist(); err != nil {
 		printer.StepFail("File validation failed")
 		return fmt.Errorf("validating files: %w", err)
