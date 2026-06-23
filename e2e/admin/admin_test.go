@@ -267,16 +267,17 @@ func TestAdminInstallUninstall(t *testing.T) {
 
 // mergeEnrollmentPR finds and merges the enrollment PR for test-repo so the
 // shim workflow is active on the default branch.
-// The install CLI waits for repo-maintenance to complete, so the PR should
-// already exist. A few retries handle GitHub eventual consistency.
+// In PR-based install mode, enrollment is deferred: repo-maintenance triggers
+// on push when the scaffold PR is merged, so the enrollment PR may take up to
+// ~90s to appear (workflow trigger + execution + PR creation).
 func mergeEnrollmentPR(t *testing.T, env *e2eEnv) {
 	t.Helper()
 	ctx := context.Background()
 
 	var enrollmentPR *forge.ChangeProposal
-	for attempt := range 5 {
+	for attempt := range 20 {
 		if attempt > 0 {
-			time.Sleep(3 * time.Second)
+			time.Sleep(5 * time.Second)
 		}
 		prs, err := env.client.ListRepoPullRequests(ctx, env.org, testRepo)
 		require.NoError(t, err, "listing PRs for %s", testRepo)

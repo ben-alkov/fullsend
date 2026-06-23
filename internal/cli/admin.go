@@ -1855,7 +1855,7 @@ func buildLayerStack(
 		layers.NewSecretsLayer(org, client, agentCreds, printer).WithOIDCMode(),
 		layers.NewInferenceLayer(org, client, inferenceProvider, printer),
 		dispatchLayer,
-		layers.NewEnrollmentLayer(org, client, enabledRepos, disabledRepos, printer),
+		newEnrollmentLayer(org, client, enabledRepos, disabledRepos, printer, direct),
 	)
 }
 
@@ -1863,6 +1863,14 @@ func workflowsLayer(org string, client forge.Client, printer *ui.Printer, user, 
 	layer := layers.NewWorkflowsLayer(org, client, printer, user, version, vendor).WithDirect(direct)
 	if vendorCollect != nil {
 		layer = layer.WithVendorCollect(vendorCollect)
+	}
+	return layer
+}
+
+func newEnrollmentLayer(org string, client forge.Client, enabledRepos, disabledRepos []string, printer *ui.Printer, direct bool) *layers.EnrollmentLayer {
+	layer := layers.NewEnrollmentLayer(org, client, enabledRepos, disabledRepos, printer)
+	if !direct {
+		layer = layer.WithScaffoldPending()
 	}
 	return layer
 }
