@@ -2246,6 +2246,72 @@ func TestHandler_CrossOrgFullFlow(t *testing.T) {
 	}
 }
 
+func TestHandler_ForeignAllowlistCached(t *testing.T) {
+	t.Setenv("ALLOWED_ORGS", "test-org,fullsend-ai")
+	t.Setenv("ROLE_APP_IDS", `{"e2e":"300"}`)
+
+	pemData, err := generateTestRSAKey()
+	if err != nil {
+		t.Fatalf("generating test key: %v", err)
+	}
+
+	env := newTestOIDCEnv(t, &fakePEMAccessor{pems: map[string][]byte{"e2e": pemData}})
+	token := env.signToken(t, map[string]interface{}{
+		"repository":       "fullsend-ai/fullsend",
+		"repository_owner": "fullsend-ai",
+		"job_workflow_ref": "fullsend-ai/fullsend/.github/workflows/e2e.yml@refs/heads/main",
+	})
+
+	var foreignReads int
+	var tokenCalls int
+	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/orgs/pool-org/installation" && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode(installationResponse{
+				ID: 999, Account: struct {
+					Login string `json:"login"`
+				}{Login: "pool-org"},
+			})
+		case r.URL.Path == "/app/installations/999/access_tokens" && r.Method == http.MethodPost:
+			tokenCalls++
+			w.WriteHeader(http.StatusCreated)
+			if tokenCalls%2 == 1 {
+				json.NewEncoder(w).Encode(installationTokenResponse{Token: "ghs_policy_token"})
+				return
+			}
+			json.NewEncoder(w).Encode(installationTokenResponse{
+				Token:     "ghs_e2e_token",
+				ExpiresAt: "2026-05-06T12:00:00Z",
+			})
+		case r.URL.Path == "/orgs/pool-org/actions/variables/FULLSEND_FOREIGN_E2E_REPOS" && r.Method == http.MethodGet:
+			foreignReads++
+			json.NewEncoder(w).Encode(orgVariableResponse{
+				Name:  "FULLSEND_FOREIGN_E2E_REPOS",
+				Value: "fullsend-ai/fullsend",
+			})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer github.Close()
+	env.handler.githubBaseURL = github.URL
+
+	body := `{"role":"e2e","target_org":"pool-org"}`
+	for i := 0; i < 2; i++ {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/token", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		env.handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("request %d: expected 200, got %d: %s", i+1, rec.Code, rec.Body.String())
+		}
+	}
+	if foreignReads != 1 {
+		t.Fatalf("expected 1 FOREIGN variable read (cached), got %d", foreignReads)
+	}
+}
+
 func TestHandler_CrossOrgForeignDenied(t *testing.T) {
 	t.Setenv("ALLOWED_ORGS", "test-org,evil-org")
 	t.Setenv("ROLE_APP_IDS", `{"e2e":"300"}`)

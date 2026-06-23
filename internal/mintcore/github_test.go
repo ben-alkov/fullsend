@@ -283,3 +283,25 @@ func TestReadForeignAllowlist_EmptyVariable(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, got)
 }
+
+func TestFindOrgInstallation_NotFound(t *testing.T) {
+	mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer mockGH.Close()
+
+	_, err := FindOrgInstallation(t.Context(), http.DefaultClient, mockGH.URL, "fake-jwt", "myorg")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "status 404")
+}
+
+func TestGetOrgVariable_ErrorStatus(t *testing.T) {
+	mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer mockGH.Close()
+
+	_, _, err := GetOrgVariable(t.Context(), http.DefaultClient, mockGH.URL, "ghs_policy", "pool-org", "VAR")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "status 403")
+}

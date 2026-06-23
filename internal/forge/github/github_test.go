@@ -371,6 +371,33 @@ func TestGetAuthenticatedUser_FallbackToGraphQL(t *testing.T) {
 	assert.Equal(t, "fullsend-e2e[bot]", user)
 }
 
+func TestGraphQLViewerLogin_GraphQLErrors(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/graphql", r.URL.Path)
+		json.NewEncoder(w).Encode(map[string]any{
+			"errors": []map[string]string{{"message": "insufficient permissions"}},
+		})
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, srv)
+	_, err := client.graphqlViewerLogin(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "insufficient permissions")
+}
+
+func TestGraphQLViewerLogin_HTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{"message": "nope"})
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, srv)
+	_, err := client.graphqlViewerLogin(context.Background())
+	require.Error(t, err)
+}
+
 func TestGetAuthenticatedUser_BothFail(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)

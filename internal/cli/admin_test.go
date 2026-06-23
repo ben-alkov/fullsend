@@ -2748,6 +2748,17 @@ func TestCheckTokenScopes_MissingScopes(t *testing.T) {
 	assert.Contains(t, err.Error(), "delete_repo")
 }
 
+func TestCheckTokenScopes_InstallationTokenProbeFails(t *testing.T) {
+	client := forge.NewFakeClient()
+	client.Errors["IsInstallationToken"] = fmt.Errorf("network down")
+
+	var buf bytes.Buffer
+	printer := ui.New(&buf)
+	err := checkTokenScopes(context.Background(), client, printer, []string{"repo"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "detecting installation token")
+}
+
 func TestLoadKnownSlugs_HardError_ReturnsNil(t *testing.T) {
 	client := forge.NewFakeClient()
 	client.Errors["ListDirectoryContents"] = fmt.Errorf("network timeout")

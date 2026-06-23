@@ -270,6 +270,29 @@ func TestForeignRevokeCmd_NotPresent(t *testing.T) {
 	assert.Equal(t, "fullsend-ai/fullsend", state.vars["FULLSEND_FOREIGN_E2E_REPOS"])
 }
 
+func TestForeignListCmd_NoForeignVariables(t *testing.T) {
+	state := &foreignVarState{vars: map[string]string{"OTHER_VAR": "x"}}
+	srv := httptest.NewServer(state.handler(t))
+	defer srv.Close()
+
+	_, err := runForeignCmd(t, srv.URL, "list", "--org", "pool-org")
+	require.NoError(t, err)
+}
+
+func TestForeignAllowCmd_UpdateError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	_, err := runForeignCmd(t, srv.URL, "allow", "--org", "pool-org", "--role", "e2e", "--caller", "fullsend-ai/fullsend")
+	require.Error(t, err)
+}
+
 func TestForeignCmd_ValidationErrors(t *testing.T) {
 	_, err := runForeignCmd(t, "http://unused", "allow", "--role", "e2e", "--caller", "fullsend-ai/fullsend")
 	require.Error(t, err)
