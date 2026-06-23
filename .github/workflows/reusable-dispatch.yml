@@ -88,6 +88,7 @@ jobs:
           PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
           ISSUE_IS_PR: ${{ github.event.issue.pull_request && 'true' || 'false' }}
           ISSUE_USER_LOGIN: ${{ github.event.issue.user.login }}
+          EVENT_SENDER_LOGIN: ${{ github.event.sender.login }}
           REVIEW_STATE: ${{ github.event.review.state }}
           REVIEW_USER_LOGIN: ${{ github.event.review.user.login }}
           TRIGGERING_LABEL: ${{ github.event.label.name }}
@@ -112,7 +113,10 @@ jobs:
               return 1
             fi
             local role api_err
-            api_err=$(mktemp)
+            api_err=$(mktemp) || {
+              echo "::warning::Failed to create temp file for permission check of ${username}" >&2
+              return 1
+            }
             role=$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${username}/permission" \
               --jq '.role_name' 2>"${api_err}") || {
               echo "::warning::Permission API call failed for ${username}: $(cat "${api_err}")" >&2
@@ -218,8 +222,12 @@ jobs:
               ;;
 
             issues)
-              if [[ "${EVENT_ACTION}" == "opened" || "${EVENT_ACTION}" == "edited" ]]; then
+              if [[ "${EVENT_ACTION}" == "opened" ]]; then
                 if is_event_actor_authorized "${ISSUE_USER_LOGIN}"; then
+                  STAGE="triage"
+                fi
+              elif [[ "${EVENT_ACTION}" == "edited" ]]; then
+                if is_event_actor_authorized "${EVENT_SENDER_LOGIN}"; then
                   STAGE="triage"
                 fi
               elif [[ "${EVENT_ACTION}" == "labeled" ]]; then

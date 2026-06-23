@@ -1,5 +1,5 @@
 ---
-# lint-workflow-size: max-lines=455
+# lint-workflow-size: max-lines=470
 # Dispatcher workflow that routes events to agent workflows based on stage.
 # Routing logic determines the stage from event context — the shim only
 # forwards the raw event.  Adding a new stage requires only a case branch
@@ -38,6 +38,7 @@ jobs:
           PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
           ISSUE_HAS_PR: ${{ github.event.issue.pull_request && 'true' || 'false' }}
           ISSUE_USER_LOGIN: ${{ github.event.issue.user.login }}
+          EVENT_SENDER_LOGIN: ${{ github.event.sender.login }}
           REVIEW_STATE: ${{ github.event.review.state }}
           REVIEW_USER_LOGIN: ${{ github.event.review.user.login }}
           TRIGGERING_LABEL: ${{ github.event.label.name }}
@@ -62,7 +63,10 @@ jobs:
               return 1
             fi
             local role api_err
-            api_err=$(mktemp)
+            api_err=$(mktemp) || {
+              echo "::warning::Failed to create temp file for permission check of ${username}" >&2
+              return 1
+            }
             role=$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${username}/permission" \
               --jq '.role_name' 2>"${api_err}") || {
               echo "::warning::Permission API call failed for ${username}: $(cat "${api_err}")" >&2
@@ -125,8 +129,10 @@ jobs:
                   fi
                   ;;
                 /fs-review)
-                  if [[ "${COMMENT_USER_TYPE}" != "Bot" ]] && is_authorized; then
-                    STAGE="review"
+                  if [[ "${ISSUE_HAS_PR}" == "true" ]]; then
+                    if [[ "${COMMENT_USER_TYPE}" != "Bot" ]] && is_authorized; then
+                      STAGE="review"
+                    fi
                   fi
                   ;;
                 /fs-fix)
@@ -170,15 +176,21 @@ jobs:
               ;;
 
             issues)
-              if [[ "${EVENT_ACTION}" == "opened" || "${EVENT_ACTION}" == "edited" ]]; then
+              if [[ "${EVENT_ACTION}" == "opened" ]]; then
                 if is_event_actor_authorized "${ISSUE_USER_LOGIN}"; then
+                  STAGE="triage"
+                fi
+              elif [[ "${EVENT_ACTION}" == "edited" ]]; then
+                if is_event_actor_authorized "${EVENT_SENDER_LOGIN}"; then
                   STAGE="triage"
                 fi
               elif [[ "${EVENT_ACTION}" == "labeled" ]]; then
                 if [[ "${TRIGGERING_LABEL}" == "ready-to-code" ]]; then
                   STAGE="code"
                 elif [[ "${TRIGGERING_LABEL}" == "ready-for-review" ]]; then
-                  STAGE="review"
+                  if [[ "${ISSUE_HAS_PR}" == "true" ]]; then
+                    STAGE="review"
+                  fi
                 fi
               fi
               ;;
