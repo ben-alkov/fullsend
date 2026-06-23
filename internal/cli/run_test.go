@@ -1411,6 +1411,36 @@ func TestBuildSandboxEnvLines_SortedKeys(t *testing.T) {
 	assert.Equal(t, "export ZZZ='last'", lines[1])
 }
 
+func TestBuildSandboxEnvLines_SkipsInvalidKeys(t *testing.T) {
+	h := &harness.Harness{
+		Agent: "agents/test.md",
+		Role:  "test",
+		Env: &harness.EnvConfig{
+			Sandbox: map[string]string{
+				"VALID_KEY":  "ok",
+				"bad key":    "spaces",
+				"'; rm -rf ": "inject",
+			},
+		},
+	}
+	lines := buildSandboxEnvLines(h)
+	require.Len(t, lines, 1)
+	assert.Equal(t, "export VALID_KEY='ok'", lines[0])
+}
+
+func TestBuildSandboxEnvLines_EmptyValue(t *testing.T) {
+	h := &harness.Harness{
+		Agent: "agents/test.md",
+		Role:  "test",
+		Env: &harness.EnvConfig{
+			Sandbox: map[string]string{"EMPTY": ""},
+		},
+	}
+	lines := buildSandboxEnvLines(h)
+	require.Len(t, lines, 1)
+	assert.Equal(t, "export EMPTY=''", lines[0])
+}
+
 func TestShouldStartFetchService_AllowRuntimeFetch(t *testing.T) {
 	h := &harness.Harness{
 		Agent:                  "agents/test.md",

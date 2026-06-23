@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -1247,16 +1248,26 @@ func setupFetchService(ctx context.Context, forgeClient forge.Client, h *harness
 	return fetchServiceEnv{addr: addr, token: token}, shutdown, nil
 }
 
+// validEnvKeyRe matches POSIX-portable environment variable names.
+// Keys that don't match are skipped to prevent shell injection.
+var validEnvKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 // buildSandboxEnvLines generates export lines for env.sandbox values (ADR 0055).
 // Values have already been expanded by the caller. Each value is single-quoted
-// with internal single quotes escaped.
+// with internal single quotes escaped. Keys that are not valid shell identifiers
+// are silently skipped.
 func buildSandboxEnvLines(h *harness.Harness) []string {
 	if h.Env == nil || len(h.Env.Sandbox) == 0 {
 		return nil
 	}
 	keys := make([]string, 0, len(h.Env.Sandbox))
 	for k := range h.Env.Sandbox {
-		keys = append(keys, k)
+		if validEnvKeyRe.MatchString(k) {
+			keys = append(keys, k)
+		}
+	}
+	if len(keys) == 0 {
+		return nil
 	}
 	sort.Strings(keys)
 
