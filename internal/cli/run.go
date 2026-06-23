@@ -1247,6 +1247,28 @@ func setupFetchService(ctx context.Context, forgeClient forge.Client, h *harness
 	return fetchServiceEnv{addr: addr, token: token}, shutdown, nil
 }
 
+// buildSandboxEnvLines generates export lines for env.sandbox values (ADR 0055).
+// Values have already been expanded by the caller. Each value is single-quoted
+// with internal single quotes escaped.
+func buildSandboxEnvLines(h *harness.Harness) []string {
+	if h.Env == nil || len(h.Env.Sandbox) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(h.Env.Sandbox))
+	for k := range h.Env.Sandbox {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	lines := make([]string, 0, len(keys))
+	for _, k := range keys {
+		v := h.Env.Sandbox[k]
+		escaped := strings.ReplaceAll(v, "'", "'\\''")
+		lines = append(lines, fmt.Sprintf("export %s='%s'", k, escaped))
+	}
+	return lines
+}
+
 func bootstrapEnv(sandboxName, remoteRepositoryDir string, h *harness.Harness, runtimeEnvExports []string, fetchEnv ...fetchServiceEnv) error {
 	remoteEnvFile := sandbox.SandboxWorkspace + "/.env"
 	outputDir := sandbox.SandboxWorkspace + "/output"
@@ -1293,6 +1315,10 @@ func bootstrapEnv(sandboxName, remoteRepositoryDir string, h *harness.Harness, r
 		lines = append(lines, fmt.Sprintf("export FULLSEND_FETCH_URL='http://%s/fetch'", escAddr))
 		lines = append(lines, fmt.Sprintf("export FULLSEND_FETCH_TOKEN='%s'", escToken))
 	}
+
+	// ADR 0055: export env.sandbox vars. Placed before .env.d sourcing so
+	// manual .env files (if still present during migration) win on collision.
+	lines = append(lines, buildSandboxEnvLines(h)...)
 
 	// Source all env files from .env.d/ (populated by host_files with expand: true).
 	lines = append(lines, fmt.Sprintf("for f in %s/.env.d/*.env; do [ -f \"$f\" ] && . \"$f\"; done", sandbox.SandboxWorkspace))

@@ -1348,6 +1348,69 @@ func TestBootstrapEnv_SkipsFetchVarsWhenEmpty(t *testing.T) {
 	assert.Contains(t, err.Error(), "copying .env file to sandbox")
 }
 
+func TestBuildSandboxEnvLines_FromEnvSandbox(t *testing.T) {
+	h := &harness.Harness{
+		Agent: "agents/test.md",
+		Role:  "test",
+		Env: &harness.EnvConfig{
+			Sandbox: map[string]string{
+				"GITHUB_PR_URL": "https://github.com/org/repo/pull/1",
+				"GH_TOKEN":      "tok123",
+			},
+		},
+	}
+
+	lines := buildSandboxEnvLines(h)
+	assert.Contains(t, lines, "export GH_TOKEN='tok123'")
+	assert.Contains(t, lines, "export GITHUB_PR_URL='https://github.com/org/repo/pull/1'")
+}
+
+func TestBuildSandboxEnvLines_NilEnv(t *testing.T) {
+	h := &harness.Harness{Agent: "agents/test.md", Role: "test"}
+	lines := buildSandboxEnvLines(h)
+	assert.Nil(t, lines)
+}
+
+func TestBuildSandboxEnvLines_EmptySandbox(t *testing.T) {
+	h := &harness.Harness{
+		Agent: "agents/test.md",
+		Role:  "test",
+		Env:   &harness.EnvConfig{Runner: map[string]string{"FOO": "bar"}},
+	}
+	lines := buildSandboxEnvLines(h)
+	assert.Nil(t, lines)
+}
+
+func TestBuildSandboxEnvLines_EscapesSingleQuotes(t *testing.T) {
+	h := &harness.Harness{
+		Agent: "agents/test.md",
+		Role:  "test",
+		Env: &harness.EnvConfig{
+			Sandbox: map[string]string{"MSG": "it's a test"},
+		},
+	}
+	lines := buildSandboxEnvLines(h)
+	require.Len(t, lines, 1)
+	assert.Equal(t, "export MSG='it'\\''s a test'", lines[0])
+}
+
+func TestBuildSandboxEnvLines_SortedKeys(t *testing.T) {
+	h := &harness.Harness{
+		Agent: "agents/test.md",
+		Role:  "test",
+		Env: &harness.EnvConfig{
+			Sandbox: map[string]string{
+				"ZZZ": "last",
+				"AAA": "first",
+			},
+		},
+	}
+	lines := buildSandboxEnvLines(h)
+	require.Len(t, lines, 2)
+	assert.Equal(t, "export AAA='first'", lines[0])
+	assert.Equal(t, "export ZZZ='last'", lines[1])
+}
+
 func TestShouldStartFetchService_AllowRuntimeFetch(t *testing.T) {
 	h := &harness.Harness{
 		Agent:                  "agents/test.md",
