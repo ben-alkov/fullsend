@@ -96,8 +96,8 @@ func TestLoadForeignAllowlist_NotSet(t *testing.T) {
 }
 
 type foreignVarState struct {
-	mu    sync.Mutex
-	vars  map[string]string
+	mu      sync.Mutex
+	vars    map[string]string
 	deleted []string
 }
 
