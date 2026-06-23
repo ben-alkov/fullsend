@@ -610,7 +610,8 @@ GitHub event ──► SHIM WORKFLOW (fullsend.yml in enrolled repo)
                  ║ │                                                           │ ║
                  ║ │ Post-agent secret scan (redact from extracted output).    │ ║
                  ║ │                                                           │ ║
-                 ║ │ Post-script (scripts/post-code.sh, with PUSH_TOKEN):      │ ║
+                 ║ │ Post-script (scripts/post-code.sh, with PUSH_TOKEN,       │ ║
+                 ║ │   minted by the binary via --mint-url):                   │ ║
                  ║ │   1. Verify feature branch (not main/master)              │ ║
                  ║ │   2. Protected-path check                                 │ ║
                  ║ │   3. gitleaks secret scan                                 │ ║
