@@ -41,7 +41,7 @@ E2E tests run without maintainer action when the PR author is an org/repo
 live REST lookup — because `GITHUB_TOKEN` lacks `read:org` and cannot see org
 membership for members with private visibility. (Note: agent dispatch paths use
 the collaborator permission API instead, which does not have this limitation —
-see [ADR 0051](../../ADRs/0051-require-authorization-on-all-agent-dispatch-paths.md).)
+see [ADR 0054](../../ADRs/0054-require-authorization-on-all-agent-dispatch-paths.md).)
 
 ### Who needs `ok-to-test`
 

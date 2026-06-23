@@ -61,16 +61,16 @@ jobs:
             if [[ -z "${username}" ]]; then
               return 1
             fi
-            local perm api_err
+            local role api_err
             api_err=$(mktemp)
-            perm=$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${username}/permission" \
-              --jq '.permission' 2>"${api_err}") || {
+            role=$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${username}/permission" \
+              --jq '.role_name' 2>"${api_err}") || {
               echo "::warning::Permission API call failed for ${username}: $(cat "${api_err}")" >&2
               rm -f "${api_err}"
               return 1
             }
             rm -f "${api_err}"
-            case "${perm}" in
+            case "${role}" in
               admin|maintain|write) return 0 ;;
               *) return 1 ;;
             esac
@@ -155,8 +155,9 @@ jobs:
                   fi
                   ;;
                 *)
-                  # Non-command issue_comment: auto-triage on needs-info issues
-                  # when commenter is a non-bot with association != NONE or is issue author
+                  # Intentionally weaker gate: allows external reporters to
+                  # re-trigger triage by providing clarification on needs-info
+                  # issues. Full write-permission check is not required here.
                   if has_label "needs-info" && ! has_label "feature"; then
                     if [[ "${COMMENT_USER_TYPE}" != "Bot" ]]; then
                       if [[ "${COMMENT_AUTHOR_ASSOC}" != "NONE" ]] || is_issue_author; then

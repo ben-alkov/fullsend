@@ -204,9 +204,10 @@ func TestDispatchWorkflowContent(t *testing.T) {
 	assert.Contains(t, s, "opened|synchronize|ready_for_review")
 	// /code must only run on issues, not PRs
 	assert.Contains(t, s, "ISSUE_HAS_PR")
-	// Authorization checks (collaborator permission API)
+	// Authorization checks (collaborator permission API using .role_name)
 	assert.Contains(t, s, "is_authorized")
 	assert.Contains(t, s, "has_write_permission")
+	assert.Contains(t, s, ".role_name")
 	assert.Contains(t, s, "admin|maintain|write")
 	assert.Contains(t, s, `COMMENT_AUTHOR_ASSOC`)
 	// Auto-triage requires assoc != NONE or issue author

@@ -1,5 +1,5 @@
 ---
-title: "51. Require authorization on all agent dispatch paths"
+title: "54. Require authorization on all agent dispatch paths"
 status: Accepted
 relates_to:
   - agent-architecture
@@ -10,7 +10,7 @@ topics:
   - dispatch
 ---
 
-# 51. Require authorization on all agent dispatch paths
+# 54. Require authorization on all agent dispatch paths
 
 Date: 2026-05-29
 
@@ -96,28 +96,21 @@ org admin with private membership gets `CONTRIBUTOR` instead of `MEMBER`
 Instead, all authorization checks (both slash commands and event
 triggers) use the collaborator permission API
 (`GET /repos/{owner}/{repo}/collaborators/{username}/permission`) which
-returns the user's **effective** permission level including inherited org
-grants regardless of membership visibility.
+returns the user's **effective** role including inherited org grants
+regardless of membership visibility.
 
-```bash
-has_write_permission() {
-  local username="${1:-}"
-  local perm
-  perm=$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${username}/permission" \
-    --jq '.permission' 2>/dev/null || echo "none")
-  case "${perm}" in
-    admin|maintain|write) return 0 ;;
-    *) return 1 ;;
-  esac
-}
+The implementation uses a three-function layering:
 
-is_authorized() { has_write_permission "${COMMENT_USER_LOGIN}"; }
-is_event_actor_authorized() { has_write_permission "${1:-}"; }
-```
+- `has_write_permission(username)` — calls the API, checks `.role_name`
+- `is_authorized()` — delegates to `has_write_permission` for the comment author
+- `is_event_actor_authorized(username)` — delegates for event actors
 
-Users with `admin`, `maintain`, or `write` permission are authorized.
-Users with only `triage` or `read` permission are denied. This maps to
-"users with push access to the repository."
+See the workflow files (`reusable-dispatch.yml`, scaffold `dispatch.yml`)
+for the canonical implementation.
+
+Users with `admin`, `maintain`, or `write` role are authorized. Users
+with only `triage` or `read` role are denied. This maps to "users with
+push access to the repository."
 
 ### Automatic event triggers
 
@@ -129,6 +122,7 @@ Users with only `triage` or `read` permission are denied. This maps to
 | `pull_request_target.ready_for_review` | PR author | Yes (same branch as opened/synchronize) |
 | `pull_request_target.closed` | Closer | Already implicit (requires write access) |
 | `pull_request_review.submitted` | Reviewer | Already gated (requires review-bot authorship) |
+| `issue_comment` (needs-info re-triage) | Commenter | Weaker gate: `author_association != NONE` or issue author (intentional — allows clarification from external reporters) |
 
 For external contributors (issues opened or PRs submitted by
 non-members), the agent does not fire automatically. A maintainer can
@@ -157,15 +151,15 @@ slash commands because they orchestrate via labels.
 
 ### Visible feedback for unauthorized users
 
-When a non-Bot user fails `is_authorized`, the dispatch script must
+When a non-Bot user fails `is_authorized`, the dispatch script should
 provide visible feedback. The dispatch mechanism is open source and
 present in every enrolled repo's workflow files — silent failure
 provides no security benefit but does confuse legitimate contributors.
 
-The dispatch script must provide some form of visible response (e.g., a
-reaction, a comment, or both) so the user knows their command was
-received but not executed. The exact mechanism is an implementation
-detail.
+The dispatch script should provide some form of visible response (e.g.,
+a reaction, a comment, or both) so the user knows their command was
+received but not executed. This is not yet implemented — commands
+currently fail silently. Tracked as future work.
 
 For automatic triggers (e.g., unauthorized user opens an issue), no
 feedback is needed — the user didn't explicitly request an agent run.
