@@ -149,7 +149,7 @@ func AgentAppConfig(org, role, appSet string) AppConfig {
 		base.Permissions = AppPermissions{
 			Actions:                      "write",
 			Variables:                    "write",
-			OrganizationActionsVariables: "read",
+			OrganizationActionsVariables: "write",
 			Administration:               "write",
 			Contents:                     "write",
 			Issues:                       "write",

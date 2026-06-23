@@ -110,7 +110,7 @@ func TestAgentAppConfig_E2e(t *testing.T) {
 	assert.Equal(t, "fullsend-ai-e2e", cfg.Name)
 	assert.Equal(t, "write", cfg.Permissions.Actions)
 	assert.Equal(t, "write", cfg.Permissions.Variables)
-	assert.Equal(t, "read", cfg.Permissions.OrganizationActionsVariables)
+	assert.Equal(t, "write", cfg.Permissions.OrganizationActionsVariables)
 	assert.Equal(t, "write", cfg.Permissions.Administration)
 	assert.Equal(t, "write", cfg.Permissions.Contents)
 	assert.Equal(t, "write", cfg.Permissions.Issues)
