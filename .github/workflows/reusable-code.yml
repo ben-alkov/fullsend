@@ -60,12 +60,12 @@ jobs:
 
     steps:
       - name: Checkout config repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Checkout upstream defaults
         # Keep in sync with --vendor marker paths (see internal/scaffold/vendorcontent.go VendoredMarkerPath).
         if: hashFiles('.defaults/action.yml', '.fullsend/.defaults/action.yml') == ''
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: fullsend-ai/fullsend
           ref: ${{ inputs.fullsend_ai_ref }}
@@ -128,7 +128,7 @@ jobs:
           mint_url: ${{ inputs.mint_url }}
 
       - name: Checkout target repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: ${{ inputs.source_repo }}
           token: ${{ steps.app-token.outputs.token }}
@@ -186,7 +186,7 @@ jobs:
           REPO_FULL_NAME: ${{ inputs.source_repo }}
           PUSH_TOKEN: ${{ steps.app-token.outputs.token }}
           PUSH_TOKEN_SOURCE: github-app
-          TARGET_BRANCH: main
+          CODE_ALLOWED_TARGET_BRANCHES: ''
         with:
           agent: code
           version: ${{ inputs.fullsend_version }}
