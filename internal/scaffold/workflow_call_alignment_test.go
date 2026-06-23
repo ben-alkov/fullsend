@@ -259,7 +259,6 @@ func TestReusableDispatchRoutingContent(t *testing.T) {
 	content, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "reusable-dispatch.yml"))
 	require.NoError(t, err)
 	s := string(content)
-	assert.Contains(t, s, "ISSUE_IS_PR")
-	assert.Regexp(t, `(?s)/fs-review\).*?ISSUE_IS_PR`, s)
-	assert.Regexp(t, `(?s)ready-for-review.*?ISSUE_IS_PR`, s)
+	assert.Regexp(t, `(?s)/fs-review\)\s*\n\s+if \[\[ "\$\{ISSUE_IS_PR\}"`, s)
+	assert.Regexp(t, `(?s)ready-for-review"\s*\]\];\s*then\s*\n\s+if \[\[ "\$\{ISSUE_IS_PR\}"`, s)
 }
