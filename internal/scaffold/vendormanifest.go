@@ -155,6 +155,7 @@ var vendoredDefaultsInfraPaths = []string{
 }
 
 // enumerateVendoredPaths returns embed-derived paths for a current --vendor install layout.
+// Reusable workflows are always under .github/workflows/ (GitHub Actions requirement).
 func enumerateVendoredPaths(workflowPrefix string) ([]string, error) {
 	seen := make(map[string]struct{})
 	add := func(p string) {
@@ -164,7 +165,7 @@ func enumerateVendoredPaths(workflowPrefix string) ([]string, error) {
 	}
 
 	for _, name := range vendoredReusableWorkflows {
-		add(workflowPrefix + ".github/workflows/" + name)
+		add(".github/workflows/" + name)
 	}
 	for _, p := range vendoredDefaultsInfraPaths {
 		add(defaultsVendoredPrefix + p)
@@ -185,6 +186,8 @@ func enumerateVendoredPaths(workflowPrefix string) ([]string, error) {
 }
 
 // enumerateLegacyFlatVendoredPaths returns pre-.defaults flat layout paths from embed.
+// Reusable workflows are always under .github/workflows/ (GitHub Actions requirement).
+// Legacy per-repo paths (.fullsend/.github/workflows/...) are also included for cleanup.
 func enumerateLegacyFlatVendoredPaths(workflowPrefix string) ([]string, error) {
 	seen := make(map[string]struct{})
 	add := func(p string) {
@@ -194,7 +197,11 @@ func enumerateLegacyFlatVendoredPaths(workflowPrefix string) ([]string, error) {
 	}
 
 	for _, name := range vendoredReusableWorkflows {
-		add(workflowPrefix + ".github/workflows/" + name)
+		add(".github/workflows/" + name)
+		// Include legacy per-repo paths for cleanup.
+		if workflowPrefix != "" {
+			add(workflowPrefix + ".github/workflows/" + name)
+		}
 	}
 	for _, p := range vendoredDefaultsInfraPaths {
 		add(p)

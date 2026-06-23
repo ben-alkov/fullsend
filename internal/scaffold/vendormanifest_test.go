@@ -111,7 +111,7 @@ func TestManagedVendoredContentPaths(t *testing.T) {
 	paths, err := ManagedVendoredContentPaths(".fullsend/")
 	require.NoError(t, err)
 	assert.Contains(t, paths, ".defaults/action.yml")
-	assert.Contains(t, paths, ".fullsend/.github/workflows/reusable-triage.yml")
+	assert.Contains(t, paths, ".github/workflows/reusable-triage.yml")
 }
 
 func TestLegacyFlatVendoredPaths(t *testing.T) {

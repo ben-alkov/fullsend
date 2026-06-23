@@ -47,8 +47,24 @@ func TestRenderPerRepoShimVendored(t *testing.T) {
 	})
 	require.NoError(t, err)
 	out := string(rendered)
-	assert.Contains(t, out, "uses: ./.fullsend/.github/workflows/reusable-dispatch.yml")
+	assert.Contains(t, out, "uses: ./.github/workflows/reusable-dispatch.yml")
 	assert.NotContains(t, out, "distribution_mode")
+}
+
+func TestRenderThinCallerVendoredPerRepo(t *testing.T) {
+	raw, err := FullsendRepoFile(".github/workflows/triage.yml")
+	require.NoError(t, err)
+
+	rendered, err := RenderTemplate(".github/workflows/triage.yml", raw, RenderOptions{
+		Vendored: true,
+		PerRepo:  true,
+	})
+	require.NoError(t, err)
+	out := string(rendered)
+	// GitHub Actions requires local reusable workflow references to be under .github/workflows/.
+	assert.Contains(t, out, "uses: ./.github/workflows/reusable-triage.yml")
+	assert.NotContains(t, out, ".fullsend/")
+	assertFreeOfRenderPlaceholders(t, out)
 }
 
 func TestRenderPrioritizeThinCallerVendored(t *testing.T) {
@@ -96,8 +112,8 @@ func TestRenderDispatchPerRepoStagePaths(t *testing.T) {
 	require.NotEmpty(t, raw)
 
 	rendered := RenderDispatchPerRepoStagePaths(raw)
-	assert.Contains(t, string(rendered), "uses: ./.fullsend/.github/workflows/reusable-triage.yml")
-	assert.Contains(t, string(rendered), "uses: ./.fullsend/.github/workflows/reusable-prioritize.yml")
+	assert.Contains(t, string(rendered), "uses: ./.github/workflows/reusable-triage.yml")
+	assert.Contains(t, string(rendered), "uses: ./.github/workflows/reusable-prioritize.yml")
 	assert.NotContains(t, string(rendered), "uses: fullsend-ai/fullsend/.github/workflows/reusable-triage.yml@v0")
 }
 

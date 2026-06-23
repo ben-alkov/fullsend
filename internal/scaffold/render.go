@@ -73,9 +73,6 @@ func thinStageName(content string) (string, error) {
 
 func reusableWorkflowUses(stage string, opts RenderOptions) string {
 	if opts.Vendored {
-		if opts.PerRepo {
-			return "./.fullsend/.github/workflows/reusable-" + stage + ".yml"
-		}
 		return "./.github/workflows/reusable-" + stage + ".yml"
 	}
 	return config.DefaultUpstreamRepo + "/.github/workflows/reusable-" + stage + ".yml@" + config.DefaultUpstreamRef
@@ -83,15 +80,16 @@ func reusableWorkflowUses(stage string, opts RenderOptions) string {
 
 func reusableDispatchUses(opts RenderOptions) string {
 	if opts.Vendored {
-		return "./.fullsend/.github/workflows/reusable-dispatch.yml"
+		return "./.github/workflows/reusable-dispatch.yml"
 	}
 	return config.DefaultUpstreamRepo + "/.github/workflows/reusable-dispatch.yml@" + config.DefaultUpstreamRef
 }
 
 // RenderDispatchPerRepoStagePaths rewrites stage workflow paths for vendored
-// per-repo installs where reusable-dispatch.yml lives under .fullsend/.
+// per-repo installs so reusable workflows reference .github/workflows/ (required
+// by GitHub Actions for local reusable workflow references).
 func RenderDispatchPerRepoStagePaths(content []byte) []byte {
-	return dispatchStageUses.ReplaceAll(content, []byte(`uses: ./.fullsend/.github/workflows/reusable-$1.yml`))
+	return dispatchStageUses.ReplaceAll(content, []byte(`uses: ./.github/workflows/reusable-$1.yml`))
 }
 
 var dispatchStageUses = regexp.MustCompile(`uses: fullsend-ai/fullsend/\.github/workflows/reusable-([a-z-]+)\.yml@[^\s]+`)
