@@ -386,6 +386,73 @@ func TestValidate_ForgeSkillURLWithHash(t *testing.T) {
 	require.NoError(t, h.Validate())
 }
 
+func TestResolveForge_MergesEnv(t *testing.T) {
+	h := &Harness{
+		Agent: "agents/test.md",
+		Role:  "test",
+		Env: &EnvConfig{
+			Runner:  map[string]string{"SHARED": "base"},
+			Sandbox: map[string]string{"SHARED_SB": "base"},
+		},
+		Forge: map[string]*ForgeConfig{
+			"github": {
+				Env: &EnvConfig{
+					Runner:  map[string]string{"GH_TOKEN": "tok"},
+					Sandbox: map[string]string{"PR_URL": "url"},
+				},
+			},
+		},
+	}
+
+	require.NoError(t, h.ResolveForge("github"))
+
+	require.NotNil(t, h.Env)
+	assert.Equal(t, "base", h.Env.Runner["SHARED"])
+	assert.Equal(t, "tok", h.Env.Runner["GH_TOKEN"])
+	assert.Equal(t, "base", h.Env.Sandbox["SHARED_SB"])
+	assert.Equal(t, "url", h.Env.Sandbox["PR_URL"])
+}
+
+func TestResolveForge_EnvForgeOverridesTopLevel(t *testing.T) {
+	h := &Harness{
+		Agent: "agents/test.md",
+		Role:  "test",
+		Env: &EnvConfig{
+			Runner: map[string]string{"KEY": "top"},
+		},
+		Forge: map[string]*ForgeConfig{
+			"github": {
+				Env: &EnvConfig{
+					Runner: map[string]string{"KEY": "forge"},
+				},
+			},
+		},
+	}
+
+	require.NoError(t, h.ResolveForge("github"))
+	assert.Equal(t, "forge", h.Env.Runner["KEY"])
+}
+
+func TestResolveForge_EnvInheritedWhenForgeNil(t *testing.T) {
+	h := &Harness{
+		Agent: "agents/test.md",
+		Role:  "test",
+		Env: &EnvConfig{
+			Runner:  map[string]string{"INHERITED": "yes"},
+			Sandbox: map[string]string{"ALSO": "inherited"},
+		},
+		Forge: map[string]*ForgeConfig{
+			"github": {},
+		},
+	}
+
+	require.NoError(t, h.ResolveForge("github"))
+
+	require.NotNil(t, h.Env)
+	assert.Equal(t, "yes", h.Env.Runner["INHERITED"])
+	assert.Equal(t, "inherited", h.Env.Sandbox["ALSO"])
+}
+
 func TestLoad_WithForgeSection(t *testing.T) {
 	content := `
 agent: agents/test.md
