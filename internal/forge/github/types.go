@@ -148,7 +148,7 @@ func AgentAppConfig(org, role, appSet string) AppConfig {
 		base.Description = fmt.Sprintf("Fullsend e2e pool testing for %s", org)
 		base.Permissions = AppPermissions{
 			Actions:                      "write",
-			Variables:                    "read",
+			Variables:                    "write",
 			OrganizationActionsVariables: "read",
 			Administration:               "write",
 			Contents:                     "write",

@@ -161,7 +161,7 @@ func TestRolePermissions_E2e(t *testing.T) {
 	perms := RolePermissionsFor("e2e")
 	require.NotNil(t, perms)
 	assert.Equal(t, "write", perms["actions"])
-	assert.Equal(t, "read", perms["actions_variables"])
+	assert.Equal(t, "write", perms["actions_variables"])
 	assert.Equal(t, "read", perms["organization_actions_variables"])
 	assert.Equal(t, "write", perms["administration"])
 	assert.Equal(t, "write", perms["contents"])
