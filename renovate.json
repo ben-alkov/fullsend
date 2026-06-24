@@ -1,0 +1,37 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "prHourlyLimit": 1,
+  "postUpdateOptions": ["gomodTidy"],
+  "git-submodules": {
+    "enabled": true
+  },
+  "github-actions": {
+    "fileMatch": [
+      "^internal/scaffold/.*\\.github/workflows/[^/]+\\.ya?ml$"
+    ]
+  },
+  "packageRules": [
+    {
+      "description": "Ignore fullsend self-references (own reusable workflows and actions)",
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": ["/^fullsend-ai\\//"],
+      "enabled": false
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Track OpenShell version pin in openshell-version.sh",
+      "fileMatch": [
+        "^\\.github/scripts/openshell-version\\.sh$"
+      ],
+      "matchStrings": [
+        "OPENSHELL_VERSION=(?<currentValue>\\d+\\.\\d+\\.\\d+)\\nOPENSHELL_SHA=(?<currentDigest>[0-9a-f]{40})"
+      ],
+      "depNameTemplate": "NVIDIA/OpenShell",
+      "datasourceTemplate": "github-tags",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    }
+  ]
+}

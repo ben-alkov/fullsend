@@ -64,12 +64,12 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      stage: ${{ steps.role-check.outputs.skipped != 'true' && steps.route.outputs.stage || '' }}
+      stage: ${{ steps.role-check.outputs.skipped != 'true' && steps.pr-check.outputs.skipped != 'true' && steps.route.outputs.stage || '' }}
       trigger_source: ${{ steps.route.outputs.trigger_source }}
       event_payload: ${{ steps.payload.outputs.event_payload }}
     steps:
       - name: Checkout caller repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
           sparse-checkout: .fullsend/config.yaml
@@ -86,7 +86,7 @@ jobs:
           COMMENT_AUTHOR_ASSOC: ${{ github.event.comment.author_association }}
           ISSUE_LABELS: ${{ join(github.event.issue.labels.*.name, ',') }}
           PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
-          ISSUE_HAS_PR: ${{ github.event.issue.pull_request && 'true' || 'false' }}
+          ISSUE_IS_PR: ${{ github.event.issue.pull_request && 'true' || 'false' }}
           ISSUE_USER_LOGIN: ${{ github.event.issue.user.login }}
           REVIEW_STATE: ${{ github.event.review.state }}
           REVIEW_USER_LOGIN: ${{ github.event.review.user.login }}
@@ -124,7 +124,7 @@ jobs:
 
           COMMAND=""
           if [[ -n "${COMMENT_BODY:-}" ]]; then
-            COMMAND="$(printf '%s\n' "${COMMENT_BODY}" | head -1 | awk '{print $1}')"
+            COMMAND="$(printf '%s\n' "${COMMENT_BODY}" | head -1 | tr -d '\r' | awk '{print $1}')"
           fi
 
           case "${EVENT_NAME}" in
@@ -134,15 +134,17 @@ jobs:
                   STAGE="triage"
                   ;;
                 /fs-code)
-                  if [[ "${ISSUE_HAS_PR}" == "false" ]]; then
+                  if [[ "${ISSUE_IS_PR}" == "false" ]]; then
                     STAGE="code"
                   fi
                   ;;
                 /fs-review)
-                  STAGE="review"
+                  if [[ "${ISSUE_IS_PR}" == "true" ]]; then
+                    STAGE="review"
+                  fi
                   ;;
                 /fs-fix)
-                  if [[ "${ISSUE_HAS_PR}" == "true" ]]; then
+                  if [[ "${ISSUE_IS_PR}" == "true" ]]; then
                     if [[ "${COMMENT_USER_TYPE}" != "Bot" ]] && is_authorized; then
                       STAGE="fix"
                       TRIGGER_SOURCE="${COMMENT_USER_LOGIN}"
@@ -152,7 +154,7 @@ jobs:
                 /fs-retro|/fullsend)
                   if [[ "${COMMENT_USER_TYPE}" != "Bot" ]] && is_authorized; then
                     if [[ "${COMMAND}" == "/fullsend" ]]; then
-                      SECOND_WORD="$(printf '%s\n' "${COMMENT_BODY}" | head -1 | awk '{print $2}')"
+                      SECOND_WORD="$(printf '%s\n' "${COMMENT_BODY}" | head -1 | tr -d '\r' | awk '{print $2}')"
                       if [[ "${SECOND_WORD}" == "retro" ]]; then
                         STAGE="retro"
                       fi
@@ -185,7 +187,9 @@ jobs:
                 if [[ "${TRIGGERING_LABEL}" == "ready-to-code" ]]; then
                   STAGE="code"
                 elif [[ "${TRIGGERING_LABEL}" == "ready-for-review" ]]; then
-                  STAGE="review"
+                  if [[ "${ISSUE_IS_PR}" == "true" ]]; then
+                    STAGE="review"
+                  fi
                 fi
               fi
               ;;
@@ -233,6 +237,27 @@ jobs:
           echo "Routed to stage: ${STAGE}"
           echo "stage=${STAGE}" >> "${GITHUB_OUTPUT}"
           echo "trigger_source=${TRIGGER_SOURCE}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check for existing PRs
+        id: pr-check
+        if: steps.route.outputs.stage == 'code'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          SOURCE_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          BOT_LOGIN="fullsend-ai[bot]"
+          CODER_BOT_LOGIN="fullsend-ai-coder[bot]"
+          MENTIONING_PRS="$(gh pr list --repo "${SOURCE_REPO}" --state open \
+            --search "${ISSUE_NUMBER} in:title,body" \
+            --json number,author \
+            --jq "[.[] | select(.author.login != \"${BOT_LOGIN}\" and .author.login != \"${CODER_BOT_LOGIN}\")] | .[].number" \
+            2>/dev/null || true)"
+          if [[ -n "${MENTIONING_PRS}" ]]; then
+            echo "::notice::Open PR(s) mentioning issue #${ISSUE_NUMBER} found — skipping code dispatch"
+            echo "skipped=true" >> "${GITHUB_OUTPUT}"
+          fi
 
       - name: Validate routed stage
         if: steps.route.outputs.stage != ''
@@ -317,7 +342,7 @@ jobs:
           EVENT_PAYLOAD=$(jq -c '{
             issue: (.issue // null | if . then {number, html_url} else null end),
             pull_request: (.pull_request // null | if . then {number, html_url,
-              head: {ref: .head.ref, repo: {full_name: .head.repo.full_name}},
+              head: {ref: .head.ref, sha: .head.sha, repo: {full_name: .head.repo.full_name}},
               base: {ref: .base.ref, repo: {full_name: .base.repo.full_name}}} else null end),
             comment: (.comment // null | if . then {body: .body[:4096]} else null end)
           }' "$GITHUB_EVENT_PATH") || {

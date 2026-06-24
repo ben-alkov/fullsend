@@ -24,6 +24,10 @@
 #
 # Optional environment variables:
 #   PUSH_TOKEN_SOURCE — "github-app" (for logging; default: unknown)
+#   CODE_ALLOWED_TARGET_BRANCHES
+#                     — comma-separated list of branches the agent may target,
+#                       or "*" for any. When unset, only the repo's default
+#                       branch is allowed. (default: auto-detected)
 #
 # Exit codes:
 #   0  — branch pushed and PR created, OR agent determined nothing to do
@@ -45,10 +49,11 @@ UV_SHA256="f3b623eb0e6141a7053d571d59a0bdc341e0f238ea8f5f0b4815ddbec9a2a296"
 # Setup
 # ---------------------------------------------------------------------------
 REPO_DIR="${REPO_DIR:-repo}"
+RUN_DIR="$(pwd)"
 
 if [ "${REPO_DIR}" != "." ]; then
   if [ ! -d "${REPO_DIR}" ]; then
-    echo "::error::Extracted repo not found at ${REPO_DIR}"
+    echo "::error::Extracted repo not found at ${REPO_DIR}" >&2
     exit 1
   fi
   cd "${REPO_DIR}"
@@ -57,7 +62,45 @@ fi
 : "${PUSH_TOKEN:?PUSH_TOKEN is required}"
 : "${REPO_FULL_NAME:?REPO_FULL_NAME is required}"
 : "${ISSUE_NUMBER:?ISSUE_NUMBER is required}"
-TARGET_BRANCH="${TARGET_BRANCH:-main}"
+# ---------------------------------------------------------------------------
+# Resolve target branch (ADR 0053)
+#
+# Priority: agent output > allowed-list validation > auto-detect default
+# The agent writes its chosen branch to code-result.json. The post-script
+# validates it against CODE_ALLOWED_TARGET_BRANCHES (comma-separated list
+# or "*" for any). When unset, only the auto-detected default branch is
+# allowed. Falls back to "main" if the API call fails.
+# ---------------------------------------------------------------------------
+AGENT_TARGET=""
+RESULT_FILE=""
+for dir in "${RUN_DIR}"/iteration-*/output; do
+  if [ -f "${dir}/code-result.json" ]; then
+    RESULT_FILE="${dir}/code-result.json"
+  fi
+done
+if [ -n "${RESULT_FILE}" ]; then
+  AGENT_TARGET="$(jq -r '.target_branch // empty' "${RESULT_FILE}" 2>/dev/null || true)"
+fi
+if [[ -n "${AGENT_TARGET}" && ! "${AGENT_TARGET}" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
+  echo "Error: invalid branch name from agent output: '${AGENT_TARGET}'"
+  exit 1
+fi
+
+DEFAULT_BRANCH="$(GH_TOKEN="${PUSH_TOKEN}" gh api "repos/${REPO_FULL_NAME}" --jq '.default_branch' 2>/dev/null || echo 'main')"
+
+if [ -n "${AGENT_TARGET}" ]; then
+  ALLOWED="${CODE_ALLOWED_TARGET_BRANCHES:-${DEFAULT_BRANCH}}"
+  if [ "${ALLOWED}" = "*" ] || echo ",${ALLOWED}," | grep -qF ",${AGENT_TARGET},"; then
+    TARGET_BRANCH="${AGENT_TARGET}"
+    echo "Agent requested branch '${TARGET_BRANCH}' — allowed"
+  else
+    echo "Error: agent requested branch '${AGENT_TARGET}' but allowed branches are: ${ALLOWED}"
+    exit 1
+  fi
+else
+  TARGET_BRANCH="${DEFAULT_BRANCH}"
+  echo "No agent branch preference — using repo default: ${TARGET_BRANCH}"
+fi
 
 echo "::add-mask::${PUSH_TOKEN}"
 
@@ -127,6 +170,59 @@ echo "Changed files:"
 echo "${CHANGED_FILES}" | sed 's/^/  /'
 
 # ---------------------------------------------------------------------------
+# 2b. Strip agent working directories (defense-in-depth)
+#
+# Agent working dirs (.agentready/, .fullsend-workspace/) should never
+# appear in commits. The harness excludes them via .git/info/exclude, but
+# if an agent manages to stage them anyway, strip them here before push.
+# ---------------------------------------------------------------------------
+AGENT_ARTIFACT_PATTERNS=".agentready/ .fullsend-workspace/"
+STRIPPED_FILES=""
+for file in ${CHANGED_FILES}; do
+  is_artifact=false
+  for pattern in ${AGENT_ARTIFACT_PATTERNS}; do
+    dir="${pattern%/}"  # strip trailing slash for prefix matching
+    case "${file}" in
+      "${dir}"/*|"${dir}") is_artifact=true; break ;;
+      */"${dir}"/*|*/"${dir}") is_artifact=true; break ;;
+    esac
+  done
+  if [ "${is_artifact}" = "true" ]; then
+    echo "::warning::Stripping agent artifact from commit: ${file}"
+    STRIPPED_FILES="${STRIPPED_FILES} ${file}"
+  fi
+done
+
+if [ -n "${STRIPPED_FILES}" ]; then
+  echo "::warning::Agent committed working directory artifacts — stripping before push"
+  # shellcheck disable=SC2086
+  git rm --cached --quiet ${STRIPPED_FILES}
+  git commit --amend --no-edit
+
+  # Rebuild CHANGED_FILES without the stripped artifacts.
+  CLEAN_FILES=""
+  for file in ${CHANGED_FILES}; do
+    is_stripped=false
+    for sf in ${STRIPPED_FILES}; do
+      if [ "${file}" = "${sf}" ]; then
+        is_stripped=true
+        break
+      fi
+    done
+    if [ "${is_stripped}" = "false" ]; then
+      CLEAN_FILES="${CLEAN_FILES}${CLEAN_FILES:+
+}${file}"
+    fi
+  done
+  CHANGED_FILES="${CLEAN_FILES}"
+
+  if [ -z "${CHANGED_FILES}" ]; then
+    echo "::notice::All changed files were agent artifacts — nothing to push"
+    exit 0
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # 3. Authoritative secret scan
 # ---------------------------------------------------------------------------
 echo "Running authoritative secret scan on agent's commit..."
@@ -153,6 +249,23 @@ gitleaks detect --source . --log-opts="${SCAN_RANGE}" --redact
 echo "Secret scan passed — no leaks in agent's commit(s)"
 
 # ---------------------------------------------------------------------------
+# 3b. Reject Signed-off-by trailers
+#
+# Agents must never produce Signed-off-by trailers. DCO is a human
+# attestation — the DCO app already waives the check for bot authors.
+# The bot noreply email makes the trailer ~90 characters, which causes
+# gitlint body-max-line-length failures in repos with a 72-char limit.
+# ---------------------------------------------------------------------------
+echo "Checking for Signed-off-by trailers in agent's commit(s)..."
+if git log --format='%b' "${SCAN_RANGE}" | grep -q '^Signed-off-by:'; then
+  echo "::error::BLOCKED — agent commit contains a Signed-off-by trailer" >&2
+  echo "::error::Agents must not use 'git commit -s' or append Signed-off-by trailers." >&2
+  echo "::error::DCO is a human attestation; the DCO app waives the check for bots." >&2
+  exit 1
+fi
+echo "Signed-off-by scan passed — no trailers in agent's commit(s)"
+
+# ---------------------------------------------------------------------------
 # 4. Install lychee (for pre-commit markdown link checking)
 # ---------------------------------------------------------------------------
 if ! command -v lychee >/dev/null 2>&1; then
@@ -161,7 +274,7 @@ if ! command -v lychee >/dev/null 2>&1; then
   case "$(uname -m)" in
     x86_64)  LY_TRIPLE="x86_64-unknown-linux-gnu";  LY_SHA="${LYCHEE_SHA256_AMD64}" ;;
     aarch64) LY_TRIPLE="aarch64-unknown-linux-gnu"; LY_SHA="${LYCHEE_SHA256_ARM64}" ;;
-    *) echo "::error::Unsupported architecture for lychee: $(uname -m)"; exit 1 ;;
+    *) echo "::error::Unsupported architecture for lychee: $(uname -m)" >&2; exit 1 ;;
   esac
   curl -fsSL \
     "https://github.com/lycheeverse/lychee/releases/download/lychee-v${LYCHEE_VERSION}/lychee-${LY_TRIPLE}.tar.gz" \
@@ -209,9 +322,9 @@ if [ -f .pre-commit-config.yaml ]; then
     if pre-commit run --files "${changed_array[@]}"; then
       echo "Pre-commit passed — all hooks clean"
     else
-      echo "::error::BLOCKED — pre-commit hooks failed on agent's changes"
-      echo "::error::The agent's code does not pass the repo's pre-commit hooks."
-      echo "::error::Fix the issues and re-run, or update the pre-commit config."
+      echo "::error::BLOCKED — pre-commit hooks failed on agent's changes" >&2
+      echo "::error::The agent's code does not pass the repo's pre-commit hooks." >&2
+      echo "::error::Fix the issues and re-run, or update the pre-commit config." >&2
       exit 1
     fi
   else
@@ -262,9 +375,13 @@ echo "${PUSH_OUTPUT}"
 if [ "${PUSH_RC}" -ne 0 ]; then
   if echo "${PUSH_OUTPUT}" | grep -qi "non-fast-forward\|rejected\|fetch first"; then
     echo "::warning::Plain push failed (non-fast-forward) — retrying with --force-with-lease"
-    git push --force-with-lease -u origin -- "${BRANCH}" 2>&1
+    if ! git push --force-with-lease -u origin -- "${BRANCH}" 2>&1; then
+      echo "::error::Force-with-lease push also failed"
+      exit 1
+    fi
   else
-    echo "::error::Push failed with unexpected error"
+    echo "::error::Push failed with unexpected error (git push origin ${BRANCH})" >&2
+    echo "::error::Push output: ${PUSH_OUTPUT}" >&2
     exit 1
   fi
 fi
@@ -336,13 +453,19 @@ Closes #${ISSUE_NUMBER}
 - [x] Pre-commit hooks passed (authoritative run on runner)
 - [x] Tests ran inside sandbox"
 
-PR_URL="$(gh pr create \
+PR_CREATE_STDERR=$(mktemp)
+if ! PR_URL=$(gh pr create \
   --repo "${REPO_FULL_NAME}" \
   --head "${BRANCH}" \
   --base "${TARGET_BRANCH}" \
   --title "${PR_TITLE}" \
-  --body "${PR_BODY}" \
-  2>&1)"
+  --body "${PR_BODY}" 2>"${PR_CREATE_STDERR}"); then
+  echo "::error::Failed to create PR for ${REPO_FULL_NAME} (head: ${BRANCH}, base: ${TARGET_BRANCH})" >&2
+  [ -s "${PR_CREATE_STDERR}" ] && cat "${PR_CREATE_STDERR}" >&2
+  rm -f "${PR_CREATE_STDERR}"
+  exit 1
+fi
+rm -f "${PR_CREATE_STDERR}"
 
 echo "PR created: ${PR_URL}"
 echo "pr_url=${PR_URL}" >> "${GITHUB_OUTPUT:-/dev/null}"
