@@ -107,9 +107,10 @@ lint-md-links:
 
 define run-timed
 	@start=$$(date +%s); \
-	$(1); \
+	rc=0; $(1) || rc=$$?; \
 	elapsed=$$(($$(date +%s) - $$start)); \
-	printf '::debug::script-test timing: %s completed in %ds\n' '$(1)' "$$elapsed"
+	printf '::debug::script-test timing: %s completed in %ds\n' '$(1)' "$$elapsed"; \
+	exit $$rc
 endef
 
 script-test:
