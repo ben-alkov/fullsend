@@ -65,3 +65,16 @@ func tokenForOrg(ctx context.Context, cfg envConfig, org string) (string, error)
 	}
 	return resolveLocalToken()
 }
+
+// issueAuthorToken returns a user OAuth token for actions that must appear as a
+// human with repository write access. Installation tokens create issues as bots,
+// which fail ADR 0054 dispatch authorization (has_write_permission on open).
+func issueAuthorToken(cfg envConfig) (string, error) {
+	if token := os.Getenv("E2E_ISSUE_AUTHOR_TOKEN"); token != "" {
+		return token, nil
+	}
+	if !cfg.useMint {
+		return resolveLocalToken()
+	}
+	return "", fmt.Errorf("E2E_ISSUE_AUTHOR_TOKEN not set: CI mint tokens create issues as bots, which dispatch rejects for triage")
+}

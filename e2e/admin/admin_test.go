@@ -312,12 +312,17 @@ Segmentation fault (core dumped)
 **Additional context:**
 This started happening after the v2.3.0 -> v2.3.1 upgrade. Files under 64KB save fine.
 Files over 64KB save fine if they contain only ASCII characters.`
-	issue, err := env.client.CreateIssue(ctx, env.org, testRepo, issueTitle, issueBody)
+	// Issues must be opened by a user with write access so dispatch authorizes
+	// triage (ADR 0054). Mint/installation tokens create issues as bots.
+	authorToken, err := issueAuthorToken(env.cfg)
+	require.NoError(t, err, "resolving issue author token")
+	issueClient := newLiveClient(authorToken)
+	issue, err := issueClient.CreateIssue(ctx, env.org, testRepo, issueTitle, issueBody)
 	require.NoError(t, err, "creating test issue")
 	t.Logf("Created test issue #%d: %s", issue.Number, issue.URL)
 	t.Cleanup(func() {
 		t.Log("Closing test issue...")
-		if closeErr := env.client.CloseIssue(ctx, env.org, testRepo, issue.Number); closeErr != nil {
+		if closeErr := issueClient.CloseIssue(ctx, env.org, testRepo, issue.Number); closeErr != nil {
 			t.Logf("warning: could not close test issue: %v", closeErr)
 		}
 	})
