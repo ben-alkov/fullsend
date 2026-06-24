@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/fullsend-ai/fullsend/internal/mintclient"
 )
@@ -20,7 +21,11 @@ func resolveLocalToken() (string, error) {
 	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
 		return token, nil
 	}
-	out, err := exec.Command("gh", "auth", "token").Output()
+	out, err := func() ([]byte, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		return exec.CommandContext(ctx, "gh", "auth", "token").Output()
+	}()
 	if err == nil {
 		token := strings.TrimSpace(string(out))
 		if token != "" {

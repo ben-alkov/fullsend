@@ -67,7 +67,10 @@ orgs control over their own policy.
 
 ## Consequences
 
-- Cross-org mint requests add GitHub API calls (FOREIGN variable cached with short TTL).
+- Cross-org mint requests add GitHub API calls. FOREIGN allowlist lookups are cached in-memory
+  per mint instance (key: `target_org/role`, TTL 60s). Cache entries include empty/missing
+  allowlists (negative cache) so revoked or unset variables may take up to one TTL window to
+  take effect. Cardinality is bounded by enrolled orgs × roles; no explicit eviction beyond TTL.
 - Roles used on the cross-org path need `actions_variables: read` on their App permissions.
 - The `e2e` role additionally needs `actions_variables: write` and
   `organization_actions_variables: write` so pool tests can set repo/org variables during

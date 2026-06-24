@@ -11,13 +11,21 @@ Historical ADRs [0010](../../ADRs/0010-stored-session-for-e2e-browser-auth.md) (
 auth ([#2155](https://github.com/fullsend-ai/fullsend/issues/2155)); local runs no longer use
 Playwright or stored sessions.
 
+## Prerequisites
+
+Before running e2e locally or in CI:
+
+1. **Pool orgs** (`halfsend-01` … `halfsend-06`) provisioned per [Pool org provisioning](#pool-org-provisioning) below
+2. **Mint** deployed with `e2e` role enrolled and `ALLOWED_ORGS` including `fullsend-ai`
+3. **CI only:** `E2E_MINT_URL` repository secret and pool orgs with `FULLSEND_FOREIGN_E2E_REPOS` authorizing `fullsend-ai/fullsend`
+4. **Local only:** `gh auth login` (or `GH_TOKEN` / `GITHUB_TOKEN`) with admin access on pool orgs
+
 ## Local runs
 
-```bash
-# Authenticate as an admin on the pool orgs
-gh auth login --web
+1. Authenticate as an admin on the pool orgs (`gh auth login --web`, or export `GH_TOKEN`).
+2. Run tests (uses `gh auth token`, `GH_TOKEN`, or `GITHUB_TOKEN`):
 
-# Run tests (uses gh auth token, GH_TOKEN, or GITHUB_TOKEN)
+```bash
 make e2e-test
 ```
 
@@ -94,7 +102,9 @@ E2E tests run without maintainer action when the PR author is an org/repo
 `COLLABORATOR` on the base repo). The gate uses the frozen
 `github.event.pull_request.author_association` from the workflow event — not a
 live REST lookup — because `GITHUB_TOKEN` lacks `read:org` and cannot see org
-membership for members with private visibility.
+membership for members with private visibility. (Note: agent dispatch paths use
+the collaborator permission API instead, which does not have this limitation —
+see [ADR 0054](../../ADRs/0054-require-authorization-on-all-agent-dispatch-paths.md).)
 
 ### Who needs `ok-to-test`
 

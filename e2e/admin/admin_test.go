@@ -93,6 +93,7 @@ func TestAdminInstallUninstall(t *testing.T) {
 		"--app-set", e2eAppSet,
 		"--enroll-all",
 		"--vendor",
+		"--direct",
 	}
 	if env.cfg.gcpProjectID != "" {
 		installArgs = append(installArgs, "--inference-project", env.cfg.gcpProjectID)
@@ -682,6 +683,7 @@ func TestVendorFromSubdirectory(t *testing.T) {
 		"--app-set", e2eAppSet,
 		"--enroll-none",
 		"--vendor",
+		"--direct",
 	}
 	runCLIFromDir(t, env.binary, env.token, subdir, installArgs...)
 

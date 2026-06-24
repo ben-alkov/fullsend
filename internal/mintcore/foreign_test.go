@@ -41,4 +41,7 @@ func TestCallerAllowed(t *testing.T) {
 	if CallerAllowed(list, "other-org/repo", "other-org") {
 		t.Fatal("expected deny")
 	}
+	if !CallerAllowed(list, "FULLSEND-AI/fullsend", "fullsend-ai") {
+		t.Fatal("expected case-insensitive repo match")
+	}
 }

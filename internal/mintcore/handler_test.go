@@ -2312,6 +2312,54 @@ func TestHandler_ForeignAllowlistCached(t *testing.T) {
 	}
 }
 
+func TestHandler_CrossOrgForeignVariableMissing(t *testing.T) {
+	t.Setenv("ALLOWED_ORGS", "test-org,fullsend-ai")
+	t.Setenv("ROLE_APP_IDS", `{"e2e":"300"}`)
+
+	pemData, err := generateTestRSAKey()
+	if err != nil {
+		t.Fatalf("generating test key: %v", err)
+	}
+
+	env := newTestOIDCEnv(t, &fakePEMAccessor{pems: map[string][]byte{"e2e": pemData}})
+	token := env.signToken(t, map[string]interface{}{
+		"repository":       "fullsend-ai/fullsend",
+		"repository_owner": "fullsend-ai",
+		"job_workflow_ref": "fullsend-ai/fullsend/.github/workflows/e2e.yml@refs/heads/main",
+	})
+
+	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/orgs/pool-org/installation" && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode(installationResponse{
+				ID: 999, Account: struct {
+					Login string `json:"login"`
+				}{Login: "pool-org"},
+			})
+		case r.URL.Path == "/app/installations/999/access_tokens" && r.Method == http.MethodPost:
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(installationTokenResponse{Token: "ghs_policy_token"})
+		case r.URL.Path == "/orgs/pool-org/actions/variables/FULLSEND_FOREIGN_E2E_REPOS" && r.Method == http.MethodGet:
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer github.Close()
+	env.handler.githubBaseURL = github.URL
+
+	body := `{"role":"e2e","target_org":"pool-org","repos":["e2e-lock"]}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/token", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	env.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestHandler_CrossOrgForeignDenied(t *testing.T) {
 	t.Setenv("ALLOWED_ORGS", "test-org,evil-org")
 	t.Setenv("ROLE_APP_IDS", `{"e2e":"300"}`)
