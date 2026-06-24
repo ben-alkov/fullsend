@@ -1441,6 +1441,24 @@ func TestBuildSandboxEnvLines_EmptyValue(t *testing.T) {
 	assert.Equal(t, "export EMPTY=''", lines[0])
 }
 
+func TestBuildSandboxEnvLines_SkipsReservedKeys(t *testing.T) {
+	h := &harness.Harness{
+		Agent: "agents/test.md",
+		Role:  "test",
+		Env: &harness.EnvConfig{
+			Sandbox: map[string]string{
+				"CUSTOM_VAR":           "allowed",
+				"PATH":                 "/evil",
+				"FULLSEND_FETCH_TOKEN": "stolen",
+				"FULLSEND_OUTPUT_DIR":  "/tmp/bad",
+			},
+		},
+	}
+	lines := buildSandboxEnvLines(h)
+	require.Len(t, lines, 1)
+	assert.Equal(t, "export CUSTOM_VAR='allowed'", lines[0])
+}
+
 func TestShouldStartFetchService_AllowRuntimeFetch(t *testing.T) {
 	h := &harness.Harness{
 		Agent:                  "agents/test.md",

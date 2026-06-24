@@ -358,28 +358,6 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 		}
 	}
 
-	// ADR 0055: env.runner takes precedence over runner_env.
-	// Emit deprecation warning when runner_env is present.
-	if len(h.RunnerEnv) > 0 {
-		if h.Env != nil && len(h.Env.Runner) > 0 {
-			fmt.Fprintln(os.Stderr, "WARNING: runner_env is deprecated and env.runner takes precedence; migrate to env.runner (see ADR 0055)")
-		} else {
-			fmt.Fprintln(os.Stderr, "WARNING: runner_env is deprecated; use env.runner instead (see ADR 0055)")
-		}
-	}
-
-	// Build effective runner env: start with runner_env, overlay env.runner.
-	effectiveRunnerEnv := make(map[string]string)
-	for k, v := range h.RunnerEnv {
-		effectiveRunnerEnv[k] = v
-	}
-	if h.Env != nil {
-		for k, v := range h.Env.Runner {
-			effectiveRunnerEnv[k] = v
-		}
-	}
-	h.RunnerEnv = effectiveRunnerEnv
-
 	if err := h.ValidateFilesExist(); err != nil {
 		printer.StepFail("File validation failed")
 		return fmt.Errorf("validating files: %w", err)
@@ -396,10 +374,25 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 	}
 	printer.StepDone(fmt.Sprintf("Harness loaded (%.1fs)", time.Since(harnessStart).Seconds()))
 
-	// Run lint checks and report any diagnostics (non-fatal).
+	// Run lint checks before merging env.runner into RunnerEnv so that
+	// Lint() sees the original YAML state and only warns when runner_env
+	// was actually declared (not when env.runner entries are merged in).
 	for _, diag := range h.Lint() {
 		emitDiagnostic(printer, diag)
 	}
+
+	// ADR 0055: build effective runner env — start with runner_env,
+	// overlay env.runner so the new field takes precedence.
+	effectiveRunnerEnv := make(map[string]string)
+	for k, v := range h.RunnerEnv {
+		effectiveRunnerEnv[k] = v
+	}
+	if h.Env != nil {
+		for k, v := range h.Env.Runner {
+			effectiveRunnerEnv[k] = v
+		}
+	}
+	h.RunnerEnv = effectiveRunnerEnv
 
 	// Print plan.
 	printer.KeyValue("Agent", h.Agent)
@@ -1252,6 +1245,19 @@ func setupFetchService(ctx context.Context, forgeClient forge.Client, h *harness
 // Keys that don't match are skipped to prevent shell injection.
 var validEnvKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+// reservedSandboxKeys are infrastructure env vars that env.sandbox must not
+// shadow. These are set by the runner in bootstrapEnv and overriding them
+// from harness YAML could break sandbox operation.
+var reservedSandboxKeys = map[string]bool{
+	"PATH":                   true,
+	"FULLSEND_FETCH_URL":     true,
+	"FULLSEND_FETCH_TOKEN":   true,
+	"FULLSEND_OUTPUT_DIR":    true,
+	"FULLSEND_OUTPUT_SCHEMA": true,
+	"FULLSEND_OUTPUT_FILE":   true,
+	"FULLSEND_TARGET_REPO_DIR": true,
+}
+
 // buildSandboxEnvLines generates export lines for env.sandbox values (ADR 0055).
 // Values have already been expanded by the caller. Each value is single-quoted
 // with internal single quotes escaped. Keys that are not valid shell identifiers
@@ -1262,11 +1268,15 @@ func buildSandboxEnvLines(h *harness.Harness) []string {
 	}
 	keys := make([]string, 0, len(h.Env.Sandbox))
 	for k := range h.Env.Sandbox {
-		if validEnvKeyRe.MatchString(k) {
-			keys = append(keys, k)
-		} else {
+		if !validEnvKeyRe.MatchString(k) {
 			fmt.Fprintf(os.Stderr, "WARNING: env.sandbox key %q is not a valid POSIX identifier; skipping\n", k)
+			continue
 		}
+		if reservedSandboxKeys[k] {
+			fmt.Fprintf(os.Stderr, "WARNING: env.sandbox key %q is reserved for runner infrastructure; skipping\n", k)
+			continue
+		}
+		keys = append(keys, k)
 	}
 	if len(keys) == 0 {
 		return nil

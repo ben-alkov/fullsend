@@ -105,7 +105,10 @@ ADR 0045 for `runner_env`:
 
 When `env.sandbox` is present (after all merges), the runner:
 
-1. Expands `${VAR}` references from the host environment.
+1. Expands `${VAR}` references from the host environment using Go's
+   `os.Expand`, which supports `$VAR` and `${VAR}` syntax only — no
+   default values, substring operations, or other shell parameter
+   expansion features.
 2. Writes the result as `KEY=value` lines to a generated `.env` file inside
    the sandbox (e.g. `/sandbox/workspace/.env.d/generated.env`).
 3. The sandbox's `envfile.Load` picks it up normally.
