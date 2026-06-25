@@ -8,8 +8,8 @@ import tempfile
 import textwrap
 import unittest
 
-# Load the resolver module from the scaffold scripts directory.
-_SCRIPT_DIR = os.path.join(os.path.dirname(__file__), "..", "fullsend-repo", "scripts")
+# Load the resolver module from the same directory.
+_SCRIPT_DIR = os.path.dirname(__file__)
 _RESOLVER = os.path.join(_SCRIPT_DIR, "resolve-precommit-tools.py")
 spec = importlib.util.spec_from_file_location("resolver", _RESOLVER)
 assert spec is not None and spec.loader is not None
@@ -180,6 +180,58 @@ class TestMergeRegistries(unittest.TestCase):
         self.assertIn("lint-a", names)
         self.assertIn("lint-b", names)
         self.assertEqual(warnings, [])
+
+    def test_match_entry_collision_warns(self):
+        """Local entry with same match_entry as a different upstream entry emits a warning."""
+        upstream = {
+            "tools": [
+                {
+                    "hook_id": "uv-run",
+                    "repo": "local",
+                    "match_entry": "uv",
+                    "install": {"type": "binary", "name": "uv", "version": "0.11.14"},
+                },
+            ]
+        }
+        local = {
+            "tools": [
+                {
+                    "hook_id": "custom-uv",
+                    "repo": "https://example.com/custom",
+                    "match_entry": "uv",
+                    "install": {"type": "binary", "name": "custom-uv", "version": "1.0"},
+                },
+            ]
+        }
+        merged, warnings = resolver.merge_registries(upstream, local)
+        self.assertEqual(len(merged["tools"]), 2)
+        self.assertTrue(any("collides" in w and "match_entry" in w for w in warnings))
+
+    def test_match_entry_same_key_no_collision(self):
+        """Override of the same (repo, hook_id) should not warn on match_entry."""
+        upstream = {
+            "tools": [
+                {
+                    "hook_id": "uv-run",
+                    "repo": "local",
+                    "match_entry": "uv",
+                    "install": {"type": "binary", "name": "uv", "version": "0.11.14"},
+                },
+            ]
+        }
+        local = {
+            "tools": [
+                {
+                    "hook_id": "uv-run",
+                    "repo": "local",
+                    "match_entry": "uv",
+                    "install": {"type": "binary", "name": "uv", "version": "0.12.0"},
+                },
+            ]
+        }
+        merged, warnings = resolver.merge_registries(upstream, local)
+        self.assertEqual(len(merged["tools"]), 1)
+        self.assertFalse(any("collides" in w for w in warnings))
 
     def test_exclude_nonexistent_entry(self):
         upstream = {

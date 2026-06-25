@@ -194,6 +194,11 @@ Only hooks that pre-commit **cannot self-serve** need registry entries:
 
 Hooks using `language: python`, `language: node`, or `language: docker_image` are handled natively by pre-commit and need no registry entry.
 
+#### Prerequisites
+
+- A `.pre-commit-config.yaml` in the target repo with hooks that use `language: system` or `language: golang`.
+- Access to commit to the target repo's base branch (L2 per-repo registries only take effect after merge).
+
 #### Three-layer resolution
 
 ```
@@ -216,37 +221,40 @@ upstream defaults (fullsend-ai/fullsend)
 > - `.fullsend/customized/scripts/.pre-commit-tools.yaml` — L1 full replacement (same overlay mechanism as other layered dirs)
 > - `.pre-commit-tools.yaml` at repo root — L2 additive merge (resolver discovers and merges)
 
-#### Example: adding a custom binary tool
+#### Adding a custom binary tool
 
-Place `.pre-commit-tools.yaml` at your repo root:
+1. Create a `.pre-commit-tools.yaml` file at your repo root.
+2. Add an entry with the `hook_id`, `repo`, and `install` fields:
 
-```yaml
-tools:
-  - hook_id: my-linter
-    repo: https://github.com/example/my-linter
-    install:
-      type: binary
-      name: my-linter
-      version: "1.2.3"
-      url_template: "https://github.com/example/my-linter/releases/download/v{version}/my-linter-{triple}.tar.gz"
-      checksums:
-        x86_64: "abc123..."
-        aarch64: "def456..."
-      binary_name: my-linter
-```
+    ```yaml
+    tools:
+      - hook_id: my-linter
+        repo: https://github.com/example/my-linter
+        install:
+          type: binary
+          name: my-linter
+          version: "1.2.3"
+          url_template: "https://github.com/example/my-linter/releases/download/v{version}/my-linter-{triple}.tar.gz"
+          checksums:
+            x86_64: "abc123..."
+            aarch64: "def456..."
+          binary_name: my-linter
+    ```
 
-This entry is merged with the upstream registry — all upstream tools remain available.
+3. Commit and merge to the base branch. The entry is merged with the upstream registry — all upstream tools remain available.
 
-#### Example: suppressing an upstream entry
+#### Suppressing an upstream entry
 
-To prevent an upstream tool from being installed (e.g., if your repo handles it differently):
+1. Add an entry to `.pre-commit-tools.yaml` with the matching `hook_id` and `repo`, plus `exclude: true`:
 
-```yaml
-tools:
-  - hook_id: gitleaks
-    repo: https://github.com/zricethezav/gitleaks
-    exclude: true
-```
+    ```yaml
+    tools:
+      - hook_id: gitleaks
+        repo: https://github.com/zricethezav/gitleaks
+        exclude: true
+    ```
+
+2. Commit and merge to the base branch. The upstream tool will no longer be installed for this repo.
 
 #### Security
 

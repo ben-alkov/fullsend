@@ -58,9 +58,13 @@ def merge_registries(upstream: dict, local: dict) -> tuple[dict, list[str]]:
 
     upstream_tools = (upstream.get("tools") or [])[:]
     keyed: dict[tuple[str, str], int] = {}
+    match_entry_owners: dict[str, tuple[str, str]] = {}
     for i, tool in enumerate(upstream_tools):
         if isinstance(tool, dict) and "hook_id" in tool:
-            keyed[(tool.get("repo", ""), tool["hook_id"])] = i
+            key = (tool.get("repo", ""), tool["hook_id"])
+            keyed[key] = i
+            if "match_entry" in tool:
+                match_entry_owners[tool["match_entry"]] = key
 
     for entry in local_tools:
         if not isinstance(entry, dict) or "hook_id" not in entry:
@@ -73,8 +77,22 @@ def merge_registries(upstream: dict, local: dict) -> tuple[dict, list[str]]:
             idx = keyed.get(key)
             if idx is not None:
                 upstream_tools[idx] = None  # type: ignore[assignment]
+                match_val = entry.get("match_entry")
+                if match_val and match_entry_owners.get(match_val) == key:
+                    del match_entry_owners[match_val]
                 del keyed[key]
             continue
+
+        if "match_entry" in entry:
+            match_val = entry["match_entry"]
+            existing_owner = match_entry_owners.get(match_val)
+            if existing_owner is not None and existing_owner != key:
+                warnings.append(
+                    f"per-repo entry {key} has match_entry '{match_val}' "
+                    f"that collides with upstream entry {existing_owner} "
+                    f"— the upstream match will be shadowed"
+                )
+            match_entry_owners[match_val] = key
 
         idx = keyed.get(key)
         if idx is not None:

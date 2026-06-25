@@ -26,7 +26,7 @@ Related: [#1270](https://github.com/fullsend-ai/fullsend/issues/1270)
 PR #1055 introduced `.pre-commit-tools.yaml` — a registry mapping
 pre-commit hooks to the system tools they require. The registry can be
 fully replaced at the org level via `customized/scripts/` (L1 override,
-ADR 0035), but repos needing one extra tool must copy the entire file.
+[ADR 0035](0035-layered-content-resolution.md)), but repos needing one extra tool must copy the entire file.
 
 ## Decision
 
@@ -56,9 +56,7 @@ Malformed input emits warnings and falls back to upstream unchanged.
 
 ## Consequences
 
-- Repos extend the registry without duplicating it.
+- Repos can extend the upstream registry without duplicating the entire file.
 - L1 full-replacement remains available for orgs needing complete control.
-- New per-repo registries take effect only after merge to the base
-  branch (deliberate security trade-off).
-- Two per-repo paths exist: `.fullsend/customized/scripts/` (L1 full
-  replacement) vs `.pre-commit-tools.yaml` at root (L2 additive).
+- Per-repo registries only take effect after merge to the base branch, preventing untrusted PR input.
+- Two customization paths coexist: L1 full replacement via `.fullsend/customized/scripts/` and L2 additive merge via `.pre-commit-tools.yaml` at root.
