@@ -59,7 +59,7 @@ Breaking changes **must** be marked in both commit messages and PR titles. GoRel
 1. Append `!` after the type/scope: `feat(harness)!: require role field`
 2. Include a `BREAKING CHANGE:` trailer in the commit body explaining what breaks and how to migrate
 
-Both the `!` suffix and the trailer are required. The `!` suffix is what GoReleaser and tooling can match on; the trailer tells users what to do about it.
+Both the `!` suffix and the trailer are required. The `!` suffix signals the breaking change to human reviewers and enables future automated tooling; the trailer tells users what to do about it.
 
 **How to tell if your change is breaking:**
 
