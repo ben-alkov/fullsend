@@ -18,7 +18,7 @@ permissions: {}
 
 jobs:
   dispatch:
-    runs-on: ubuntu-24.04
+    runs-on: __GH_RUNNER__
     permissions:
       actions: write
       contents: read
