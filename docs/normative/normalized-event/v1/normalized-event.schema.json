@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://fullsend.ai/normative/normalized-event/v1/normalized-event.schema.json",
   "title": "NormalizedEvent",
-  "description": "Forge-neutral routing input for fullsend dispatch and harness CEL trigger evaluation (ADR 0054).",
+  "description": "Forge-neutral routing input for fullsend dispatch and harness CEL trigger evaluation (ADR 0055).",
   "type": "object",
   "additionalProperties": false,
   "required": ["repo", "entity", "transition", "actor", "state", "source"],
@@ -47,8 +47,8 @@
         "url": {
           "type": "string",
           "format": "uri",
-          "pattern": "^https://github\\.com/[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+/(issues|pull)/[0-9]+$",
-          "description": "Canonical entity URL. GitLab and other forges use their native URL form until a forge-neutral URI scheme is defined."
+          "minLength": 1,
+          "description": "Canonical forge URL for the entity (native form for source.system)."
         },
         "linked_change_proposal": {
           "type": "object",
@@ -62,10 +62,10 @@
             "url": {
               "type": "string",
               "format": "uri",
-              "pattern": "^https://github\\.com/[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+/pull/[0-9]+$"
+              "minLength": 1
             }
           },
-          "description": "When transition occurs on a work_item that is also a change proposal (e.g. GitHub PR comment events)."
+          "description": "When transition occurs on a work_item that is also a change proposal (e.g. GitHub PR comment events). When state.change_proposal is present, linked_change_proposal.id MUST equal state.change_proposal.id."
         }
       }
     },
@@ -261,7 +261,7 @@
               "type": "boolean"
             }
           },
-          "description": "Required when the matched harness needs change-proposal execution context (review, fix, retro on a PR/MR). Adapters must populate branch and repo fields so dispatch can project event_payload without API round-trips."
+          "description": "Required when the matched harness needs change-proposal execution context (review, fix, retro on a PR/MR). id MUST match entity.id or entity.linked_change_proposal.id when those are present. Adapters must populate branch and repo fields so dispatch can project event_payload without API round-trips."
         }
       }
     },

@@ -1,7 +1,7 @@
 # NormalizedEvent v1
 
 Forge-neutral routing input for `fullsend dispatch` and harness CEL `trigger`
-expressions ([ADR 0054](../../../ADRs/0054-harness-cel-dispatch.md)).
+expressions ([ADR 0055](../../../ADRs/0055-harness-cel-dispatch.md)).
 
 ## Contract
 
@@ -70,6 +70,12 @@ When `entity.kind == "work_item"` and `entity.linked_change_proposal` is set
 (e.g. GitHub `issue_comment` on a PR), emit **both** `issue` from `entity` and
 `pull_request` from `linked_change_proposal` + `state.change_proposal` using
 the same shape above (`number`/`html_url` from `linked_change_proposal`).
+
+**Change-proposal identity:** when `state.change_proposal` is present,
+`state.change_proposal.id` MUST equal `entity.id` if
+`entity.kind == "change_proposal"`, or `entity.linked_change_proposal.id` if
+the work item carries a linked change proposal. Adapters MUST NOT populate
+conflicting IDs across these fields.
 
 Omit `pull_request` when `state.change_proposal` is absent. Omit `issue` when
 the event targets only a change proposal with no work-item carrier.
