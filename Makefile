@@ -27,7 +27,7 @@ help:
 	@echo "  lint-md-links        - Check markdown files for broken in-repo links and anchors"
 	@echo "  script-test          - Run shell script tests (post-triage, post-code, post-review, pre-fetch-prior-review, reconcile-repos, validate-output-schema)"
 	@echo "  test                 - Run all checks: lint-all, go-test, script-test, lint-eval-cases"
-	@echo "  e2e-test             - Run admin e2e tests (CI: E2E_MINT_URL; local: gh auth login or GH_TOKEN)"
+	@echo "  e2e-test             - Run admin e2e tests (CI: OIDC mint; local: gh auth login or GH_TOKEN)"
 	@echo "  lint-eval-cases      - Lint eval case definitions (annotations.yaml completeness)"
 	@echo "  functional-tests     - Run functional agent tests (requires EVAL_ORG, FULLSEND_DIR, GH_TOKEN, GCP creds)"
 
