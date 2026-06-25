@@ -248,11 +248,8 @@ type envConfig struct {
 func loadEnvConfig(t *testing.T) envConfig {
 	t.Helper()
 
-	mintURL := os.Getenv("E2E_MINT_URL")
+	mintURL := resolveMintURL()
 	useMint := runningInGitHubActions()
-	if useMint && mintURL == "" {
-		t.Skip("E2E_MINT_URL not set, skipping e2e test in CI")
-	}
 	if !useMint {
 		if _, err := resolveLocalToken(); err != nil {
 			t.Skip("no local GitHub token (gh auth login), skipping e2e test")

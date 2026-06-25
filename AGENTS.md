@@ -40,8 +40,8 @@ When making changes to Go code under `cmd/` or `internal/`:
 
 The e2e tests mint short-lived GitHub App installation tokens via the central token mint. Credentials are never stored in the repo.
 
-- **CI:** Set `E2E_MINT_URL` (org variable on `fullsend-ai`) and use the workflow's OIDC identity. The e2e workflow exchanges the OIDC JWT for an `e2e`-role installation token on the pool org.
-- **Local:** Run `gh auth login` (or set `GH_TOKEN` to a token with sufficient scopes) so `e2e/admin/auth.go` can call the mint with your identity. Set `E2E_MINT_URL` to the deployed mint endpoint.
+- **CI:** Uses the hosted public mint (same default as `fullsend admin --mint-url`) with the workflow's OIDC identity. The e2e workflow exchanges the OIDC JWT for an `e2e`-role installation token on the pool org. Override with `FULLSEND_MINT_URL` if needed.
+- **Local:** Run `gh auth login` (or set `GH_TOKEN` to a token with sufficient scopes) for pool-org admin operations. Mint uses `FULLSEND_MINT_URL` or the hosted default.
 
 See `docs/guides/dev/e2e-testing.md` and `make help` for pool org setup and troubleshooting.
 

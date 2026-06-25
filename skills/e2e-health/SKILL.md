@@ -43,7 +43,7 @@ gh run view <run-id> --log-failed 2>&1 | grep -iE "(FAIL|--- FAIL|Error|panic|ti
 Read the matched lines and provide a brief explanation of why the run failed. Common failure categories:
 
 - **Flaky test** — timing-dependent or non-deterministic failure
-- **Mint / auth** — OIDC or mint token exchange failure, missing `E2E_MINT_URL`, or FOREIGN allowlist misconfiguration
+- **Mint / auth** — OIDC or mint token exchange failure, FOREIGN allowlist misconfiguration, or missing interim `E2E_GITHUB_PASSWORD` for triage smoke tests
 - **Infrastructure** — GCP auth, runner issues, pool org lock contention
 - **Real regression** — a code change broke e2e behavior
 

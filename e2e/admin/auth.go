@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fullsend-ai/fullsend/internal/cli"
 	"github.com/fullsend-ai/fullsend/internal/mintclient"
 )
 
@@ -40,12 +41,21 @@ func runningInGitHubActions() bool {
 	return os.Getenv("GITHUB_ACTIONS") == "true"
 }
 
+// resolveMintURL returns the mint endpoint from FULLSEND_MINT_URL or the hosted
+// default (same as fullsend admin --mint-url).
+func resolveMintURL() string {
+	if u := os.Getenv("FULLSEND_MINT_URL"); u != "" {
+		return u
+	}
+	return cli.DefaultMintURL
+}
+
 // resolveE2EToken mints a cross-org e2e installation token for targetOrg.
 // Repos are omitted so the token covers the full installation (needed to
 // create and operate on e2e-lock and .fullsend at runtime).
 func resolveE2EToken(ctx context.Context, mintURL, targetOrg string) (string, error) {
 	if mintURL == "" {
-		return "", fmt.Errorf("E2E_MINT_URL not set")
+		return "", fmt.Errorf("mint URL not configured")
 	}
 	result, err := mintclient.MintToken(ctx, mintclient.MintRequest{
 		MintURL:   mintURL,
