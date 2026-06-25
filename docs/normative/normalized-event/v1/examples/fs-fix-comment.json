@@ -20,7 +20,7 @@
   "actor": {
     "id": "alice",
     "kind": "human",
-    "role": "member",
+    "role": "write",
     "is_entity_author": false
   },
   "state": {

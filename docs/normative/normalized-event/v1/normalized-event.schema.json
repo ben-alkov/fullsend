@@ -8,9 +8,7 @@
   "required": ["repo", "entity", "transition", "actor", "state", "source"],
   "properties": {
     "repo": {
-      "type": "string",
-      "pattern": "^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$",
-      "description": "Target enrolled repository (owner/name)."
+      "$ref": "#/$defs/repo_path"
     },
     "entity": {
       "$ref": "#/$defs/entity"
@@ -29,6 +27,13 @@
     }
   },
   "$defs": {
+    "repo_path": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9._-]+(/[a-zA-Z0-9._-]+)+$",
+      "minLength": 3,
+      "maxLength": 512,
+      "description": "Target enrolled repository. Two segments for GitHub (owner/repo); nested groups for GitLab (group/subgroup/project)."
+    },
     "entity": {
       "type": "object",
       "additionalProperties": false,
@@ -48,6 +53,7 @@
           "type": "string",
           "format": "uri",
           "minLength": 1,
+          "maxLength": 2048,
           "description": "Canonical forge URL for the entity (native form for source.system)."
         },
         "linked_change_proposal": {
@@ -62,7 +68,8 @@
             "url": {
               "type": "string",
               "format": "uri",
-              "minLength": 1
+              "minLength": 1,
+              "maxLength": 2048
             }
           },
           "description": "When transition occurs on a work_item that is also a change proposal (e.g. GitHub PR comment events). When state.change_proposal is present, linked_change_proposal.id MUST equal state.change_proposal.id."
@@ -78,13 +85,17 @@
           "type": "string",
           "enum": [
             "opened",
+            "reopened",
+            "edited",
+            "synchronized",
             "updated",
             "closed",
             "marked_ready",
             "label_changed",
             "comment_added",
             "review_submitted"
-          ]
+          ],
+          "description": "Semantic lifecycle transition. Prefer edited/synchronized over updated; adapters MAY map reopened to opened when distinction is unnecessary."
         },
         "label": {
           "type": "object",
@@ -93,7 +104,8 @@
           "properties": {
             "name": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "maxLength": 255
             },
             "action": {
               "type": "string",
@@ -108,17 +120,18 @@
           "properties": {
             "command": {
               "type": "string",
+              "maxLength": 64,
               "description": "First whitespace-delimited token of the first line (e.g. /fs-triage)."
             },
             "body": {
               "type": "string",
               "maxLength": 4096,
-              "description": "Full comment body, truncated to 4096 bytes for dispatch."
+              "description": "Comment body truncated to 4096 bytes for dispatch transport."
             },
             "instruction": {
               "type": "string",
-              "maxLength": 10000,
-              "description": "Text after the command on slash-command comments (e.g. /fs-fix instruction)."
+              "maxLength": 4096,
+              "description": "Text after the command, extracted from the raw comment before body truncation (e.g. /fs-fix instruction)."
             }
           }
         },
@@ -139,6 +152,7 @@
             "reviewer_id": {
               "type": "string",
               "minLength": 1,
+              "maxLength": 255,
               "description": "Forge login of the reviewer (bot accounts end with [bot] on GitHub)."
             }
           }
@@ -150,21 +164,24 @@
             "properties": { "kind": { "const": "label_changed" } },
             "required": ["kind"]
           },
-          "then": { "required": ["label"] }
+          "then": { "required": ["label"] },
+          "else": { "properties": { "label": false } }
         },
         {
           "if": {
             "properties": { "kind": { "const": "comment_added" } },
             "required": ["kind"]
           },
-          "then": { "required": ["comment"] }
+          "then": { "required": ["comment"] },
+          "else": { "properties": { "comment": false } }
         },
         {
           "if": {
             "properties": { "kind": { "const": "review_submitted" } },
             "required": ["kind"]
           },
-          "then": { "required": ["review"] }
+          "then": { "required": ["review"] },
+          "else": { "properties": { "review": false } }
         }
       ]
     },
@@ -176,6 +193,7 @@
         "id": {
           "type": "string",
           "minLength": 1,
+          "maxLength": 255,
           "description": "Forge login or service account identifier."
         },
         "kind": {
@@ -185,14 +203,15 @@
         "role": {
           "type": "string",
           "enum": [
-            "owner",
-            "member",
-            "collaborator",
-            "contributor",
+            "admin",
+            "maintain",
+            "write",
+            "triage",
+            "read",
             "none",
             "external"
           ],
-          "description": "Normalized permission level of the actor on the target repo."
+          "description": "Effective repository permission level (ADR 0054). Adapters populate from the forge collaborator permission API when available."
         },
         "is_entity_author": {
           "type": "boolean",
@@ -209,7 +228,8 @@
           "type": "array",
           "items": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "maxLength": 255
           },
           "description": "Snapshot of label names on the entity at event time."
         },
@@ -231,21 +251,21 @@
               "minimum": 1
             },
             "head_repo": {
-              "type": "string",
-              "pattern": "^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$"
+              "$ref": "#/$defs/repo_path"
             },
             "base_repo": {
-              "type": "string",
-              "pattern": "^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$"
+              "$ref": "#/$defs/repo_path"
             },
             "head_ref": {
               "type": "string",
               "minLength": 1,
+              "maxLength": 255,
               "description": "Head branch name (Git ref) for checkout and push."
             },
             "base_ref": {
               "type": "string",
               "minLength": 1,
+              "maxLength": 255,
               "description": "Base branch name (Git ref) the change proposal targets."
             },
             "head_sha": {
@@ -255,7 +275,8 @@
             },
             "author_id": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "maxLength": 255
             },
             "is_fork": {
               "type": "boolean"
@@ -277,10 +298,12 @@
         "raw_type": {
           "type": "string",
           "minLength": 1,
+          "maxLength": 128,
           "description": "Native event type (e.g. issue_comment, merge_request_event)."
         },
         "raw_action": {
           "type": "string",
+          "maxLength": 128,
           "description": "Native action when applicable (e.g. created, labeled, synchronize)."
         }
       }

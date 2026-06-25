@@ -17,7 +17,9 @@ Date: 2026-06-23
 
 ## Status
 
-Accepted
+Accepted (partially supersedes static stage routing from
+[ADR 0041](0041-synchronous-workflow-call-event-dispatch.md); preserves its
+synchronous `workflow_call` execution model)
 
 ## Context
 
@@ -63,17 +65,23 @@ Adopt **Option C**.
   ([`docs/normative/normalized-event/v1/`](../normative/normalized-event/v1/),
   [ADR 0015](0015-normative-specifications-directory.md)). Examples and
   projection rules live in the normative tree — not duplicated here.
+- **Authorization:** `fullsend dispatch` enforces
+  [ADR 0054](0054-require-authorization-on-all-agent-dispatch-paths.md) as a
+  **platform-level gate** after the input driver normalizes the event and
+  **before** CEL trigger evaluation. Authorization is not delegated to per-harness
+  CEL expressions.
 - **Harness `trigger`:** optional CEL boolean with root variable `event`. No
   `trigger` → manual `fullsend run` only. Multiple harnesses may match (parallel
   fan-out).
-- **`fullsend dispatch`:** input driver → evaluate harness CEL → project
-  execution ref (unchanged `fullsend run` contract) → output driver
+- **`fullsend dispatch`:** input driver → **authorize** → evaluate harness CEL →
+  project execution ref (unchanged `fullsend run` contract) → output driver
   (`gha-matrix`, `json`, etc.). Drivers are flagged or auto-detected
   (`GITHUB_EVENT_PATH` → `gha-event`).
 - **Workflow integration:** replace bash stage routing with
   `fullsend dispatch --output-driver gha-matrix` and a dynamic job matrix.
-  Deprecate `# fullsend-stage:` markers and static per-stage `workflow_call`
-  jobs.
+  Reintroduces dynamic agent discovery via CEL (superseding ADR 0041's static
+  `workflow_call` stage list) while keeping synchronous matrix-job execution.
+  Deprecate `# fullsend-stage:` markers and duplicated bash routers.
 
 ## Consequences
 
@@ -81,10 +89,10 @@ Adopt **Option C**.
   dispatch bash edits.
 - Mint and inference allow-lists can trust a small set of generic runner
   workflows instead of every agent-specific workflow file.
+- Authorization remains centralized per ADR 0054; CEL triggers express routing
+  only, not permission policy.
 - Routing is unit-testable via `NormalizedEvent` fixtures without GitHub
   Actions; only input drivers are forge-specific.
-- `# fullsend-stage:` markers and duplicated bash routers are removed during
-  implementation.
 - CEL linting, documentation, and eval fixtures are required
   ([testing-agents.md](../problems/testing-agents.md)); sequential multi-agent
   chaining remains out of scope ([ADR 0018](0018-scripted-pipeline-for-multi-agent-orchestration.md)).
