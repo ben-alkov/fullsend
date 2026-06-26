@@ -17,7 +17,6 @@ This is not a product spec. It's an evolving exploration of a hard problem space
 - **[docs/problems/](docs/problems/)** — Deep dives into each major problem domain, each evolving independently:
   - [Intent Representation](docs/problems/intent-representation.md) — How do we capture, verify, and enforce what changes are wanted?
   - [Security Threat Model](docs/problems/security-threat-model.md) — Prompt injection, insider threats, agent drift, supply chain attacks
-  - [MCP Configuration Drift](docs/problems/mcp-config-drift.md) — Detecting unauthorized changes in MCP server configurations that define the agent tool surface
   - [Agent Architecture](docs/problems/agent-architecture.md) — What agents exist, what authority do they have, how do they interact?
   - [Agent Infrastructure](docs/problems/agent-infrastructure.md) — Where agents run, what resources they get, 3rd party vs internal vs build our own
   - [Autonomy Spectrum](docs/problems/autonomy-spectrum.md) — When to auto-merge vs. escalate to humans
@@ -49,11 +48,12 @@ This is not a product spec. It's an evolving exploration of a hard problem space
   - [Universal Harness Access — Phase 4 Implementation](docs/plans/universal-harness-access-phase4.md) — Phased PR breakdown for ADR-0038 Phase 4 (runtime dependency loading)
   - [Agent Execution Environment](docs/plans/agent-execution-environment.md) — Sandbox and runtime environment for agent execution
   - [Vertex AI Inference Provisioning](docs/plans/vertex-inference-provisioning.md) — Provisioning and configuration for Vertex AI inference endpoints
-  - [ADR-0044 Deprecate Per-Org Installation Mode](docs/plans/deprecate-per-org-install.md) — Phased removal of per-org installation mode in favor of per-repo
   - [ADR-0045 Forge-Portable Harness Schema — Phase 1](docs/plans/adr-0045-forge-portable-harness-phase1.md) — Implementation plan for ADR-0045 forge-portable harness schema (Phase 1)
   - [ADR-0045 Forge-Portable Harness Schema — Phase 2](docs/plans/adr-0045-forge-portable-harness-phase2.md) — Implementation plan for ADR-0045 Phase 2: adopt new schema fields across install, scaffold, and lock flows
   - [ADR-0045 Forge-Portable Harness Schema — Phase 3](docs/plans/adr-0045-forge-portable-harness-phase3.md) — Implementation plan for ADR-0045 Phase 3: deprecate config.yaml agents block, add Lint() diagnostics, migrate to harness-first discovery
   - [ADR-0046 Drift Scanner](docs/plans/2026-03-06-adr46-drift-scanner.md) — Implementation plan for ADR-0046 drift detection tool
+  - [Repos Management](docs/plans/repos-management.md) — Implementation plan for declarative multi-repo management
+  - [Repos Init](docs/plans/repos-init.md) — Implementation plan for `fullsend repos init` manifest bootstrapping
 - **[docs/guides/](docs/guides/)** — Practical how-to documentation for administrators and developers (see [ADR 0023](docs/ADRs/0023-user-documentation-structure.md))
 - **[docs/ADRs/](docs/ADRs/)** — Architecture Decision Records for crystallizing specific decisions (see [ADR 0001](docs/ADRs/0001-use-adrs-for-decision-making.md))
 - **[web/](web/)** — Browser-delivered assets for the public site (document graph today; future Vite app here). Cloudflare Worker config lives in [`cloudflare_site/`](cloudflare_site/) ([ADR 0019](docs/ADRs/0019-web-source-and-cloudflare-site-layout.md)).

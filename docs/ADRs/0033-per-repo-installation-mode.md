@@ -291,8 +291,6 @@ Per-repo install requires only `repo` and `workflow` OAuth scopes when reusing e
 
 ### 8. Coexistence
 
-> **Note:** [ADR 0044](0044-deprecate-per-org-installation-mode.md) deprecates the per-org side of this coexistence model, promoting per-repo as the sole supported installation mode.
-
 Per-repo and per-org coexist within the same org. Some repos use the org `.fullsend` config repo (per-org), others run independently (per-repo). They use different dispatch paths, credential stores, and shim templates.
 
 To prevent per-org enrollment from overriding a per-repo installation, per-repo install sets a repository Actions variable `FULLSEND_PER_REPO_INSTALL=true`. The per-org enrollment flow checks this guard at three points:
@@ -373,3 +371,4 @@ Ordered by the project's threat priority (external injection > insider > drift >
 - [ADR 0031: Reusable workflows](0031-reusable-workflows-for-action-installed-distribution.md) — publishes stage reusable workflows and composite actions
 - [ADR 0034: Centralized event routing](0034-centralized-shim-routing-via-dispatch.md) — routing logic in `dispatch.yml`, replicated as `reusable-dispatch.yml` for per-repo
 - ADR 0035: Layered content resolution — upstream defaults sparse-checked at runtime, overrides via `customized/` (per-org) or `.fullsend/` (per-repo)
+- [ADR 0057: Repos management](0057-repos-management.md) — addresses bulk operations, enrollment inventory, and drift detection gaps for per-repo at scale
