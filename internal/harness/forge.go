@@ -140,22 +140,7 @@ func mergeForgeConfig(h *Harness, fc *ForgeConfig) {
 		if h.Env == nil {
 			h.Env = &EnvConfig{}
 		}
-		if fc.Env.Runner != nil {
-			if h.Env.Runner == nil {
-				h.Env.Runner = make(map[string]string, len(fc.Env.Runner))
-			}
-			for k, v := range fc.Env.Runner {
-				h.Env.Runner[k] = v
-			}
-		}
-		if fc.Env.Sandbox != nil {
-			if h.Env.Sandbox == nil {
-				h.Env.Sandbox = make(map[string]string, len(fc.Env.Sandbox))
-			}
-			for k, v := range fc.Env.Sandbox {
-				h.Env.Sandbox[k] = v
-			}
-		}
+		h.Env.mergeEnvFrom(fc.Env, true)
 	}
 }
 

@@ -392,6 +392,8 @@ func runAgent(ctx context.Context, agentName, fullsendDir, outputBase, targetRep
 			effectiveRunnerEnv[k] = v
 		}
 	}
+	// NOTE: after this point h.RunnerEnv contains the merged effective set
+	// (runner_env + env.runner), not just the declared runner_env entries.
 	h.RunnerEnv = effectiveRunnerEnv
 
 	// Print plan.
@@ -1247,9 +1249,18 @@ var validEnvKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // reservedSandboxKeys are infrastructure env vars that env.sandbox must not
 // shadow. These are set by the runner in bootstrapEnv and overriding them
-// from harness YAML could break sandbox operation.
+// from harness YAML could break sandbox operation, or are security-sensitive
+// vars that could influence sandbox execution (e.g. shared library injection,
+// auto-sourced shell startup files).
+// NOTE: keep in sync with bootstrapEnv exports below for FULLSEND_* keys.
 var reservedSandboxKeys = map[string]bool{
 	"PATH":                     true,
+	"HOME":                     true,
+	"SHELL":                    true,
+	"LD_PRELOAD":               true,
+	"LD_LIBRARY_PATH":          true,
+	"BASH_ENV":                 true,
+	"ENV":                      true,
 	"FULLSEND_FETCH_URL":       true,
 	"FULLSEND_FETCH_TOKEN":     true,
 	"FULLSEND_OUTPUT_DIR":      true,
@@ -1339,12 +1350,13 @@ func bootstrapEnv(sandboxName, remoteRepositoryDir string, h *harness.Harness, r
 		lines = append(lines, fmt.Sprintf("export FULLSEND_FETCH_TOKEN='%s'", escToken))
 	}
 
-	// ADR 0055: export env.sandbox vars. Placed before .env.d sourcing so
-	// manual .env files (if still present during migration) win on collision.
-	lines = append(lines, buildSandboxEnvLines(h)...)
-
 	// Source all env files from .env.d/ (populated by host_files with expand: true).
 	lines = append(lines, fmt.Sprintf("for f in %s/.env.d/*.env; do [ -f \"$f\" ] && . \"$f\"; done", sandbox.SandboxWorkspace))
+
+	// ADR 0055: export env.sandbox vars. Placed after .env.d sourcing so
+	// env.sandbox takes precedence on collision — the common use case is
+	// overriding a single var from a shared host_files .env file.
+	lines = append(lines, buildSandboxEnvLines(h)...)
 
 	content := strings.Join(lines, "\n") + "\n"
 

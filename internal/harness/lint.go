@@ -1,6 +1,9 @@
 package harness
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // DiagnosticSeverity indicates whether a diagnostic is a warning or an error.
 type DiagnosticSeverity int
@@ -50,6 +53,22 @@ func (h *Harness) Lint() []Diagnostic {
 			Field:    "runner_env",
 			Message:  msg,
 		})
+	}
+
+	// Warn when env.sandbox is present alongside host_files entries that
+	// deliver .env files to .env.d/ with expand: true, since env.sandbox
+	// takes precedence on key collision (may shadow host_files values).
+	if h.Env != nil && len(h.Env.Sandbox) > 0 {
+		for _, hf := range h.HostFiles {
+			if hf.Expand && strings.Contains(hf.Dest, ".env.d/") {
+				diags = append(diags, Diagnostic{
+					Severity: SeverityWarning,
+					Field:    "env.sandbox",
+					Message:  fmt.Sprintf("env.sandbox coexists with host_files entry %s (dest: %s); env.sandbox values take precedence on key collision", hf.Src, hf.Dest),
+				})
+				break // one warning is enough
+			}
+		}
 	}
 
 	return diags

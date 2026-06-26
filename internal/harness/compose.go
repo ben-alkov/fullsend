@@ -464,26 +464,7 @@ func mergeBaseIntoChild(base, child *Harness) {
 		if child.Env == nil {
 			child.Env = &EnvConfig{}
 		}
-		if base.Env.Runner != nil {
-			if child.Env.Runner == nil {
-				child.Env.Runner = make(map[string]string, len(base.Env.Runner))
-			}
-			for k, v := range base.Env.Runner {
-				if _, exists := child.Env.Runner[k]; !exists {
-					child.Env.Runner[k] = v
-				}
-			}
-		}
-		if base.Env.Sandbox != nil {
-			if child.Env.Sandbox == nil {
-				child.Env.Sandbox = make(map[string]string, len(base.Env.Sandbox))
-			}
-			for k, v := range base.Env.Sandbox {
-				if _, exists := child.Env.Sandbox[k]; !exists {
-					child.Env.Sandbox[k] = v
-				}
-			}
-		}
+		child.Env.mergeEnvFrom(base.Env, false)
 	}
 
 	// Pointer structs: child replaces if non-nil
@@ -889,26 +870,7 @@ func mergeForgeConfigInto(base, child *ForgeConfig) {
 		if child.Env == nil {
 			child.Env = &EnvConfig{}
 		}
-		if base.Env.Runner != nil {
-			if child.Env.Runner == nil {
-				child.Env.Runner = make(map[string]string, len(base.Env.Runner))
-			}
-			for k, v := range base.Env.Runner {
-				if _, exists := child.Env.Runner[k]; !exists {
-					child.Env.Runner[k] = v
-				}
-			}
-		}
-		if base.Env.Sandbox != nil {
-			if child.Env.Sandbox == nil {
-				child.Env.Sandbox = make(map[string]string, len(base.Env.Sandbox))
-			}
-			for k, v := range base.Env.Sandbox {
-				if _, exists := child.Env.Sandbox[k]; !exists {
-					child.Env.Sandbox[k] = v
-				}
-			}
-		}
+		child.Env.mergeEnvFrom(base.Env, false)
 	}
 
 	// ValidationLoop: child replaces if non-nil

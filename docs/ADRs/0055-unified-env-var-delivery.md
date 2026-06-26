@@ -48,8 +48,14 @@ var in two places.
 ## Decision
 
 Add a new `env:` top-level field to the harness schema with `runner` and
-`sandbox` sub-maps. Deprecate `runner_env` and the manual `.env` file
-convention.
+`sandbox` sub-maps. Deprecate `runner_env` in favor of `env.runner`.
+
+`host_files` env delivery (`.env` files with `expand: true`) remains
+permanently supported alongside `env.sandbox`. The two mechanisms are
+complementary: `env.sandbox` is convenient for simple per-harness vars,
+while `host_files` provides file-level composability that `env.sandbox`
+cannot match (e.g. one `.env` file per tool, mix-and-matched across
+harnesses without duplication).
 
 ### Schema
 
@@ -66,8 +72,8 @@ env:
 - `env.runner` — key-value pairs set in the host process environment for
   pre/post scripts and the validation loop. Replaces `runner_env`.
 - `env.sandbox` — key-value pairs the runner writes into a generated `.env`
-  file and copies into the sandbox at bootstrap. Replaces manual `.env` files
-  delivered via `host_files` with `expand: true`.
+  file and copies into the sandbox at bootstrap. Complements (does not
+  replace) `.env` files delivered via `host_files`.
 - Values in both sub-maps support `${VAR}` expansion from the host
   environment, same as `runner_env` and `expand: true` host_files today.
 
@@ -101,6 +107,12 @@ ADR 0045 for `runner_env`:
 - **`forge.<platform>` resolution** — identical rules. Forge sub-maps merge
   with top-level sub-maps; forge keys win.
 
+**Limitation:** merge is strictly additive — there is no mechanism for a
+child to remove a key inherited from its base. A child that inherits
+`GITHUB_ISSUE_URL` from a base cannot suppress it; it can only override
+the value. If removal semantics are needed in the future, a YAML `null`
+/ `~` sentinel could be added.
+
 ### Runner behavior
 
 When `env.sandbox` is present (after all merges), the runner:
@@ -117,6 +129,15 @@ When `env.sandbox` is present (after all merges), the runner:
 executing pre/post scripts and the validation loop — identical to current
 `runner_env` behavior.
 
+### Precedence
+
+When both `env.sandbox` and `host_files` `.env` entries define the same
+key, `env.sandbox` takes precedence. This is enforced by bootstrap
+ordering: `.env.d/` files are sourced first, then `env.sandbox` exports
+are emitted, so `env.sandbox` wins on collision. This matches the
+expected use case: a harness inherits a shared `.env` file via
+`host_files` and overrides a single var with `env.sandbox`.
+
 ### Deprecation
 
 `runner_env` **always** emits a deprecation warning when present, regardless
@@ -127,10 +148,10 @@ of whether `env:` also exists:
   "migrate to env.runner."
 - Same rules apply to `forge.<platform>.runner_env`.
 
-Manually-authored `.env` files delivered via `host_files` are not
-automatically removed or skipped. Users migrate those entries into
-`env.sandbox` at their own pace and remove the `host_files` entries
-themselves. Both mechanisms coexist safely during migration.
+`host_files` env delivery is **not deprecated**. It provides file-level
+composability (one `.env` file per tool, mixed across harnesses) that
+`env.sandbox` cannot structurally replicate. The two mechanisms coexist
+permanently.
 
 ### Migration phases
 
@@ -139,9 +160,9 @@ themselves. Both mechanisms coexist safely during migration.
 both exist, `env.runner` wins. Runner generates `.env` from `env.sandbox`.
 
 **Phase 2 — Migrate scaffold harnesses:** Update all scaffold harnesses to
-use `env:` instead of `runner_env`. Move vars from manual `.env` files into
-`env.sandbox`. Remove redundant `.env` host_files entries and `.env` files
-from the scaffold.
+use `env:` instead of `runner_env`. Move simple passthrough vars from manual
+`.env` files into `env.sandbox` where appropriate. Harnesses that use
+modular per-tool `.env` files via `host_files` keep them.
 
 **Phase 3 — Remove `runner_env`:** Remove `runner_env` from the Go structs.
 `yaml.Unmarshal` silently ignores it in old files. `Lint()` emits an error
@@ -159,3 +180,11 @@ for harnesses that still reference it.
   `runner_env` deprecation.
 - ADR 0049's env var naming convention applies unchanged — the delivery
   mechanism changes but the `{AGENT}_{SETTING_NAME}` convention does not.
+- Modular `.env` files via `host_files` remain the right choice for
+  per-tool env groups shared across multiple harnesses.
+- This change extends the harness schema; runners older than Phase 1 will
+  silently ignore `env:` and fall back to `runner_env` / `host_files` only.
+  Harness schema versioning ([#235](https://github.com/fullsend-ai/fullsend/issues/235))
+  would make this evolution explicit.
+- Env merge is strictly additive. A child cannot remove a key inherited from
+  its base — it can only override the value.
