@@ -101,6 +101,8 @@ export default defineConfig({
   },
 
   head: [
+    // Redirect legacy Svelte SPA hash routes (#/path) to VitePress paths (/docs/path)
+    ['script', {}, `(function(){var h=location.hash;if(h&&h.startsWith('#/')){var r=h.slice(2),s=r.indexOf('::'),p,a;if(s!==-1){p=r.slice(0,s);a=r.slice(s+2)}else{p=r;a=''}location.replace('/docs/'+p+(a?'#'+a:''))}})();`],
     ['link', { rel: 'icon', href: '/docs/img/favicon.png' }],
     ['link', { rel: 'preconnect', href: 'https://fonts.googleapis.com' }],
     ['link', { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' }],
