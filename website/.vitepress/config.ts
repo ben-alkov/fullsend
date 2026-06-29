@@ -203,6 +203,7 @@ export default defineConfig({
           items: [
             { text: 'Infrastructure Reference', link: '/guides/infrastructure/infrastructure-reference' },
             { text: 'Mint Administration', link: '/guides/infrastructure/mint-administration' },
+            { text: 'Standalone Mint', link: '/guides/infrastructure/standalone-mint' },
             { text: 'Private Repositories', link: '/guides/infrastructure/private-repositories' },
             { text: 'Distributed Tracing', link: '/guides/infrastructure/distributed-tracing' },
           ],
