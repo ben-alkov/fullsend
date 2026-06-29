@@ -63,25 +63,45 @@ const KNOWN_TAGS = /^<\/?(?:a|abbr|address|area|article|aside|audio|b|base|bdi|b
 
 function escapeLine(line: string): string {
   let result = ''
-  let inInlineCode = false
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i]
-    if (ch === '`') {
-      inInlineCode = !inInlineCode
-      result += '`'
-    } else if (!inInlineCode && ch === '{') {
+  let i = 0
+  while (i < line.length) {
+    if (line[i] === '`') {
+      let runLen = 0
+      while (i + runLen < line.length && line[i + runLen] === '`') runLen++
+      let found = -1
+      let j = i + runLen
+      while (j < line.length) {
+        if (line[j] === '`') {
+          let closeLen = 0
+          while (j + closeLen < line.length && line[j + closeLen] === '`') closeLen++
+          if (closeLen === runLen) { found = j; break }
+          j += closeLen
+        } else { j++ }
+      }
+      if (found !== -1) {
+        result += line.slice(i, found + runLen)
+        i = found + runLen
+      } else {
+        result += '`'.repeat(runLen)
+        i += runLen
+      }
+    } else if (line[i] === '{') {
       result += '&#123;'
-    } else if (!inInlineCode && ch === '}') {
+      i++
+    } else if (line[i] === '}') {
       result += '&#125;'
-    } else if (!inInlineCode && ch === '<') {
+      i++
+    } else if (line[i] === '<') {
       const rest = line.slice(i)
       if (KNOWN_TAGS.test(rest) || /^<!--/.test(rest)) {
         result += '<'
       } else {
         result += '&lt;'
       }
+      i++
     } else {
-      result += ch
+      result += line[i]
+      i++
     }
   }
   return result
