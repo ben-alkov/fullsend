@@ -352,7 +352,8 @@ export default defineConfig({
             for (const s of segments) { if (s === '..') depth++; else break }
             if (depth > docDir.length) {
               const remainder = segments.slice(depth).join('/')
-              child.attrSet('href', 'https://github.com/fullsend-ai/fullsend/tree/main/' + remainder + anchor)
+              const prefix = /\.[a-zA-Z0-9]+$/.test(remainder) && !remainder.endsWith('/') ? 'blob' : 'tree'
+              child.attrSet('href', `https://github.com/fullsend-ai/fullsend/${prefix}/main/${remainder}${anchor}`)
               continue
             }
 
