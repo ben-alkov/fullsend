@@ -26,6 +26,7 @@
   --text-muted:#64748b;
   --accent:#4d7c0f;
   --accent-dim:#3f6212;
+  --accent-contrast:#fff;
   --blue:#2563eb;
   --purple:#7c3aed;
   color-scheme:light;
@@ -40,6 +41,7 @@
   --text-muted:#5a7294;
   --accent:#c4ff0e;
   --accent-dim:#92bf0a;
+  --accent-contrast:#0c1220;
   --blue:#5cb3ff;
   --purple:#a78bfa;
   color-scheme:dark;
@@ -82,7 +84,7 @@ nav{
 .nav-cta{
   font-size:0.85rem;font-weight:600;
   padding:0.45rem 1.1rem;border-radius:6px;
-  background:var(--accent);color:#0c1220;
+  background:var(--accent);color:var(--accent-contrast);
   text-decoration:none;transition:opacity 0.15s;
 }
 .nav-cta:hover{opacity:0.85}
@@ -188,7 +190,7 @@ nav{
   display:inline-flex;align-items:center;gap:0.4rem;
   font-family:var(--font-body);font-size:1rem;font-weight:600;
   padding:0.75rem 1.75rem;border-radius:8px;
-  background:var(--accent);color:#0c1220;
+  background:var(--accent);color:var(--accent-contrast);
   text-decoration:none;border:none;cursor:pointer;
   transition:opacity 0.15s;
 }
