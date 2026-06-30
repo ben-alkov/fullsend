@@ -61,7 +61,6 @@ func TestFullsendRepoFilesExist(t *testing.T) {
 		"agents/triage.md",
 		"agents/code.md",
 		"env/gcp-vertex.env",
-		"env/triage.env",
 		"env/code-agent.env",
 		"harness/triage.yaml",
 		"harness/code.yaml",

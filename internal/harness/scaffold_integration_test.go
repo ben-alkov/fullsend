@@ -61,13 +61,17 @@ slug: test-triage
 	assert.NotEmpty(t, h.PreScript, "PreScript should be set after forge resolution")
 	assert.NotEmpty(t, h.PostScript, "PostScript should be set after forge resolution")
 
-	// RunnerEnv contains both top-level keys and forge.github keys after merge.
-	assert.Contains(t, h.RunnerEnv, "FULLSEND_OUTPUT_SCHEMA", "should have top-level runner_env key")
-	assert.Contains(t, h.RunnerEnv, "GH_TOKEN", "should have forge.github runner_env key")
-	assert.Contains(t, h.RunnerEnv, "GITHUB_ISSUE_URL", "should have forge.github runner_env key")
+	// Env.Runner contains both top-level keys and forge.github keys after merge.
+	assert.Contains(t, h.Env.Runner, "FULLSEND_OUTPUT_SCHEMA", "should have top-level env.runner key")
+	assert.Contains(t, h.Env.Runner, "GH_TOKEN", "should have forge.github env.runner key")
+	assert.Contains(t, h.Env.Runner, "GITHUB_ISSUE_URL", "should have forge.github env.runner key")
+
+	// Env.Sandbox contains forge.github sandbox vars.
+	assert.Contains(t, h.Env.Sandbox, "GH_TOKEN", "should have forge.github env.sandbox key")
+	assert.Contains(t, h.Env.Sandbox, "GITHUB_ISSUE_URL", "should have forge.github env.sandbox key")
 
 	// Skills includes base top-level skills (forge skills are concatenated by ResolveForge,
-	// but the triage template has no forge-specific skills — only runner_env and scripts).
+	// but the triage template has no forge-specific skills — only env and scripts).
 	assert.Contains(t, h.Skills, "skills/issue-labels")
 
 	// Forge map is nil (consumed by ResolveForge).
