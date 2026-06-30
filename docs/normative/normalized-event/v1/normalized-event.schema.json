@@ -167,7 +167,7 @@
             "body": {
               "type": "string",
               "maxLength": 4096,
-              "description": "Comment body truncated to 4096 bytes for dispatch transport."
+              "description": "Comment body truncated to 4096 Unicode code points for dispatch transport."
             },
             "instruction": {
               "type": "string",
