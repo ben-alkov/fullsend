@@ -477,27 +477,27 @@ Segmentation fault (core dumped)
 **Additional context:**
 This started happening after the v2.3.0 -> v2.3.1 upgrade. Files under 64KB save fine.
 Files over 64KB save fine if they contain only ASCII characters.`
-	// Issues must be opened by a user with write access so dispatch authorizes
-	// triage (ADR 0054). Mint/installation tokens create issues as bots.
-	authorToken, err := issueAuthorToken(env.cfg)
-	require.NoError(t, err, "resolving issue author token")
-	issueClient := newLiveClient(authorToken)
-	issue, err := issueClient.CreateIssue(ctx, env.org, testRepo, issueTitle, issueBody)
+	// Bot-authored issues skip issues.opened dispatch (ADR 0054). Apply
+	// ready-for-triage in a follow-up call so the shim receives issues.labeled
+	// (#2636).
+	issue, err := env.client.CreateIssue(ctx, env.org, testRepo, issueTitle, issueBody)
 	require.NoError(t, err, "creating test issue")
 	t.Logf("Created test issue #%d: %s", issue.Number, issue.URL)
+	require.NoError(t, ensureRepoLabel(ctx, env.token, env.org, testRepo, "ready-for-triage"))
+	triggerTime := time.Now()
+	require.NoError(t, addIssueLabel(ctx, env.token, env.org, testRepo, issue.Number, "ready-for-triage"))
 	t.Cleanup(func() {
 		t.Log("Closing test issue...")
-		if closeErr := issueClient.CloseIssue(ctx, env.org, testRepo, issue.Number); closeErr != nil {
+		if closeErr := env.client.CloseIssue(ctx, env.org, testRepo, issue.Number); closeErr != nil {
 			t.Logf("warning: could not close test issue: %v", closeErr)
 		}
 	})
 
 	// Wait for the triage workflow to be dispatched in .fullsend.
-	// The shim fires on issues:opened and dispatches to triage.yml.
-	// The shim typically fires within ~5s of the issue being created,
+	// The shim fires on issues.labeled with ready-for-triage and dispatches to triage.yml.
+	// The shim typically fires within ~5s of the label being applied,
 	// so 12 attempts at 5s intervals (60s total) is generous.
 	// Filter by CreatedAt to avoid false positives from previous runs.
-	issueCreatedAt := time.Now()
 	t.Log("Waiting for triage workflow to be dispatched...")
 	var triageRun *forge.WorkflowRun
 	for attempt := 0; attempt < 12; attempt++ {
@@ -513,7 +513,7 @@ Files over 64KB save fine if they contain only ASCII characters.`
 				t.Logf("Attempt %d: run %d has unparseable CreatedAt %q: %v", attempt+1, run.ID, run.CreatedAt, parseErr)
 				continue
 			}
-			if runTime.Before(issueCreatedAt) {
+			if runTime.Before(triggerTime) {
 				t.Logf("Attempt %d: run %d created at %s is from before our issue, skipping", attempt+1, run.ID, run.CreatedAt)
 				continue
 			}

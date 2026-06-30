@@ -17,7 +17,7 @@ Before running e2e locally or in CI:
 
 1. **Pool orgs** (`halfsend-01` … `halfsend-06`) provisioned per [Pool org provisioning](#pool-org-provisioning) below
 2. **Mint** deployed with `e2e` role enrolled and `ALLOWED_ORGS` including `fullsend-ai`
-3. **CI only:** `E2E_GITHUB_PASSWORD` repository secret (interim triage PAT); pool orgs with `FULLSEND_FOREIGN_E2E_REPOS` authorizing `fullsend-ai/fullsend`
+3. **CI only:** pool orgs with `FULLSEND_FOREIGN_E2E_REPOS` authorizing `fullsend-ai/fullsend`
 4. **Local only:** `gh auth login` (or `GH_TOKEN` / `GITHUB_TOKEN`) with admin access on pool orgs
 
 ## Local runs
@@ -33,8 +33,7 @@ Optional environment variables:
 
 | Variable | Purpose |
 |----------|---------|
-| `GH_TOKEN` / `GITHUB_TOKEN` | Override token source for local runs (also used to open triage test issues) |
-| `E2E_GITHUB_PASSWORD` | User PAT with write access on pool orgs (CI interim for triage smoke test; see [#2641](https://github.com/fullsend-ai/fullsend/issues/2641)) |
+| `GH_TOKEN` / `GITHUB_TOKEN` | Override token source for local runs |
 | `FULLSEND_MINT_URL` | Override mint endpoint (default: hosted public mint, same as `fullsend admin --mint-url`) |
 | `E2E_LOCK_TIMEOUT` | Max wait for a free pool org (default 10m) |
 | `E2E_GCP_PROJECT_ID` | GCP project for inference-related setup (if needed) |
@@ -54,7 +53,6 @@ Required repository secrets:
 
 | Secret | Purpose |
 |--------|---------|
-| `E2E_GITHUB_PASSWORD` | User PAT (e.g. pool org admin) with write access on pool org repos — interim: opens triage test issues as a human actor ([ADR 0054](../../ADRs/0054-require-authorization-on-all-agent-dispatch-paths.md); mint tokens create bot-authored issues that dispatch rejects). Removed when [#2641](https://github.com/fullsend-ai/fullsend/issues/2641) lands. Value is a PAT, not a login password. |
 | `E2E_GCP_WIF_PROVIDER` | GCP WIF provider (inference / auxiliary GCP access) |
 | `E2E_GCP_SERVICE_ACCOUNT` | GCP service account for WIF |
 | `E2E_GCP_PROJECT_ID` | GCP project ID |
