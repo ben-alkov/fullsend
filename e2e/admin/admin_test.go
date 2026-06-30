@@ -97,6 +97,14 @@ func TestAdminInstallUninstall(t *testing.T) {
 	if env.cfg.gcpProjectID != "" {
 		installArgs = append(installArgs, "--inference-project", env.cfg.gcpProjectID)
 	}
+	// Mint installation tokens authenticate as the App bot, not the org owner.
+	// The default PR path forks within the org and fails PR creation (422) in CI.
+	// Direct push still exercises install; PR-based delivery is covered on main
+	// and in local runs with a user token (gh auth login).
+	useDirectScaffold := env.cfg.useMint
+	if useDirectScaffold {
+		installArgs = append(installArgs, "--direct")
+	}
 	runCLI(t, env.binary, env.token, installArgs...)
 
 	// Verify install artifacts that exist regardless of delivery mode.
@@ -109,11 +117,13 @@ func TestAdminInstallUninstall(t *testing.T) {
 	// Register .fullsend cleanup (in case later phases fail).
 	registerRepoCleanup(t, env.client, env.org, forge.ConfigRepoName)
 
-	// Phase 1.5: Merge the scaffold PR.
-	// Default install mode creates a PR instead of pushing directly.
-	// Merge it so scaffold files land on the default branch.
-	t.Log("=== Phase 1.5: Merge Scaffold PR ===")
-	mergeScaffoldPR(t, env)
+	if !useDirectScaffold {
+		// Phase 1.5: Merge the scaffold PR.
+		// Default install mode creates a PR instead of pushing directly.
+		// Merge it so scaffold files land on the default branch.
+		t.Log("=== Phase 1.5: Merge Scaffold PR ===")
+		mergeScaffoldPR(t, env)
+	}
 
 	// Verify scaffold files on the default branch after merge.
 	cfgData, err := env.client.GetFileContent(ctx, env.org, forge.ConfigRepoName, "config.yaml")
