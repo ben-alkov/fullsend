@@ -221,7 +221,8 @@ func runGitHubSetupPerRepo(ctx context.Context, client forge.Client, printer *ui
 		return fmt.Errorf("marshaling per-repo config: %w", err)
 	}
 
-	installFiles, err := scaffold.CollectPerRepoInstallFiles(cfg.vendor)
+	upstreamRef, upstreamTag := resolveUpstreamRef()
+	installFiles, err := scaffold.CollectPerRepoInstallFiles(cfg.vendor, upstreamRef, upstreamTag)
 	if err != nil {
 		return fmt.Errorf("collecting per-repo scaffold files: %w", err)
 	}
@@ -941,10 +942,12 @@ func runGitHubUninstall(ctx context.Context, client forge.Client, printer *ui.Pr
 // --- sync-scaffold command ---
 
 func newGitHubSyncScaffoldCmd() *cobra.Command {
+	var directFlag bool
+
 	cmd := &cobra.Command{
 		Use:   "sync-scaffold <org>",
 		Short: "Update workflow templates in .fullsend",
-		Long:  "Re-commits scaffold files (shim and maintenance workflows) to the .fullsend repo without touching secrets, variables, or enrollment. Useful after fullsend version upgrades. Idempotent and safe to run repeatedly.",
+		Long:  "Re-commits scaffold files (shim and maintenance workflows) to the .fullsend repo without touching secrets, variables, or enrollment. Useful after fullsend version upgrades. Idempotent and safe to run repeatedly.\n\nBy default, changes are delivered via a pull request. Use --direct to push to the default branch instead.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			org := args[0]
@@ -960,15 +963,18 @@ func newGitHubSyncScaffoldCmd() *cobra.Command {
 			client := gh.New(token)
 			printer := ui.New(os.Stdout)
 
-			return runGitHubSyncScaffold(cmd.Context(), client, printer, org)
+			// Default is PR delivery; --direct overrides to direct push.
+			return runGitHubSyncScaffold(cmd.Context(), client, printer, org, directFlag)
 		},
 	}
+
+	cmd.Flags().BoolVar(&directFlag, "direct", false, "push scaffold files directly to the default branch instead of creating a PR")
 
 	return cmd
 }
 
 // runGitHubSyncScaffold runs only the WorkflowsLayer.
-func runGitHubSyncScaffold(ctx context.Context, client forge.Client, printer *ui.Printer, org string) error {
+func runGitHubSyncScaffold(ctx context.Context, client forge.Client, printer *ui.Printer, org string, direct bool) error {
 	printer.Banner(Version())
 	printer.Blank()
 	printer.Header("Syncing scaffold for " + org)
@@ -994,7 +1000,8 @@ func runGitHubSyncScaffold(ctx context.Context, client forge.Client, printer *ui
 		return fmt.Errorf("reading config.yaml: %w", cfgErr)
 	}
 
-	wfLayer := layers.NewWorkflowsLayer(org, client, printer, user, version, vendored).WithDirect(true)
+	upstreamRef, upstreamTag := resolveUpstreamRef()
+	wfLayer := layers.NewWorkflowsLayer(org, client, printer, user, version, vendored).WithDirect(direct).WithUpstreamRef(upstreamRef, upstreamTag)
 	if id, idErr := client.GetAuthenticatedUserIdentity(ctx); idErr == nil {
 		wfLayer = wfLayer.WithSignOff(id.Name, id.Email)
 	}

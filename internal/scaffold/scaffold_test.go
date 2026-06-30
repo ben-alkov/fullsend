@@ -79,6 +79,7 @@ func TestFullsendRepoFilesExist(t *testing.T) {
 		"scripts/validate-output-schema.sh",
 		"scripts/fullsend-check-output",
 		"scripts/validate-source-repo.sh",
+		"skills/autonomy-readiness/SKILL.md",
 		"skills/code-implementation/SKILL.md",
 		"skills/issue-labels/SKILL.md",
 		"templates/shim-workflow-call.yaml",
@@ -208,6 +209,7 @@ func TestDispatchWorkflowContent(t *testing.T) {
 	assert.Contains(t, s, "/fs-fix")
 	assert.Contains(t, s, "/fs-retro")
 	assert.Contains(t, s, "/fs-prioritize")
+	assert.Contains(t, s, "ready-for-triage")
 	assert.Contains(t, s, "ready-to-code")
 	assert.Contains(t, s, "ready-for-review")
 	assert.Contains(t, s, "TRIGGERING_LABEL")
@@ -717,7 +719,7 @@ func TestRepoMaintenanceWorkflowContent(t *testing.T) {
 		"push trigger must include workflow_call shim template so changes propagate to enrolled repos")
 	assert.NotContains(t, s, "templates/shim-workflow.yaml",
 		"PAT shim template reference should be removed")
-	assert.Contains(t, s, "fullsend-ai/fullsend/.github/actions/mint-token@v0")
+	assert.Contains(t, s, "fullsend-ai/fullsend/.github/actions/mint-token@__FULLSEND_AI_REF__")
 	assert.Contains(t, s, "Checkout upstream scripts")
 	assert.Contains(t, s, "Prepare scripts")
 	assert.Contains(t, s, "customized/scripts")
@@ -798,7 +800,7 @@ func TestPrioritizeSchedulerWorkflowContent(t *testing.T) {
 	require.NotEqual(t, -1, guardIndex)
 	require.NotEqual(t, -1, projectViewIndex)
 	assert.Less(t, guardIndex, projectViewIndex, "PROJECT_NUMBER must be checked before gh project view")
-	assert.Contains(t, s, "fullsend-ai/fullsend/.github/actions/mint-token@v0")
+	assert.Contains(t, s, "fullsend-ai/fullsend/.github/actions/mint-token@__FULLSEND_AI_REF__")
 	assert.Contains(t, s, "role: fullsend")
 	assert.Contains(t, s, "id-token: write")
 	assert.NotContains(t, s, "create-github-app-token")

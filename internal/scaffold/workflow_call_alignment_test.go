@@ -159,7 +159,7 @@ func loadRenderedScaffoldCaller(path string) func(t *testing.T) []byte {
 		t.Helper()
 		raw, err := FullsendRepoFile(path)
 		require.NoError(t, err)
-		rendered, err := RenderTemplate(path, raw, RenderOptionsForInstall(false, false))
+		rendered, err := RenderTemplate(path, raw, RenderOptionsForInstall(false, false, "", ""))
 		require.NoError(t, err)
 		return rendered
 	}
@@ -275,6 +275,7 @@ func TestReusableWorkflowsShareCommonInputs(t *testing.T) {
 		"fullsend_version",
 		"install_mode",
 		"fullsend_ai_ref",
+		"runner_image",
 	}
 
 	commonSecrets := []string{
