@@ -36,7 +36,7 @@ func TestProbeInstallationToken(t *testing.T) {
 				}
 				if tt.status == http.StatusOK {
 					json.NewEncoder(w).Encode(map[string]any{
-						"total_count":   0,
+						"total_count":  0,
 						"repositories": []any{},
 					})
 					return
@@ -79,7 +79,7 @@ func TestLiveClient_IsInstallationToken(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{
-			"total_count":   0,
+			"total_count":  0,
 			"repositories": []any{},
 		})
 	}))
